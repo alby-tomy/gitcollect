@@ -56,6 +56,19 @@ func AuditDir() (string, error) {
 	return filepath.Join(dir, "audit"), nil
 }
 
+// ActivityDir returns ~/.gitcollect/activity, where each collection's code
+// activity log (commits fetched by "gitcollect activity") is stored as
+// <name>.log. Kept separate from AuditDir: audit.log is access mutations
+// gitcollect itself performed; activity.log is git commits observed in the
+// repos, a different kind of event entirely.
+func ActivityDir() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "activity"), nil
+}
+
 func configPath() (string, error) {
 	dir, err := Dir()
 	if err != nil {

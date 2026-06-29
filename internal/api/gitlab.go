@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
+	"time"
 )
 
 type gitlabClient struct {
@@ -105,19 +107,21 @@ func (c *gitlabClient) GetRepo(owner, repo string) (RepoInfo, error) {
 	}
 
 	var out struct {
-		Name         string `json:"name"`
+		Name          string `json:"name"`
 		HTTPURLToRepo string `json:"http_url_to_repo"`
-		Visibility   string `json:"visibility"`
-		Archived     bool   `json:"archived"`
+		DefaultBranch string `json:"default_branch"`
+		Visibility    string `json:"visibility"`
+		Archived      bool   `json:"archived"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return RepoInfo{}, fmt.Errorf("could not parse response: %w", err)
 	}
 	return RepoInfo{
-		Name:     out.Name,
-		CloneURL: out.HTTPURLToRepo,
-		Private:  out.Visibility != "public",
-		Archived: out.Archived,
+		Name:          out.Name,
+		CloneURL:      out.HTTPURLToRepo,
+		DefaultBranch: out.DefaultBranch,
+		Private:       out.Visibility != "public",
+		Archived:      out.Archived,
 	}, nil
 }
 
@@ -210,6 +214,47 @@ func (c *gitlabClient) RemoveCollaborator(owner, repo, username string) error {
 	default:
 		return classifyStatus(resp.StatusCode)
 	}
+}
+
+// ListCommits returns the most recent commits on branch, newest first.
+// Unlike GitHub, GitLab's commits endpoint does not expose the pushing
+// user's platform username — only the raw git author_name/author_email
+// recorded in the commit itself — so Author is always the commit author
+// name here, never a resolved GitLab account.
+func (c *gitlabClient) ListCommits(owner, repo, branch string, limit int) ([]CommitInfo, error) {
+	id := url.QueryEscape(owner + "/" + repo)
+	path := fmt.Sprintf("/projects/%s/repository/commits?ref_name=%s&per_page=%s",
+		id, url.QueryEscape(branch), strconv.Itoa(limit))
+	resp, err := c.do(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, classifyStatus(resp.StatusCode)
+	}
+
+	var out []struct {
+		ID            string    `json:"id"`
+		Title         string    `json:"title"`
+		AuthorName    string    `json:"author_name"`
+		CommittedDate time.Time `json:"committed_date"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("could not parse response: %w", err)
+	}
+
+	commits := make([]CommitInfo, 0, len(out))
+	for _, c := range out {
+		commits = append(commits, CommitInfo{
+			SHA:         c.ID,
+			Author:      c.AuthorName,
+			Message:     c.Title,
+			CommittedAt: c.CommittedDate,
+		})
+	}
+	return commits, nil
 }
 
 func (c *gitlabClient) CheckCollaborator(owner, repo, username string) (bool, error) {

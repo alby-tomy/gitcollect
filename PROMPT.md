@@ -54,12 +54,18 @@ gitcollect list --private                    Filter to private collections only
 gitcollect list --public                     Filter to public collections only
   (REVISED session 4, on user request — original spec's "list --all" is gone;
    see decisions log. "list" with no flags now shows everything --all used to.)
-gitcollect show <collection>                 Summary: repos, members, groups
+gitcollect show <collection>                 Summary: repos, members, groups, plus a
+                                              per-repo YOU column (caller's own
+                                              ✓/✗ access + reason) — added session 9,
+                                              see decisions log
 gitcollect visibility <collection> public|private   Change visibility
 
 ── Repo management ─────────────────────────────────────────────────────────
 gitcollect add <collection> <repo>           Add repo (default: all members)
 gitcollect remove <collection> <repo>        Remove repo + revoke access on platform
+                                              (requires typing the repo name to confirm,
+                                               same as `delete` — changed session 8, was
+                                               a plain y/N prompt before; see decisions log)
 gitcollect repo access <collection> <repo> --groups g1,g2   Restrict to groups
 gitcollect repo access <collection> <repo> --users u1,u2    Restrict to individuals
 gitcollect repo access <collection> <repo> --open           Open to all members
@@ -90,6 +96,17 @@ gitcollect audit <collection>                 Show access change log
 gitcollect audit <collection> --user <u>      Filter log by user
 gitcollect audit <collection> --since 7d      Filter log by time (7d, 30d, 90d)
 gitcollect audit <collection> --json          Machine-readable output
+
+── Code activity (added session 7; not in the original spec — see decisions
+   log) ────────────────────────────────────────────────────────────────────
+gitcollect activity <collection>              Show commits across accessible
+                                               repos' default branch, fetched
+                                               live + recorded to
+                                               ~/.gitcollect/activity/<name>.log
+gitcollect activity <collection> --repo <r>   Limit to one repo
+gitcollect activity <collection> --since 7d   Filter by commit time
+gitcollect activity <collection> --limit <n>  Max commits fetched per repo this run (default 10)
+gitcollect activity <collection> --json       Machine-readable output
 
 ── Git operations ──────────────────────────────────────────────────────────
 gitcollect clone <collection>                 Clone all accessible repos
@@ -128,6 +145,7 @@ gitcollect/
 │   ├── group.go             # group create / delete / add / remove / list / show
 │   ├── inspect.go           # inspect --user / --repo / full matrix
 │   ├── audit.go             # audit log viewer
+│   ├── activity.go          # commit-activity viewer (added session 7; not in original spec)
 │   ├── clone.go
 │   ├── pull.go
 │   ├── status.go
@@ -146,6 +164,9 @@ gitcollect/
 │   ├── audit/
 │   │   ├── audit.go             # AuditLog, append entry, read+filter
 │   │   └── audit_test.go
+│   ├── activity/
+│   │   ├── activity.go          # commit-activity log, append entry, read+filter+dedup (added session 7)
+│   │   └── activity_test.go
 │   ├── git/
 │   │   ├── git.go               # Clone, Pull, Status wrappers
 │   │   └── git_test.go
@@ -496,14 +517,27 @@ type Client interface {
     AddCollaborator(owner, repo, username, permission string) error
     RemoveCollaborator(owner, repo, username string) error
     CheckCollaborator(owner, repo, username string) (bool, error)
+    ListCommits(owner, repo, branch string, limit int) ([]CommitInfo, error)  // added session 7
     Host() string
 }
 
 type RepoInfo struct {
-    Name     string
-    CloneURL string  // always HTTPS
-    Private  bool
-    Archived bool
+    Name          string
+    CloneURL      string  // always HTTPS
+    DefaultBranch string  // added session 7, for "gitcollect activity"
+    Private       bool
+    Archived      bool
+}
+
+// CommitInfo added session 7. Author is the platform username on GitHub
+// when resolvable, else the raw commit author name; GitLab's commits
+// endpoint never resolves a platform username, so Author is always the
+// raw author_name there.
+type CommitInfo struct {
+    SHA         string
+    Author      string
+    Message     string  // first line only
+    CommittedAt time.Time
 }
 
 func NewClient(host, token string) Client
@@ -520,6 +554,12 @@ var (
 
 ## Command behaviour — key interactions
 
+> Every block below is the *real* output of the current implementation
+> (verified against cmd/*.go and internal/output/output.go as of session
+> 10), not the illustrative sketches this section originally shipped with.
+> If you change a print statement, update the matching block here — this
+> section drifting from reality is exactly what session 10 had to fix.
+
 ### gitcollect inspect
 
 ```
@@ -533,8 +573,8 @@ Groups:      red-team
 REPO              ACCESS   REASON
 pen-test-tools    ✓ yes    open to all members
 vuln-scanner      ✓ yes    member of group red-team
-threat-reports    ✗ no     analysts group required (not a member)
-ops-runbooks      ✗ no     ops group required (not a member)
+threat-reports    ✗ no     no access — group analysts required
+ops-runbooks      ✗ no     no access — group ops required
 ctf-writeups      ✓ yes    open to all members
 ```
 
@@ -547,8 +587,8 @@ Access:     groups: red-team
 MEMBER    ACCESS   REASON
 alice     ✓ yes    member of group red-team
 bob       ✓ yes    member of group red-team
-charlie   ✗ no     red-team group required
-diana     ✗ no     red-team group required
+charlie   ✗ no     no access — group red-team required
+diana     ✗ no     no access — group red-team required
 ```
 
 ```
@@ -558,24 +598,74 @@ Collection:  cybersecurity
 Visibility:  private
 Members:     4
 
-         pen-test  vuln-scan  threat  ops-run  ctf
-alice    ✓         ✓          ✓       ✗        ✓
-bob      ✓         ✓          ✗       ✗        ✓
-charlie  ✓         ✗          ✓       ✗        ✓
-diana    ✓         ✗          ✓       ✓        ✓
+MEMBER   pen-test-tools  vuln-scanner  threat-reports  ops-runbooks  ctf-writeups
+alice    ✓               ✓             ✓               ✗             ✓
+bob      ✓               ✓             ✗               ✗             ✓
+charlie  ✓               ✗             ✓               ✗             ✓
+diana    ✓               ✗             ✓               ✓             ✓
 ```
+
+If the owner themselves runs any of the three forms above, every repo
+reports `✓ yes` / reason `"owner"` even if the owner isn't separately
+listed in `Members` — `internal/access/inspect.go`'s `decide()` helper
+guarantees this (fixed session 9; before that fix this was a real,
+reachable bug: `CanAccess=false` paired with `Reason="owner"`).
+
+### gitcollect show — repo access, personal to the caller (session 9)
+
+```
+$ gitcollect show cybersecurity
+
+Collection:  cybersecurity
+Host:        github.com
+Owner:       alice
+Visibility:  private
+Members:     4
+Groups:      3
+Repos:       5
+
+MEMBER
+alice
+bob
+charlie
+diana
+
+GROUP      MEMBERS
+red-team   2
+ops        1
+analysts   1
+
+REPO             ACCESS RULE          YOU
+pen-test-tools   open to all members  ✓ yes
+vuln-scanner     groups: [red-team]   ✓ yes
+threat-reports   groups: [analysts]   ✗ no — no access — group analysts required
+ops-runbooks     groups: [ops]        ✗ no — no access — group ops required
+ctf-writeups     open to all members  ✓ yes
+
+  You can't access 2 repo(s): threat-reports, ops-runbooks
+Run: gitcollect inspect cybersecurity --user diana
+```
+
+(Run by `diana`, who's in `ops` but not `analysts` or `red-team`.) `ACCESS
+RULE` is the configured rule; `YOU` is whoever ran the command — `clone`
+only ever fetches the repos marked `✓` here, since both are backed by the
+same `access.UserAccessMap`/`FilterAccessible` decision.
 
 ### gitcollect audit
 
 ```
 $ gitcollect audit cybersecurity --since 7d
 
-2025-01-20 14:32  alice  member.add           bob         Added bob as member
-2025-01-20 14:35  alice  member.add_to_group  bob → red-team  Added bob to red-team
-2025-01-19 09:10  alice  repo.access.set      vuln-scanner  Restricted to groups: red-team
-2025-01-18 16:00  alice  visibility.change    private→private  No change
-2025-01-15 10:00  alice  init                 cybersecurity  Collection created (private)
+2026-01-20 14:32  alice       member.add            bob             Added member
+2026-01-20 14:35  alice       member.add_to_group   bob → red-team  Added bob to red-team
+2026-01-19 09:10  alice       repo.access.set       vuln-scanner    open to all members → groups: red-team
+2026-01-15 10:00  alice       init                  cybersecurity   Collection created (private)
 ```
+
+Real format string (`cmd/audit.go`): `"%s  %-10s  %-20s  %-20s  %s%s\n"` —
+timestamp, actor, action, target, detail, then `"  [<result>]"` appended
+only when a row's `Result` isn't `"ok"` (failures are logged too, never
+silently dropped).
 
 ### gitcollect member add — output
 
@@ -583,32 +673,55 @@ $ gitcollect audit cybersecurity --since 7d
 $ gitcollect member add cybersecurity diana
 
 ✓ Added diana to cybersecurity
-  Syncing platform access...
-  ✓ Granted pull access: pen-test-tools, ctf-writeups (2 open repos)
-  ✗ Skipped: vuln-scanner (red-team group required)
-  ✗ Skipped: ops-runbooks (ops group required)
-  ✗ Skipped: threat-reports (analysts group required)
 
-  To grant diana access to a restricted repo, add her to the relevant group:
-  gitcollect group add cybersecurity ops diana
+  Granted access: pen-test-tools, ctf-writeups
+  Skipped: vuln-scanner (no access — group red-team required)
+  Skipped: ops-runbooks (no access — group ops required)
+  Skipped: threat-reports (no access — group analysts required)
+Run: gitcollect group add cybersecurity <group> diana
 ```
+
+(`cmd/member.go`'s `printAccessBreakdown`. The "Granted"/"Skipped" lines
+are dim/secondary text; the suggestion only appears if at least one repo
+was skipped.)
 
 ### gitcollect repo access — output
 
 ```
 $ gitcollect repo access cybersecurity vuln-scanner --groups red-team
 
-Updating access for vuln-scanner...
-  Before: open to all members (4 people)
-  After:  restricted to group red-team (2 people: alice, bob)
-
-  Revoking access for 2 members: charlie, diana
-  Syncing platform...
-  ✓ Revoked charlie
-  ✓ Revoked diana
-
-✓ Access updated. Run: gitcollect inspect cybersecurity --repo vuln-scanner
+✓ Updated access for vuln-scanner
+  Before: open to all members
+  After:  groups: red-team
+Run: gitcollect inspect cybersecurity --repo vuln-scanner
 ```
+
+No live "Revoking access for N members..." progress lines — `SetRepoAccess`
+syncs collaborators synchronously before this prints, so by the time
+"Updated access" appears the platform is already consistent with it.
+
+### gitcollect repo grant / revoke — one user, individually (session 3)
+
+```
+$ gitcollect repo grant cybersecurity vuln-scanner eve
+
+✓ Granted eve individual access to vuln-scanner
+  Before: groups: red-team
+  After:  groups: red-team, users: eve
+Run: gitcollect inspect cybersecurity --repo vuln-scanner
+```
+
+```
+$ gitcollect repo grant cybersecurity ctf-writeups eve   # ctf-writeups is open to all
+
+✗ repo grant: repo is open to all members; granting one user individually would revoke everyone else
+Run: gitcollect repo access cybersecurity ctf-writeups --users eve
+```
+
+`repo revoke` has the mirror-image guardrail: it refuses if removing the
+last individually-granted user would silently re-open the repo to every
+member, with the same kind of guided suggestion. Both are no-ops (not
+errors) if the user already has, or already lacks, that individual grant.
 
 ### gitcollect group add — guided error
 
@@ -616,35 +729,92 @@ Updating access for vuln-scanner...
 $ gitcollect group add cybersecurity red-team diana
 
 ✗ group add: "diana" is not a member of cybersecurity
-  Add them first: gitcollect member add cybersecurity diana
+Run: gitcollect member add cybersecurity diana
 ```
+
+### gitcollect list — visibility filters (redesigned session 4)
+
+```
+$ gitcollect list
+
+NAME           VISIBILITY  ROLE    MEMBERS  REPOS
+cybersecurity  private     owner   4        5
+ctf-public     public      member  12       3
+
+$ gitcollect list --private
+
+NAME           VISIBILITY  ROLE    MEMBERS  REPOS
+cybersecurity  private     owner   4        5
+```
+
+Reads local YAML only — zero network calls, works fully offline. `--private`
+and `--public` are mutually exclusive filters on top of the same base list
+(everything you own or are a member of); passing neither (or both) shows
+everything.
+
+### gitcollect remove — type-the-name confirmation (session 8)
+
+```
+$ gitcollect remove cybersecurity ops-runbooks
+
+This will remove "ops-runbooks" from "cybersecurity" and revoke access for 4 member(s) (type "ops-runbooks" to confirm):
+```
+
+Matches `gitcollect delete <collection>`'s existing type-to-confirm pattern
+exactly (`output.ConfirmWord`) — both used to differ (`delete` already
+required the exact name; `remove` only asked `[y/N]` until session 8).
 
 ### Clone — access-aware output
 
 ```
 $ gitcollect clone cybersecurity
 
-✓ Access verified (bob · groups: red-team)
+✓ Access verified (bob · red-team)
   3 of 5 repos accessible
 
-[1/3] Cloning pen-test-tools...   ✓ done  (1.2s)
-[2/3] Cloning vuln-scanner...     ✓ done  (0.8s)
-[3/3] Cloning ctf-writeups...     ✓ done  (2.1s)
+[1/3] Cloning pen-test-tools...               ✓ done  (1.2s)
+[2/3] Cloning vuln-scanner...                 ✓ done  (0.8s)
+[3/3] Cloning ctf-writeups...                 ✓ done  (2.1s)
 
-✓ Cloned 3 repos in 2.4s
-  2 repos skipped (no access): threat-reports, ops-runbooks
-  Run: gitcollect inspect cybersecurity --user bob  to see why
+✓ Cloned 3 repo(s) in 2.4s
+  2 repo(s) skipped (no access): threat-reports, ops-runbooks
+Run: gitcollect inspect cybersecurity --user bob
 ```
+
+The "Access verified" line is `caller · <comma-joined groups, or "no
+groups">` — no literal word "groups:" in it. For a *public* collection it's
+instead `output.Success("Public collection — %d of %d repos accessible", …)`.
+
+### gitcollect activity — code changes, not access changes (session 7)
+
+```
+$ gitcollect activity cybersecurity --since 7d
+
+REPO            BRANCH  AUTHOR  SHA      MESSAGE          WHEN
+vuln-scanner    main    alice   a1b2c3d  Fix false positive  2026-01-20 11:02
+pen-test-tools  main    bob     9f8e7d6  Add new module       2026-01-19 16:40
+
+✓ recorded 2 new commit(s) to the activity log
+```
+
+Fetches live from GitHub/GitLab (default branch only, `--limit` per repo,
+default 10), records genuinely new commits to
+`~/.gitcollect/activity/<collection>.log`, and displays the combined history
+(this run's fetch plus everything previously recorded), newest first.
+Unlike `audit` (which only ever sees mutations gitcollect itself performed),
+this is the only place gitcollect reports on actual git commit history.
 
 ### Private collection non-disclosure
 
 ```
-$ gitcollect show secret-collection   # run by non-member
+$ gitcollect show secret-collection   # run by a non-member
 
-✗ show: collection "secret-collection" not found or access denied
+✗ show: collection not found or access denied
 ```
-Same error whether the collection exists or not.
-Never confirm a private collection's existence to non-members.
+
+`access.ErrForbidden`'s message is generic and never echoes the collection
+name back — same error whether the collection exists or not, so a private
+collection's existence is never confirmed to a non-member.
 
 ---
 
@@ -1033,6 +1203,315 @@ coverage for Execute()'s new ErrUnauthorized branch and whoami.go's
 anyRejected branch while there — both are easy to hit with a fake
 unauthenticated httptest.Server, same pattern as internal/api/
 api_test.go already uses.
+
+Session 7 — 2026-06-29 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+User asked for visibility into actual code changes in repos (not just
+gitcollect's own access mutations), wanting to know who changed what
+and on which branch. Confirmed design via AskUserQuestion before
+building: (1) a new standalone command rather than folding into
+`audit`, (2) default-branch-only commit checking (not all branches),
+(3) persist fetched commits to a local log in addition to live
+display. This is a genuinely new capability — gitcollect previously
+had zero visibility into git commit history, only into its own
+access-control mutations.
+Completed:    internal/api/client.go — added CommitInfo struct and
+              ListCommits(owner, repo, branch string, limit int)
+              ([]CommitInfo, error) to the Client interface; added
+              DefaultBranch to RepoInfo.
+              internal/api/github.go — GetRepo now decodes
+              default_branch; new ListCommits hits GET
+              /repos/{owner}/{repo}/commits?sha={branch}&per_page={n},
+              resolving Author to the linked GitHub login when
+              available, falling back to the raw commit author name
+              otherwise (commit.author can be null when GitHub can't
+              link the email to an account).
+              internal/api/gitlab.go — GetRepo now decodes
+              default_branch; new ListCommits hits GET
+              /projects/{id}/repository/commits?ref_name={branch}&
+              per_page={n}. Author here is ALWAYS the raw
+              author_name — GitLab's commits endpoint does not expose
+              the pushing user's platform username, unlike GitHub's.
+              internal/activity/activity.go (new package) — mirrors
+              internal/audit's structure (Append/Read as
+              newline-delimited JSON under
+              ~/.gitcollect/activity/<collection>.log) but is
+              deliberately a separate package/log from audit: audit
+              tracks access mutations gitcollect performed; activity
+              tracks git commits gitcollect observed via the
+              platform API. Added Filter(entries, repo, user, since)
+              and KnownSHAs(entries) (dedup helper keyed by
+              "repo\x00sha", since the same commit can recur across
+              runs within the fetch window).
+              internal/config/config.go — added ActivityDir().
+              cmd/activity.go (new) — `gitcollect activity
+              <collection> [--repo r] [--since dur] [--limit n]
+              [--json]`. Uses loadForGit + access.FilterAccessible
+              (same as clone/pull/status) since checking commit
+              history needs a live, authenticated API call
+              regardless of collection visibility — there is no
+              local-only path, same reasoning as clone. Fetches
+              concurrently across repos (bounded by
+              defaultActivityConcurrency=4, same pattern as
+              SyncCollaborators). Resolves each repo's default
+              branch via GetRepo before calling ListCommits (falls
+              back to "main" if the platform ever returns an empty
+              default_branch, which shouldn't happen but costs
+              nothing to guard). Merges freshly fetched commits with
+              everything previously recorded (mergeActivity,
+              dedup by repo+SHA) so the displayed table always shows
+              full known history, not just this run's fetch window —
+              --limit only bounds the live fetch, not what's shown.
+              Tests: internal/api/api_test.go gained
+              TestGitHubListCommits(_Error), TestGitHubGetRepo_
+              DefaultBranch, and GitLab equivalents, using the
+              existing httptest mock-server helpers.
+              internal/activity/activity_test.go (new, 84.4%
+              coverage) mirrors audit_test.go's test shapes
+              (Append/Read round-trip, OpenFailure, malformed line,
+              missing log, Filter, plus KnownSHAs which audit has no
+              equivalent of).
+              cmd/activity_test.go (new) — cmd/ package's FIRST ever
+              test file. Only covers the two pure-logic helpers
+              (shortSHA, mergeActivity) that need no network/auth;
+              cmd/ is still far below the 80% bar but this starts
+              chipping at the previously-untouched 0%.
+              Updated existing mocks in internal/collection/
+              collection_test.go and internal/access/access_test.go
+              to implement the new ListCommits method (interface
+              change broke both — minimal no-op stubs, neither test
+              exercises commit fetching).
+              README.md — new "Seeing code changes across a
+              collection's repos" section; docs/index.html — new
+              `gitcollect activity` command block in the
+              inspect/audit group (renamed to "Access inspection,
+              audit & activity").
+              Did NOT do a live end-to-end smoke test of the actual
+              `gitcollect activity` CLI command against a real GitHub
+              repo — loadForGit requires a real valid token (same
+              constraint hit in session 6), and substituting one
+              without the user's involvement felt like the wrong
+              call. Verified instead via: unit tests against
+              httptest mock servers (confirms the GitHub/GitLab JSON
+              parsing is correct against realistic response shapes),
+              `go build`/`go vet`/`go test ./...` across every
+              package, and a real (but token-less, so correctly
+              rejected with "not authenticated") run of the compiled
+              binary to confirm the command is wired up and routes
+              through loadForGit as expected.
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: cmd/list_test.go — STILL the oldest
+unaddressed pointer (sessions 5 and 6 both named it; cmd/ remains
+under 10% coverage even after this session's activity_test.go). If
+the user ever provides a real token for manual verification, the one
+thing this session couldn't confirm end-to-end is `gitcollect
+activity` against a real repo with actual commit history (the JSON
+parsing is unit-tested, but a live run would catch anything subtly
+wrong about real-world API response shapes that the hand-written
+httptest fixtures might not reproduce, e.g. an author field present
+but with an empty login string instead of being fully null).
+
+Session 8 — 2026-06-29 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+User asked for a git/GitHub-style confirmation before deleting a
+collection or repo — type the name to confirm, not just y/N.
+Checked first: cmd/delete.go (collection deletion) already did this
+via output.ConfirmWord since an earlier session — nothing to change
+there. cmd/remove.go (repo removal from a collection) was still using
+the plain y/N output.Confirm, inconsistent with delete.go.
+Completed:    cmd/remove.go — swapped output.Confirm(prompt) for
+              output.ConfirmWord(prompt, repoName), matching
+              delete.go's pattern exactly (user must type the exact
+              repo name being removed). Reworded the prompt from a
+              question ("Remove ... ?") to a statement ("This will
+              remove ...") to match delete.go's phrasing convention,
+              since ConfirmWord's own "(type %q to confirm)" suffix
+              already implies the question. Left group.go/member.go/
+              visibility.go's plain y/N Confirm prompts untouched —
+              user's request was specifically scoped to "collection
+              or repo" deletion, not group/member removal or
+              visibility changes, and those are lower-stakes (a
+              group has no platform-side effect of its own; member
+              removal and visibility changes are reversible by
+              re-adding/re-switching, unlike delete/remove which
+              revoke platform access that has to be re-granted from
+              scratch).
+              docs/index.html — updated remove's description to
+              state "Requires typing the repo's name to confirm"
+              (was "Prompts for confirmation"), matching delete's
+              existing description.
+              No new test needed: output.ConfirmWord already has
+              full unit test coverage (TestConfirmWord in
+              output_test.go) covering both the exact-match-accepts
+              and mismatch-rejects cases; cmd/remove.go itself has
+              no test file (consistent with the rest of cmd/, a
+              known pre-existing gap — not introduced by this
+              change).
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: cmd/list_test.go — unchanged pointer,
+now named by four consecutive sessions (5, 6, 7, 8). If this keeps
+getting deferred, consider just doing a focused cmd/ test-coverage
+pass as its own session rather than continuing to postpone it in
+favor of whatever feature request comes in next.
+
+Session 9 — 2026-06-29 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+User asked for `gitcollect show <collection>` to report, per repo,
+whether the CALLER specifically has access or is denied (not just the
+configured rule), and confirmed clone already only downloads repos
+the caller can access (it does — FilterAccessible already enforced
+this; no change needed there, just confirmed and documented).
+While building this, found and fixed a real latent bug: investigated
+how `inspect --user <owner>` would behave, since show's new column
+needed the same "can this username access this repo" logic.
+internal/collection/access.go's CanAccessRepo has NO owner bypass by
+design (PROMPT.md's documented decision table treats it as a pure
+member rule — "user not a member → false", no owner exception) and
+relies on CALLERS to special-case the owner, which enforce.go's
+CheckRepoAccess/FilterAccessible already do correctly (`caller !=
+col.Owner` guards before calling CanAccessRepo/AccessibleRepos). But
+internal/access/inspect.go's UserAccessMap/RepoAccessMap/FullMatrix
+never got that same guard, while collection.WhyCanAccess DOES special-
+case the owner (returns the string "owner" unconditionally). Net
+effect: before this session, `gitcollect inspect <col> --user
+<owner>` on a private collection where the owner isn't separately
+listed as a member would show CanAccess=false paired with
+Reason="owner" for every repo — a contradictory, confusing result
+that was reachable by any owner just inspecting their own collection
+the normal way (not an edge case).
+Completed:    internal/access/inspect.go — added a single `decide()`
+              helper (Visibility-public check, then owner check, then
+              fall through to col.CanAccessRepo/WhyCanAccess) and
+              routed UserAccessMap/RepoAccessMap/FullMatrix through it
+              instead of calling col.CanAccessRepo/WhyCanAccess
+              directly. Fixes the owner-bypass inconsistency above
+              for all three at once, and means cmd/show.go's new
+              column inherits the fix automatically rather than
+              needing its own copy of the same workaround.
+              internal/access/access_test.go — added
+              TestUserAccessMap_OwnerBypass, a regression test
+              constructing a private collection where the owner is
+              deliberately NOT a listed member, asserting
+              UserAccessMap now reports CanAccess=true/Reason="owner"
+              instead of the old false/"owner" contradiction. Also
+              confirms RepoAccessMap correctly excludes the owner from
+              its member-only rows (since they were never added to
+              col.Members) — that part was never wrong, just worth
+              pinning down given how close the related bug was.
+              cmd/show.go — runShow now captures caller from
+              loadForRead (was discarded as `_` before) and calls
+              access.UserAccessMap(col, caller) to build a third
+              "YOU" table column: "✓ yes" or "✗ no — <reason>". Local
+              variable named `access` (shadowing the new `access`
+              package import) renamed implicitly by restructuring —
+              the repo-rule string is now built inside the new
+              buildShowRepoRows() helper, extracted specifically so
+              it's unit-testable without auth (cmd/'s tests can't
+              easily exercise runShow itself, since loadForRead needs
+              a real client for private collections). Added a footer
+              — "You can't access N repo(s): ..." + "Run: gitcollect
+              inspect <col> --user <caller>" — mirroring clone's
+              existing skipped-repo messaging pattern. --json gained
+              you_can_access/you_reason per repo. For PUBLIC
+              collections caller is "" (loadForRead never resolves an
+              identity there) — decide()'s Visibility-public check
+              fires before the owner/membership checks regardless of
+              username, so YOU is correctly ✓ for everyone without
+              needing real auth; verified live against a hand-built
+              public collection fixture (no token required) showing
+              the exact REPO/ACCESS RULE/YOU table and matching --json
+              output.
+              cmd/show_test.go (new) — TestBuildShowRepoRows(_Empty)
+              covers the table-building helper directly (rule text +
+              YOU column + denied-list collection, no auth needed);
+              TestToShowOutput_OwnerNotListedAsMember is the cmd-level
+              regression test mirroring the access-package one above.
+              docs/index.html — show's command-reference entry now
+              describes the YOU column; the two-person walkthrough
+              (session 7) gained a new step 5, "Your teammate checks
+              what they can actually reach" with `gitcollect show`
+              real output, and step 6 (clone) now notes show and
+              clone are backed by the same access decision so they
+              can never disagree. README.md's "Listing the repos"
+              section rewritten to match.
+              Did NOT test the private-collection denial path against
+              the real running binary (needs a real authenticated
+              client, same constraint as every other private-
+              collection scenario this transcript has hit) — covered
+              instead by the unit tests above plus the already-real
+              public-collection smoke test.
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: cmd/list_test.go — unchanged pointer,
+now named by five consecutive sessions (5 through 9). Strongly
+consider making this its own session rather than deferring again.
+
+Session 10 — 2026-06-29 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+User asked to bring the "methodology" — the PROGRESS TRACKER, the
+spec body, and docs/index.html — fully up to date with every feature
+added across sessions 1-9. No new functionality requested; this was a
+documentation-accuracy audit.
+Completed:    Audited every illustrative example in "## Command
+              behaviour — key interactions" (~line 555) against the
+              actual cmd/*.go source and found it had drifted
+              significantly — this section was largely still the
+              ORIGINAL pre-implementation spec sketch, never updated
+              as the real output format diverged during sessions
+              1-9. Specific inaccuracies fixed (each verified against
+              the real print/Sprintf calls, not rewritten from
+              memory):
+                - inspect --user's REASON column said "analysts group
+                  required (not a member)"; real WhyCanAccess says
+                  "no access — group analysts required".
+                - member add's example showed fictional
+                  "Syncing platform access..." and a multi-line "To
+                  grant diana access..." paragraph that printAccess-
+                  Breakdown never prints; real output is just
+                  "Granted access: ..." / "Skipped: ... (reason)" +
+                  one Suggestion line.
+                - repo access's example showed "(4 people)" counts
+                  and a live "Revoking access for N members..."
+                  progress block that doesn't exist — SetRepoAccess
+                  syncs before runRepoAccess prints anything, so
+                  there's no progress to show.
+                - clone's example said "Access verified (bob ·
+                  groups: red-team)" — real string has no literal
+                  "groups:" prefix, just the joined group names.
+                - group add's guided error used "Add them first: ..."
+                  instead of the real "Run: ..." Suggestion prefix.
+                - the private-collection non-disclosure example
+                  showed the collection name inside the error text;
+                  access.ErrForbidden's actual message is generic
+                  and never echoes the name back.
+              Added brand-new example blocks for everything that
+              shipped in sessions 3-9 and had NO illustration at all
+              before now: `repo grant`/`repo revoke` (success + the
+              ErrRepoOpen guard), `list --private`/`--public`, `show`
+              with the session-9 YOU column (including the owner-
+              bypass note), `remove`'s session-8 type-to-confirm
+              prompt, and `activity` (session 7).
+              Added a one-line warning at the top of the Command
+              behaviour section telling future sessions to keep these
+              blocks synced with real print statements going
+              forward, since letting them drift this far took several
+              sessions to accumulate unnoticed.
+              Verified docs/index.html's command reference already
+              covers all 20 cmd/*.go files (cross-checked by listing
+              cmd/*.go and grepping every <p class="sig"> entry —
+              no gaps found, this page had stayed current already).
+              Did not change any Go code, tests, or docs/index.html
+              this session — confirmed it didn't need it (already
+              updated through session 9's show/walkthrough work) and
+              focused the audit on PROMPT.md's body, which had not
+              been re-verified against the implementation since the
+              original spec was written.
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: cmd/list_test.go — unchanged pointer,
+now named by SIX consecutive sessions (5 through 10).
 ```
 
 ---
@@ -1056,15 +1535,18 @@ cmd/whoami.go                                done         +anyRejected hint, ses
 cmd/init.go                                  done
 cmd/delete.go                                done
 cmd/list.go                                  done         redesigned session 4 — see decisions log
-cmd/show.go                                  done
+cmd/show.go                                  done         +per-caller YOU column, session 9
+cmd/show_test.go                             done         new, session 9
 cmd/visibility.go                            done
 cmd/add.go                                   done
-cmd/remove.go                                done
+cmd/remove.go                                done         y/N → type-name-to-confirm, session 8
 cmd/repo.go                                  done         grant/revoke subcommands added session 3
 cmd/member.go                                done
 cmd/group.go                                 done
 cmd/inspect.go                               done
 cmd/audit.go                                 done
+cmd/activity.go                              done         new command, session 7 — not in original spec
+cmd/activity_test.go                         done         session 7; cmd/'s first ever test file (6.5% pkg cov)
 cmd/clone.go                                 done
 cmd/pull.go                                  done
 cmd/status.go                                done
@@ -1075,26 +1557,29 @@ cmd/version.go                               done
 internal/collection/collection.go            done
 internal/collection/access.go                done         groupsContaining (dead code) removed
 internal/collection/mutation.go              done         +GrantRepoUser/RevokeRepoUser, session 3
-internal/collection/collection_test.go       done         85.9% coverage
+internal/collection/collection_test.go       done         85.9% coverage; mock +ListCommits stub, session 7
 
 internal/access/enforce.go                   done
 internal/access/sync.go                      done
-internal/access/inspect.go                   done
-internal/access/access_test.go               done         94.1% coverage
+internal/access/inspect.go                   done         +decide() owner-bypass fix, session 9 — see decisions log
+internal/access/access_test.go               done         93.0% coverage; +TestUserAccessMap_OwnerBypass, session 9
 
 internal/audit/audit.go                      done
 internal/audit/audit_test.go                 done         82.8% coverage
 
+internal/activity/activity.go                done         new package, session 7 — not in original spec
+internal/activity/activity_test.go           done         84.4% coverage, session 7
+
 internal/git/git.go                          done
 internal/git/git_test.go                     done         91.7% coverage
 
-internal/api/client.go                       done
-internal/api/github.go                       done         githubBaseURL: const → var (see decisions log)
-internal/api/gitlab.go                       done
-internal/api/api_test.go                     done         84.8% coverage
+internal/api/client.go                       done         +ListCommits, +CommitInfo, +RepoInfo.DefaultBranch, session 7
+internal/api/github.go                       done         githubBaseURL: const → var (see decisions log); +ListCommits, session 7
+internal/api/gitlab.go                       done         +ListCommits, session 7
+internal/api/api_test.go                     done         85.4% coverage (was 84.8%; +ListCommits/DefaultBranch tests, session 7)
 
-internal/config/config.go                    done
-internal/config/config_test.go               done         82.8% coverage
+internal/config/config.go                    done         +ActivityDir(), session 7
+internal/config/config_test.go               done         82.5% coverage (was 82.8%; +ActivityDir assertion, session 7)
 
 internal/output/output.go                    done         Table/padRight: byte len → rune count (real bug fix)
 internal/output/output_test.go               done         97.9% coverage

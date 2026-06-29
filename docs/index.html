@@ -75,6 +75,7 @@
     color:#e6edf3;
   }
   pre.codeblock .c{color:var(--muted);}
+  pre.codeblock.dim{color:var(--muted); font-style:italic;}
 
   .diagram{
     background:#fff; border:1px solid var(--border); border-radius:10px;
@@ -150,13 +151,14 @@
   <div class="wrap">
     <a href="#philosophy">Philosophy</a>
     <a href="#install">Install</a>
+    <a href="#walkthrough">Walkthrough</a>
     <a href="#commands">Commands</a>
     <a href="#auth-cmds">Auth</a>
     <a href="#collection-cmds">Collections</a>
     <a href="#repo-cmds">Repos</a>
     <a href="#member-cmds">Members</a>
     <a href="#group-cmds">Groups</a>
-    <a href="#inspect-cmds">Inspect &amp; audit</a>
+    <a href="#inspect-cmds">Inspect, audit &amp; activity</a>
     <a href="#git-cmds">Git ops</a>
     <a href="#system-cmds">System</a>
   </div>
@@ -202,6 +204,119 @@ gitcollect init my-collection
 gitcollect add my-collection some-repo
 gitcollect member add my-collection some-username
 gitcollect show my-collection</pre>
+  </div>
+</section>
+
+<section id="walkthrough">
+  <div class="wrap">
+    <h2>Walkthrough: sharing a collection with a teammate</h2>
+    <p class="lead">The full two-person flow, command by command — every line below is the
+    actual output gitcollect prints, not an illustration.</p>
+
+    <h3>1. Create the collection and add repos (you)</h3>
+    <pre class="codeblock"><span class="c"># the owner is always whoever ran "gitcollect auth" — there's no --owner flag</span>
+gitcollect init cybersecurity
+gitcollect add cybersecurity pen-test-tools
+gitcollect add cybersecurity vuln-scanner</pre>
+    <p>This writes <code>~/.gitcollect/collections/cybersecurity.yaml</code> on
+    <strong>your</strong> machine only. <code>add</code> defaults every repo to
+    open-to-all-members until you run <code>repo access --groups/--users</code> to
+    restrict it.</p>
+
+    <h3>2. Add your teammate as a member (you)</h3>
+    <pre class="codeblock">gitcollect member add cybersecurity teammate-username</pre>
+    <pre class="codeblock dim">✓ Added teammate-username to cybersecurity
+
+  Granted access: pen-test-tools, vuln-scanner</pre>
+    <p><code>member add</code> immediately calls the GitHub/GitLab API to add
+    teammate-username as a collaborator on every repo they can already reach (both
+    repos here, since they're open). GitHub then sends its own collaborator-invite
+    email — that's GitHub's behavior, not something gitcollect prints; the teammate
+    has to accept that invite before the access actually works.</p>
+
+    <h3>3. Get the collection file to your teammate (you)</h3>
+    <p>gitcollect has no server, no database, and no <code>fetch</code> command —
+    a collection is nothing but that one YAML file on your disk. Your teammate
+    needs an exact copy of it at <code>~/.gitcollect/collections/cybersecurity.yaml</code>
+    on <strong>their</strong> machine before any of their commands will find it.
+    Two ways to get it there:</p>
+    <pre class="codeblock"><span class="c"># Option A — commit it to a repo they can pull from</span>
+git add cybersecurity.yaml &amp;&amp; git commit -m "share cybersecurity collection" &amp;&amp; git push
+<span class="c"># teammate:</span>
+git pull
+cp cybersecurity.yaml ~/.gitcollect/collections/
+
+<span class="c"># Option B — just send them the file (chat, email, anything)</span>
+<span class="c"># teammate places it at ~/.gitcollect/collections/cybersecurity.yaml</span></pre>
+    <p class="dim">Hand-editing that file to add yourself as a member doesn't grant
+    you anything — see the guarantee below.</p>
+
+    <h3>4. Your teammate installs gitcollect and authenticates</h3>
+    <pre class="codeblock">gitcollect auth
+gitcollect whoami</pre>
+    <p>With their own personal access token — never yours.</p>
+
+    <h3>5. Your teammate checks what they can actually reach</h3>
+    <pre class="codeblock">gitcollect show cybersecurity</pre>
+    <pre class="codeblock dim">Collection:  cybersecurity
+Host:        github.com
+Owner:       your-username
+Visibility:  private
+Members:     1
+Groups:      0
+Repos:       2
+
+MEMBER
+teammate-username
+
+REPO            ACCESS RULE           YOU
+pen-test-tools  open to all members   ✓ yes
+vuln-scanner    open to all members   ✓ yes</pre>
+    <p>The <code>YOU</code> column is always about whoever ran the command — it's
+    not a generic property of the repo. If a repo were restricted to a group they
+    aren't in, that row would read <code>✗ no — no access — group red-team
+    required</code> instead, and a footer below the table would list every repo
+    they can't reach with a pointer to <code>inspect --user</code> for the full
+    explanation.</p>
+
+    <h3>6. Your teammate clones</h3>
+    <pre class="codeblock">gitcollect clone cybersecurity</pre>
+    <pre class="codeblock dim">✓ Access verified (teammate-username · no groups)
+  2 of 2 repos accessible
+[1/2] Cloning pen-test-tools...               ✓ done  (1.2s)
+[2/2] Cloning vuln-scanner...                  ✓ done  (0.8s)
+✓ Cloned 2 repo(s) in 2.0s</pre>
+    <p><code>clone</code> only ever fetches the repos <code>show</code> marked
+    <code>✓ yes</code> — the two columns are backed by the exact same access
+    decision, so there's no scenario where <code>show</code> says yes and
+    <code>clone</code> says no, or vice versa.</p>
+
+    <h3>What happens with a repo they can't reach</h3>
+    <p>Say you later restrict <code>exploit-db</code> to a <code>red-team</code>
+    group your teammate isn't in. A plain <code>clone</code> just skips it and
+    tells them how to find out why:</p>
+    <pre class="codeblock dim">  1 repo(s) skipped (no access): exploit-db
+Run: gitcollect inspect cybersecurity --user teammate-username</pre>
+    <p>Naming it explicitly with <code>--pick</code> is a hard error instead:</p>
+    <pre class="codeblock dim">$ gitcollect clone cybersecurity --pick exploit-db
+✗ clone: "exploit-db" is not an accessible repo in this collection</pre>
+    <p>And the suggested <code>inspect</code> command spells out the exact reason:</p>
+    <pre class="codeblock dim">REPO        ACCESS   REASON
+exploit-db  ✗ no     no access — group red-team required</pre>
+    <p>Even a raw <code>git clone</code> of that repo's URL fails for them — GitHub
+    itself rejects it, because gitcollect's API call to add them as a collaborator
+    on <em>that specific repo</em> never happened.</p>
+
+    <div class="philosophy">
+      <p><strong>Why this is safe even if someone edits the YAML by hand:</strong>
+      a teammate can only actually clone a repo when two independent things are
+      both true — they're listed as having access in the local manifest,
+      <em>and</em> GitHub/GitLab itself has them as a real collaborator on that
+      repo. gitcollect's mutation commands are the only thing that makes the
+      second one true. Editing the YAML changes the first; it can never fake the
+      second, because the platform — not the file — is the actual enforcement
+      point.</p>
+    </div>
   </div>
 </section>
 
@@ -257,9 +372,9 @@ gitcollect show my-collection</pre>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> show &lt;collection&gt;</p>
-        <p class="desc">Show a summary of a collection: description, owner, visibility, and tables of its members, groups, and repos with their access rules.</p>
+        <p class="desc">Show a summary of a collection: description, owner, visibility, and tables of its members, groups, and repos. The repo table's <code>YOU</code> column is personal to whoever runs the command — <code>✓ yes</code> or <code>✗ no — &lt;reason&gt;</code> — so you immediately see which repos you can and can't reach, before trying to clone. <code>clone</code> only ever clones the ones marked <code>✓</code> here.</p>
         <div class="flags"><table>
-          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
+          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output (adds <code>you_can_access</code>/<code>you_reason</code> per repo)</td></tr>
         </table></div>
       </div>
 
@@ -279,7 +394,7 @@ gitcollect show my-collection</pre>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> remove &lt;collection&gt; &lt;repo&gt;</p>
-        <p class="desc">Remove a repo from a collection and revoke every member's collaborator access to it on the platform first. Prompts for confirmation.</p>
+        <p class="desc">Remove a repo from a collection and revoke every member's collaborator access to it on the platform first. Requires typing the repo's name to confirm.</p>
       </div>
 
       <div class="cmd">
@@ -365,7 +480,7 @@ gitcollect show my-collection</pre>
     </div>
 
     <div class="group" id="inspect-cmds">
-      <h3>Access inspection &amp; audit</h3>
+      <h3>Access inspection, audit &amp; activity</h3>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> inspect &lt;collection&gt;</p>
@@ -383,6 +498,17 @@ gitcollect show my-collection</pre>
         <div class="flags"><table>
           <tr><td class="flagname">--user &lt;name&gt;</td><td class="flagdesc">filter to entries where this user is the actor or the target</td></tr>
           <tr><td class="flagname">--since &lt;dur&gt;</td><td class="flagdesc">filter to entries within this duration — accepts <code>7d</code>/<code>30d</code>/<code>90d</code> as well as anything Go's <code>time.ParseDuration</code> understands (<code>24h</code>, <code>30m</code>)</td></tr>
+          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> activity &lt;collection&gt;</p>
+        <p class="desc">Show code changes, not access changes: fetches the most recent commits on each accessible repo's default branch live from GitHub/GitLab, records any genuinely new ones to <code>~/.gitcollect/activity/&lt;collection&gt;.log</code>, and prints the combined history (this run's fetch plus everything previously recorded) — repo, branch, author, SHA, message, and timestamp for every commit, newest first.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--repo &lt;name&gt;</td><td class="flagdesc">only check this one repo instead of every accessible one</td></tr>
+          <tr><td class="flagname">--since &lt;dur&gt;</td><td class="flagdesc">only show commits within this duration of when they were made</td></tr>
+          <tr><td class="flagname">--limit &lt;n&gt;</td><td class="flagdesc">max commits to fetch per repo this run (default 10) — bounds the live fetch only; older recorded commits are still shown from the log</td></tr>
           <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
         </table></div>
       </div>

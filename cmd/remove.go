@@ -58,8 +58,8 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("remove: only %s (the owner) can remove repos from %q", col.Owner, name)
 	}
 
-	prompt := fmt.Sprintf("Remove %q from %q and revoke access for %d member(s)?", repoName, name, len(col.Members))
-	if !output.Confirm(prompt) {
+	prompt := fmt.Sprintf("This will remove %q from %q and revoke access for %d member(s)", repoName, name, len(col.Members))
+	if !output.ConfirmWord(prompt, repoName) {
 		return fmt.Errorf("remove: aborted")
 	}
 

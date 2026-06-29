@@ -11,7 +11,9 @@ drives the platform API to completion before the local YAML is written.
 
 See [PROMPT.md](PROMPT.md) for the full design spec, or browse the
 **[full command reference and docs page](docs/index.html)** for every
-command and flag with descriptions.
+command and flag with descriptions, plus a [two-person
+walkthrough](docs/index.html#walkthrough) of sharing a collection with a
+teammate end to end.
 (It's a static HTML file — open `docs/index.html` directly in a browser,
 or enable GitHub Pages on this repo pointed at `/docs` to host it online;
 clicking the link on GitHub's own file viewer shows the raw source, not
@@ -139,18 +141,25 @@ gitcollect list --public    # just the public ones
 ```
 
 All local state lives under `~/.gitcollect/` (`config` for tokens at file
-mode `0600`, `collections/*.yaml` for manifests, `audit/*.log` for the audit
-trail). Nothing is written there until you run `auth` or `init`.
+mode `0600`, `collections/*.yaml` for manifests, `audit/*.log` for the
+access-change audit trail, `activity/*.log` for the code-activity log — see
+below). Nothing is written there until you run `auth` or `init`.
 
-### Listing the repos inside a collection
+### Listing the repos inside a collection — and which ones you can reach
 
 ```bash
 gitcollect show my-collection
 ```
 
-Prints a summary including a `REPO | ACCESS` table — this is the quickest
-way to see every repo in the collection and whether it's open to all
-members or restricted to specific groups/users.
+Prints a summary including a `REPO | ACCESS RULE | YOU` table. `ACCESS
+RULE` is the configured rule (open to all members / restricted to groups
+or users); `YOU` is personal to whoever runs the command — `✓ yes`, or
+`✗ no — <reason>` if you're denied (e.g. `✗ no — no access — group
+red-team required`). If anything is denied, a line below the table lists
+every repo you can't reach and points you at `inspect --user` for more
+detail. `gitcollect clone` only ever clones the repos marked `✓` here —
+the two are backed by the same access decision, so `show` always tells
+you in advance what `clone` will actually fetch.
 
 For a per-member access breakdown (who can reach which repo, and why),
 use `inspect` instead:
@@ -203,6 +212,39 @@ guardrails worth knowing:
 
 Both commands are no-ops (not errors) if the user already has, or already
 lacks, that individual grant.
+
+### Seeing code changes across a collection's repos
+
+`gitcollect audit` only tracks *access* changes — member/group/repo-access
+mutations made through gitcollect itself. It has no idea what's actually
+been committed to the repos. For that, use `activity`:
+
+```bash
+gitcollect activity my-collection
+```
+
+This fetches the most recent commits on each accessible repo's **default
+branch** directly from GitHub/GitLab (live — no daemon, no polling, just
+whatever's true right now), records any genuinely new ones to
+`~/.gitcollect/activity/<collection>.log`, and prints the combined history
+(everything previously recorded plus this run's fetch) as one table sorted
+newest-first, with the author and branch for every commit:
+
+```
+REPO          BRANCH  AUTHOR  SHA      MESSAGE         WHEN
+learning-hub  main    alice   a1b2c3d  Fix login bug   2026-06-28 14:02
+learning-hub  main    bob     9f8e7d6  Add tests        2026-06-27 09:11
+```
+
+Useful flags:
+- `--repo <name>` — only check one repo instead of every accessible one
+- `--since 7d` — only show commits within the last N days (also accepts `24h`, `30m`, etc.)
+- `--limit N` — how many commits to fetch per repo this run (default 10) — this only bounds the live fetch; previously recorded commits beyond that window are still shown from the log
+- `--json` — machine-readable output
+
+Like `clone`/`pull`/`status`, this always needs a live, authenticated API
+call (to resolve the default branch and list commits), even for public
+collections — there's no local-only path for "what got committed."
 
 > A [Makefile](Makefile) and [.goreleaser.yaml](.goreleaser.yaml) wrap these
 > same commands (`make build`, `make test`, `goreleaser release`, etc.) for

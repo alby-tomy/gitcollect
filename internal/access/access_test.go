@@ -37,6 +37,9 @@ func (m *mockClient) CheckCollaborator(owner, repo, username string) (bool, erro
 	}
 	return m.collaborators[key(owner, repo, username)], nil
 }
+func (m *mockClient) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
+	return nil, nil
+}
 func (m *mockClient) Host() string { return "github.com" }
 
 func newCol(t *testing.T, visibility collection.Visibility) *collection.Collection {
@@ -283,5 +286,41 @@ func TestUserAccessMapAndRepoAccessMapAndFullMatrix(t *testing.T) {
 	}
 	if !matrix.Grid[aliceIdx][restrictedIdx] {
 		t.Error("expected alice (red-team) to access the restricted repo in the matrix")
+	}
+}
+
+// TestUserAccessMap_OwnerBypass is a regression test: col.CanAccessRepo has
+// no owner bypass of its own (by design — see decide() in inspect.go), so
+// before that fix, UserAccessMap(col, owner) would report CanAccess=false
+// for every repo on a private collection unless the owner happened to also
+// be listed as a member, while WhyCanAccess still said "owner" — a
+// contradictory false/"owner" pairing. decide() must make this consistent.
+func TestUserAccessMap_OwnerBypass(t *testing.T) {
+	col := newCol(t, collection.VisibilityPrivate)
+	// Deliberately do NOT add "owner" to col.Members.
+	col.Groups = map[string][]string{"red-team": {"alice"}}
+	col.Repos = []collection.RepoAccess{
+		{Name: "open", Groups: []string{}, Users: []string{}},
+		{Name: "restricted", Groups: []string{"red-team"}},
+	}
+
+	details := UserAccessMap(col, "owner")
+	if len(details) != 2 {
+		t.Fatalf("expected 2 repo entries, got %d", len(details))
+	}
+	for _, d := range details {
+		if !d.CanAccess {
+			t.Errorf("expected owner to access %q even though not a listed member, got CanAccess=false", d.RepoName)
+		}
+		if d.Reason != "owner" {
+			t.Errorf("expected owner's reason to be %q, got %q", "owner", d.Reason)
+		}
+	}
+
+	memberDetails := RepoAccessMap(col, "restricted")
+	for _, d := range memberDetails {
+		if d.Username == "owner" {
+			t.Fatal("owner is not in col.Members, so RepoAccessMap should not produce an entry for them")
+		}
 	}
 }

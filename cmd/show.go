@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/alby-tomy/gitcollect/internal/access"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 	"github.com/alby-tomy/gitcollect/internal/output"
 )
@@ -35,21 +37,23 @@ type showOutput struct {
 }
 
 type showRepo struct {
-	Name   string   `json:"name"`
-	Groups []string `json:"groups"`
-	Users  []string `json:"users"`
+	Name         string   `json:"name"`
+	Groups       []string `json:"groups"`
+	Users        []string `json:"users"`
+	YouCanAccess bool     `json:"you_can_access"`
+	YouReason    string   `json:"you_reason"`
 }
 
 func runShow(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	col, _, err := loadForRead(name)
+	col, caller, err := loadForRead(name)
 	if err != nil {
 		return fmt.Errorf("show: %w", err)
 	}
 
 	if showJSON {
-		return output.JSON(toShowOutput(col))
+		return output.JSON(toShowOutput(col, caller))
 	}
 
 	fmt.Printf("Collection:  %s\n", col.Name)
@@ -82,30 +86,60 @@ func runShow(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(col.Repos) > 0 {
-		rows := make([][]string, 0, len(col.Repos))
-		for _, r := range col.Repos {
-			access := "open to all members"
-			switch {
-			case len(r.Groups) > 0 && len(r.Users) > 0:
-				access = fmt.Sprintf("groups: %v, users: %v", r.Groups, r.Users)
-			case len(r.Groups) > 0:
-				access = fmt.Sprintf("groups: %v", r.Groups)
-			case len(r.Users) > 0:
-				access = fmt.Sprintf("users: %v", r.Users)
-			}
-			rows = append(rows, []string{r.Name, access})
-		}
+		details := access.UserAccessMap(col, caller)
+		rows, denied := buildShowRepoRows(col.Repos, details)
 		fmt.Println()
-		output.Table([]string{"REPO", "ACCESS"}, rows)
+		output.Table([]string{"REPO", "ACCESS RULE", "YOU"}, rows)
+
+		if len(denied) > 0 {
+			fmt.Println()
+			fmt.Printf("  You can't access %d repo(s): %s\n", len(denied), strings.Join(denied, ", "))
+			output.Suggestion(fmt.Sprintf("gitcollect inspect %s --user %s", name, caller))
+		}
 	}
 
 	return nil
 }
 
-func toShowOutput(col *collection.Collection) showOutput {
+// buildShowRepoRows pairs repos (in collection order) with the calling
+// user's per-repo access.RepoAccessDetail (same order, same length — both
+// come from iterating the same col.Repos slice) into REPO/ACCESS RULE/YOU
+// table rows, and separately collects the names of repos the caller is
+// denied, for the "you can't access N repo(s)" footer.
+func buildShowRepoRows(repos []collection.RepoAccess, details []access.RepoAccessDetail) (rows [][]string, denied []string) {
+	rows = make([][]string, 0, len(repos))
+	for i, r := range repos {
+		rule := "open to all members"
+		switch {
+		case len(r.Groups) > 0 && len(r.Users) > 0:
+			rule = fmt.Sprintf("groups: %v, users: %v", r.Groups, r.Users)
+		case len(r.Groups) > 0:
+			rule = fmt.Sprintf("groups: %v", r.Groups)
+		case len(r.Users) > 0:
+			rule = fmt.Sprintf("users: %v", r.Users)
+		}
+
+		you := "✓ yes"
+		if i < len(details) && !details[i].CanAccess {
+			you = "✗ no — " + details[i].Reason
+			denied = append(denied, r.Name)
+		}
+		rows = append(rows, []string{r.Name, rule, you})
+	}
+	return rows, denied
+}
+
+func toShowOutput(col *collection.Collection, caller string) showOutput {
+	details := access.UserAccessMap(col, caller)
+
 	repos := make([]showRepo, 0, len(col.Repos))
-	for _, r := range col.Repos {
-		repos = append(repos, showRepo{Name: r.Name, Groups: r.Groups, Users: r.Users})
+	for i, r := range col.Repos {
+		repo := showRepo{Name: r.Name, Groups: r.Groups, Users: r.Users}
+		if i < len(details) {
+			repo.YouCanAccess = details[i].CanAccess
+			repo.YouReason = details[i].Reason
+		}
+		repos = append(repos, repo)
 	}
 	return showOutput{
 		Name:        col.Name,

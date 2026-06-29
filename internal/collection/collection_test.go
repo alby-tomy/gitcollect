@@ -66,6 +66,9 @@ func (m *mockClient) CheckCollaborator(owner, repo, username string) (bool, erro
 	defer m.mu.Unlock()
 	return m.collaborators[key(owner, repo, username)], nil
 }
+func (m *mockClient) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
+	return nil, nil
+}
 func (m *mockClient) Host() string { return m.host }
 
 func newTestCollection(t *testing.T, visibility Visibility) *Collection {

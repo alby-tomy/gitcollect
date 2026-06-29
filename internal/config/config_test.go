@@ -210,8 +210,12 @@ func TestCollectionsDirAndAuditDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuditDir: %v", err)
 	}
-	if collDir == auditDir {
-		t.Errorf("expected CollectionsDir and AuditDir to differ, both got %q", collDir)
+	activityDir, err := ActivityDir()
+	if err != nil {
+		t.Fatalf("ActivityDir: %v", err)
+	}
+	if collDir == auditDir || collDir == activityDir || auditDir == activityDir {
+		t.Errorf("expected CollectionsDir, AuditDir, and ActivityDir to all differ: %q, %q, %q", collDir, auditDir, activityDir)
 	}
 
 	if err := EnsureDir(collDir); err != nil {

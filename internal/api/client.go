@@ -21,15 +21,33 @@ type Client interface {
 	AddCollaborator(owner, repo, username, permission string) error
 	RemoveCollaborator(owner, repo, username string) error
 	CheckCollaborator(owner, repo, username string) (bool, error)
+	// ListCommits returns the most recent commits on branch, newest first,
+	// capped at limit. Used by "gitcollect activity" to report code changes
+	// — distinct from the collaborator methods above, which gitcollect's
+	// access-control mutations drive.
+	ListCommits(owner, repo, branch string, limit int) ([]CommitInfo, error)
 	Host() string
 }
 
 // RepoInfo is the subset of platform repository metadata gitcollect needs.
 type RepoInfo struct {
-	Name     string
-	CloneURL string // always HTTPS
-	Private  bool
-	Archived bool
+	Name          string
+	CloneURL      string // always HTTPS
+	DefaultBranch string
+	Private       bool
+	Archived      bool
+}
+
+// CommitInfo is the subset of platform commit metadata gitcollect needs to
+// report code activity. Author is the platform username when the platform
+// can resolve one (GitHub links a commit to an account); it falls back to
+// the raw commit author name otherwise (notably always on GitLab, which
+// does not expose the pushing user's username on this endpoint).
+type CommitInfo struct {
+	SHA         string
+	Author      string
+	Message     string // first line only
+	CommittedAt time.Time
 }
 
 var (

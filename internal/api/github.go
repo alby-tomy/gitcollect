@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 )
 
 // githubBaseURL is a var, not a const, so api_test.go can point it at an
@@ -92,19 +94,21 @@ func (c *githubClient) GetRepo(owner, repo string) (RepoInfo, error) {
 	}
 
 	var out struct {
-		Name     string `json:"name"`
-		CloneURL string `json:"clone_url"`
-		Private  bool   `json:"private"`
-		Archived bool   `json:"archived"`
+		Name          string `json:"name"`
+		CloneURL      string `json:"clone_url"`
+		DefaultBranch string `json:"default_branch"`
+		Private       bool   `json:"private"`
+		Archived      bool   `json:"archived"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return RepoInfo{}, fmt.Errorf("could not parse response: %w", err)
 	}
 	return RepoInfo{
-		Name:     out.Name,
-		CloneURL: out.CloneURL,
-		Private:  out.Private,
-		Archived: out.Archived,
+		Name:          out.Name,
+		CloneURL:      out.CloneURL,
+		DefaultBranch: out.DefaultBranch,
+		Private:       out.Private,
+		Archived:      out.Archived,
 	}, nil
 }
 
@@ -138,6 +142,63 @@ func (c *githubClient) RemoveCollaborator(owner, repo, username string) error {
 	default:
 		return classifyStatus(resp.StatusCode)
 	}
+}
+
+// ListCommits returns the most recent commits on branch, newest first.
+// GitHub links a commit to an account when the commit's email matches a
+// verified GitHub user; Author falls back to the raw commit author name
+// when GitHub couldn't make that link (author is null in the response).
+func (c *githubClient) ListCommits(owner, repo, branch string, limit int) ([]CommitInfo, error) {
+	path := fmt.Sprintf("/repos/%s/%s/commits?sha=%s&per_page=%d",
+		url.PathEscape(owner), url.PathEscape(repo), url.QueryEscape(branch), limit)
+	resp, err := c.do(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, classifyStatus(resp.StatusCode)
+	}
+
+	var out []struct {
+		SHA    string `json:"sha"`
+		Author *struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		Commit struct {
+			Message string `json:"message"`
+			Author  struct {
+				Name string    `json:"name"`
+				Date time.Time `json:"date"`
+			} `json:"author"`
+		} `json:"commit"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("could not parse response: %w", err)
+	}
+
+	commits := make([]CommitInfo, 0, len(out))
+	for _, c := range out {
+		author := c.Commit.Author.Name
+		if c.Author != nil && c.Author.Login != "" {
+			author = c.Author.Login
+		}
+		commits = append(commits, CommitInfo{
+			SHA:         c.SHA,
+			Author:      author,
+			Message:     firstLine(c.Commit.Message),
+			CommittedAt: c.Commit.Author.Date,
+		})
+	}
+	return commits, nil
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i != -1 {
+		return s[:i]
+	}
+	return s
 }
 
 func (c *githubClient) CheckCollaborator(owner, repo, username string) (bool, error) {

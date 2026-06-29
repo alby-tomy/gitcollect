@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // withGitHubServer points githubBaseURL at server for the duration of the
@@ -396,6 +397,142 @@ func TestGitHubCheckCollaborator_Error(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	})
 	if _, err := client.CheckCollaborator("acme", "widgets", "bob"); err != ErrForbidden {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestGitHubGetRepo_DefaultBranch(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"name":           "widgets",
+			"clone_url":      "https://github.com/acme/widgets.git",
+			"default_branch": "main",
+		})
+	})
+
+	info, err := client.GetRepo("acme", "widgets")
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if info.DefaultBranch != "main" {
+		t.Errorf("DefaultBranch = %q, want %q", info.DefaultBranch, "main")
+	}
+}
+
+func TestGitHubListCommits(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/acme/widgets/commits" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("sha"); got != "main" {
+			t.Errorf("expected sha=main, got %q", got)
+		}
+		if got := r.URL.Query().Get("per_page"); got != "5" {
+			t.Errorf("expected per_page=5, got %q", got)
+		}
+		json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"sha":    "abc123",
+				"author": map[string]string{"login": "alice"},
+				"commit": map[string]any{
+					"message": "Fix bug\n\nLonger description here.",
+					"author":  map[string]any{"name": "Alice Raw", "date": "2026-01-15T10:00:00Z"},
+				},
+			},
+			{
+				"sha":    "def456",
+				"author": nil,
+				"commit": map[string]any{
+					"message": "Unlinked commit",
+					"author":  map[string]any{"name": "Bob Raw", "date": "2026-01-14T09:00:00Z"},
+				},
+			},
+		})
+	})
+
+	commits, err := client.ListCommits("acme", "widgets", "main", 5)
+	if err != nil {
+		t.Fatalf("ListCommits: %v", err)
+	}
+	if len(commits) != 2 {
+		t.Fatalf("expected 2 commits, got %d", len(commits))
+	}
+	if commits[0].Author != "alice" {
+		t.Errorf("expected first commit's author to resolve to the linked login %q, got %q", "alice", commits[0].Author)
+	}
+	if commits[0].Message != "Fix bug" {
+		t.Errorf("expected message to be truncated to its first line, got %q", commits[0].Message)
+	}
+	if commits[1].Author != "Bob Raw" {
+		t.Errorf("expected unlinked commit to fall back to the raw author name, got %q", commits[1].Author)
+	}
+	wantDate := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	if !commits[0].CommittedAt.Equal(wantDate) {
+		t.Errorf("CommittedAt = %v, want %v", commits[0].CommittedAt, wantDate)
+	}
+}
+
+func TestGitHubListCommits_Error(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	if _, err := client.ListCommits("acme", "ghost", "main", 5); err != ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGitLabGetRepo_DefaultBranch(t *testing.T) {
+	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"name":           "widgets",
+			"default_branch": "master",
+		})
+	})
+
+	info, err := client.GetRepo("acme", "widgets")
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if info.DefaultBranch != "master" {
+		t.Errorf("DefaultBranch = %q, want %q", info.DefaultBranch, "master")
+	}
+}
+
+func TestGitLabListCommits(t *testing.T) {
+	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("ref_name"); got != "master" {
+			t.Errorf("expected ref_name=master, got %q", got)
+		}
+		json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"id":             "abc123",
+				"title":          "Fix bug",
+				"author_name":    "Alice Raw",
+				"committed_date": "2026-01-15T10:00:00Z",
+			},
+		})
+	})
+
+	commits, err := client.ListCommits("acme", "widgets", "master", 5)
+	if err != nil {
+		t.Fatalf("ListCommits: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("expected 1 commit, got %d", len(commits))
+	}
+	if commits[0].Author != "Alice Raw" {
+		t.Errorf("expected GitLab's Author to always be the raw author_name, got %q", commits[0].Author)
+	}
+	if commits[0].SHA != "abc123" || commits[0].Message != "Fix bug" {
+		t.Errorf("unexpected commit: %+v", commits[0])
+	}
+}
+
+func TestGitLabListCommits_Error(t *testing.T) {
+	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	if _, err := client.ListCommits("acme", "widgets", "master", 5); err != ErrForbidden {
 		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
 }
