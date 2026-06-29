@@ -868,12 +868,12 @@ At the start of every new session, say:
 ### Session log
 
 ```
-Session 1 — [DATE] — [MODEL]
+Session 1 — 2026-06-29 — Claude Sonnet 4.6
 ────────────────────────────────────────────────────────────────────
-Completed:    (none yet)
-In progress:  (none yet)
-Blockers:     (none yet)
-Next session: Start with main.go, then go.mod, then cmd/root.go
+Completed:    main.go, go.mod, cmd/root.go, cmd/auth.go
+In progress:  (none)
+Blockers:     (none)
+Next session: Start with cmd/whoami.go
 ```
 
 ---
@@ -886,21 +886,21 @@ STATUS values: todo | in-progress | done | blocked (add reason)
 ```
 FILE                                         STATUS       NOTES
 ───────────────────────────────────────────  ───────────  ─────────────────────
-main.go                                      todo
-go.mod                                       todo
+main.go                                      done
+go.mod                                       done
 Makefile                                     todo
 .goreleaser.yaml                             todo
 
-cmd/root.go                                  todo
-cmd/auth.go                                  todo
-cmd/whoami.go                                todo
-cmd/init.go                                  todo
-cmd/delete.go                                todo
-cmd/list.go                                  todo
-cmd/show.go                                  todo
-cmd/visibility.go                            todo
-cmd/add.go                                   todo
-cmd/remove.go                                todo
+cmd/root.go                                  done
+cmd/auth.go                                  done
+cmd/whoami.go                                done
+cmd/init.go                                  done
+cmd/delete.go                                done
+cmd/list.go                                  done
+cmd/show.go                                  done
+cmd/visibility.go                            done
+cmd/add.go                                   done
+cmd/remove.go                                done
 cmd/repo.go                                  todo
 cmd/member.go                                todo
 cmd/group.go                                 todo
@@ -911,31 +911,31 @@ cmd/pull.go                                  todo
 cmd/status.go                                todo
 cmd/version.go                               todo
 
-internal/collection/collection.go            todo
-internal/collection/access.go                todo
-internal/collection/mutation.go              todo
+internal/collection/collection.go            done
+internal/collection/access.go                done
+internal/collection/mutation.go              done
 internal/collection/collection_test.go       todo
 
-internal/access/enforce.go                   todo
-internal/access/sync.go                      todo
-internal/access/inspect.go                   todo
+internal/access/enforce.go                   done
+internal/access/sync.go                      done
+internal/access/inspect.go                   done
 internal/access/access_test.go               todo
 
-internal/audit/audit.go                      todo
+internal/audit/audit.go                      done
 internal/audit/audit_test.go                 todo
 
-internal/git/git.go                          todo
+internal/git/git.go                          done
 internal/git/git_test.go                     todo
 
-internal/api/client.go                       todo
-internal/api/github.go                       todo
-internal/api/gitlab.go                       todo
+internal/api/client.go                       done
+internal/api/github.go                       done
+internal/api/gitlab.go                       done
 internal/api/api_test.go                     todo
 
-internal/config/config.go                    todo
+internal/config/config.go                    done
 internal/config/config_test.go               todo
 
-internal/output/output.go                    todo
+internal/output/output.go                    done
 ```
 
 ---
@@ -946,5 +946,129 @@ Record any design decisions made during implementation here so future
 sessions do not re-debate them.
 
 ```
-(none yet)
+- Exit code classification (cmd/root.go): cobra's SilenceUsage/SilenceErrors
+  are set on rootCmd only — cobra checks the root's flags even when a
+  subcommand errors, so this suffices globally. To distinguish exit 2 (usage)
+  from exit 1 (operational) without re-deriving it per command, root.go sets
+  a package-level bool `ranPersistentPreRun` inside rootCmd.PersistentPreRunE.
+  Any error returned before that runs (unknown command/flag, bad arg count)
+  is necessarily a usage error. Errors returned after it (i.e. from a
+  command's own RunE) are operational (exit 1) unless explicitly wrapped
+  with cmd.NewUsageError(err) — use that wrapper for semantic input problems
+  caught inside command logic (e.g. invalid collection/repo/username format)
+  that cobra's own Args validators can't catch.
+- rootCmd.Version is intentionally left unset. `gitcollect version` is its
+  own subcommand (cmd/version.go, prints version + platform per spec) rather
+  than relying on cobra's auto-generated `--version` flag, to avoid two
+  divergent version outputs.
+- cmd/auth.go fixes these signatures for not-yet-built packages — match them
+  exactly when implementing those files:
+    api.NewClient(host, token string) api.Client   (already in spec)
+    api.Client.GetAuthenticatedUser() (string, error)   (already in spec)
+    config.SaveToken(host, token string) error   — new; config.go must add
+      this in addition to whatever Load/host-map functions it defines, since
+      auth is the only command that writes a token.
+  promptForToken in auth.go bypasses internal/output and writes the
+  "Token for <host> (input hidden): " prompt straight to os.Stderr with
+  fmt.Fprintf (no trailing newline), because the hidden input from
+  term.ReadPassword needs to land on the same terminal line as the prompt.
+  Treat internal/output's Info/Success/etc. as line-oriented (always end
+  with a newline) when implementing output.go, and keep using raw
+  fmt.Fprint(os.Stderr, ...) for any future same-line prompt instead of
+  adding a no-newline variant to internal/output.
+- internal/output/output.go implemented: fatih/color + golang.org/x/term
+  (IsTerminal) decide colour; NO_COLOR env var or either stream not being a
+  TTY disables colour globally via color.NoColor. Table does simple
+  space-padded alignment (no truncation/wrapping). Confirm/ConfirmWord read
+  one line via a fresh bufio.Reader(os.Stdin) per call — fine since no
+  command issues more than one prompt per invocation.
+- internal/config/config.go implemented: tokens stored as YAML
+  (map[string]string, host -> token) at ~/.gitcollect/config, atomic
+  temp-file+rename write, chmod 0600 explicitly (belt-and-suspenders since
+  os.CreateTemp already defaults to 0600 on POSIX). Also owns
+  CollectionsDir()/AuditDir()/EnsureDir() as the shared source of truth for
+  paths under ~/.gitcollect, since collection.go and audit.go both need them
+  and config.go is the package documented to own "~/.gitcollect/" layout.
+- internal/api: NewClient dispatches purely on host string — "github.com"
+  exactly gets the GitHub implementation (api.github.com), anything else
+  (gitlab.com or a self-hosted GitLab domain) gets the GitLab v4 API at
+  https://<host>/api/v4. No GitHub Enterprise support — out of v1 scope.
+  GitLab's "pull" permission maps to access_level 20 (Reporter), not 10
+  (Guest), because Guest cannot read repository code on most GitLab
+  versions and gitcollect's "pull" always means read access. GitLab's
+  member endpoints need a numeric user_id, so AddCollaborator/
+  RemoveCollaborator/CheckCollaborator first resolve username via
+  GET /users?username=. AddCollaborator on an existing member (409) falls
+  back to updating their access_level via PUT instead of failing.
+- IMPORTANT — avoided a package import cycle: the spec's internal/access
+  package (enforce.go/sync.go/inspect.go) necessarily imports
+  internal/collection (its functions take *collection.Collection). That
+  means internal/collection cannot import internal/access back, even
+  though the spec's prose for mutation.go says each mutation "calls
+  SyncCollaborators". Resolution: the real SyncCollaborators
+  implementation now lives as a method, (c *Collection) SyncCollaborators
+  (client api.Client) (added, removed int, err error), directly in
+  internal/collection/mutation.go — it only needs api.Client, not the
+  access package. internal/access/sync.go's exported SyncCollaborators
+  function (still required by the spec's public API surface, used by
+  cmd/clone.go etc.) is a thin wrapper: `return col.SyncCollaborators
+  (client)`. Build access/sync.go this way — do not duplicate the
+  concurrency logic there.
+  Relatedly, RemoveMember can't rely on SyncCollaborators' normal
+  member×repo loop to revoke access, because once username is dropped from
+  c.Members it no longer appears in that iteration. mutation.go therefore
+  has a separate unexported helper, revokeAllAccess(username, client),
+  that unconditionally calls RemoveCollaborator across every repo before
+  the member is actually removed from the manifest.
+- cmd/root.go grew shared cross-command infra beyond the original
+  Execute/UsageError pair (still additive, never rewritten): cachedClient/
+  cachedUser + currentClient(host)/currentUser(client) for the "call
+  GetAuthenticatedUser once per invocation" rule; loadCollection(name) for
+  owner-perspective commands (friendly "not found. Run: gitcollect list");
+  loadForRead(name) (col, caller, err) for read/discovery commands (show,
+  inspect, clone, pull, status), which collapses "manifest missing" and
+  "exists but caller denied" into the identical access.ErrForbidden so a
+  private collection's existence is never disclosed. Use loadCollection for
+  mutation commands that only make sense for an authorized owner/member,
+  loadForRead for anything a non-member could probe to test existence.
+  loadForRead only resolves caller identity (currentClient+currentUser) if
+  the collection turns out to be private — public collections return with
+  caller == "" since no authentication is needed to read them at all. Don't
+  resolve caller before calling this; that was an earlier, wrong revision
+  of this helper (loadAccessibleCollection) that forced an API call even
+  for public collections — fixed during cmd/show.go.
+- DEVIATED from the spec's "Audit log append is fire-and-forget
+  (non-blocking)": recordAudit (cmd/root.go) calls audit.Append
+  synchronously instead of from a goroutine. Reason: main.go does
+  os.Exit(cmd.Execute()) immediately on return, which would kill a
+  detached goroutine mid-write before the entry was durably appended —
+  directly undermining "Audit on failure: log failed operations too."
+  A local append of a few hundred bytes is not slow enough to justify the
+  risk. Append failures are still non-fatal (logged via output.Warn, never
+  returned as the command's error).
+- internal/config/config.go grew a second cache (additive, not rewritten):
+  Config.Users map[string]string (host -> username), with SaveUser/
+  LoadUser alongside SaveToken/LoadToken. Reason: "list reads local YAML
+  only, zero network calls" is impossible to reconcile with "list shows
+  *your* collections (owned + member)" unless "who am I" is resolvable
+  without calling GetAuthenticatedUser. auth.go now calls SaveUser right
+  after it validates a token (it already has the username for free from
+  that call); cmd/root.go's currentUser() also refreshes this cache
+  whenever any other command does end up calling GetAuthenticatedUser, so
+  the cache only ever goes stale, never wrong-direction.
+- cmd/list.go semantics: a collection is "yours" if the cached username for
+  its Host equals col.Owner ("owner") or appears in col.Members ("member").
+  Public collections and any membership are shown by default; --all
+  additionally surfaces private collections you own but haven't added
+  yourself to as a member (the literal reading of "--all: include private
+  if owner"). Collections on a host you've never authenticated to (no
+  cached username) are skipped with a warning rather than erroring the
+  whole command — one bad/foreign manifest shouldn't break `list`.
+- Mutation save semantics: every mutator only calls c.Save() if
+  SyncCollaborators/revokeAllAccess returned err == nil, restoring the
+  pre-mutation in-memory state on failure. The platform may have partially
+  applied some pairs even on a failed sync (those successes are kept on the
+  platform per spec), but local YAML only commits when the *overall* sync
+  reported no error — this is what keeps YAML from ever claiming a state
+  that wasn't fully confirmed.
 ```
