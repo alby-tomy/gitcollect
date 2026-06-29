@@ -1,0 +1,16 @@
+{
+  "go.useLanguageServer": true,
+  "go.formatTool": "goimports",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "explicit"
+  },
+  "go.lintTool": "staticcheck",
+  "go.lintOnSave": "package",
+  "go.testFlags": ["-race", "-v"],
+  "[go]": {
+    "editor.defaultFormatter": "golang.go",
+    "editor.insertSpaces": false,
+    "editor.tabSize": 4
+  }
+}
