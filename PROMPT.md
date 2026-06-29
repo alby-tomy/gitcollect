@@ -15,8 +15,8 @@ by thousands of developers. You prioritise **correctness over cleverness**,
 about failure modes before happy paths.
 
 **The most important principle in this codebase:**
-gitcollect's local YAML is a *declaration of intent* — it describes who should
-have access. The GitHub/GitLab platform is the *enforcement point* — it is
+gitcollect's local YAML is a _declaration of intent_ — it describes who should
+have access. The GitHub/GitLab platform is the _enforcement point_ — it is
 where access is actually granted or revoked. These two must never diverge.
 Every access mutation must drive the platform API to completion before the
 local YAML is written. If the API call fails, the YAML does not change.
@@ -212,7 +212,7 @@ name: cybersecurity
 description: "Penetration testing and security research tools"
 host: github.com
 owner: yourusername
-visibility: private           # public | private
+visibility: private # public | private
 created_at: "2025-01-15T10:00:00Z"
 updated_at: "2025-01-20T14:32:00Z"
 
@@ -246,23 +246,23 @@ groups:
 repos:
   - name: pen-test-tools
     groups: []
-    users: []               # open to all members
+    users: [] # open to all members
 
   - name: vuln-scanner
     groups: [red-team]
-    users: []               # only red-team members (alice, bob)
+    users: [] # only red-team members (alice, bob)
 
   - name: threat-reports
     groups: [analysts]
-    users: [diana]          # analysts group OR diana individually
+    users: [diana] # analysts group OR diana individually
 
   - name: ops-runbooks
     groups: [ops]
-    users: []               # only ops group (diana)
+    users: [] # only ops group (diana)
 
   - name: ctf-writeups
     groups: []
-    users: []               # open to all members
+    users: [] # open to all members
 ```
 
 ---
@@ -352,9 +352,10 @@ func (c *Collection) WhyCanAccess(username, repoName string) string
 ## Mutation layer — internal/collection/mutation.go
 
 Every mutation here follows the same three-step pattern:
-  1. Validate inputs
-  2. Call platform API (via passed-in api.Client)
-  3. Only if API succeeds: update local struct and save atomically
+
+1. Validate inputs
+2. Call platform API (via passed-in api.Client)
+3. Only if API succeeds: update local struct and save atomically
 
 ```go
 // AddMember adds username to Members, then calls SyncCollaborators.
@@ -554,8 +555,8 @@ var (
 
 ## Command behaviour — key interactions
 
-> Every block below is the *real* output of the current implementation
-> (verified against cmd/*.go and internal/output/output.go as of session
+> Every block below is the _real_ output of the current implementation
+> (verified against cmd/\*.go and internal/output/output.go as of session
 > 10), not the illustrative sketches this section originally shipped with.
 > If you change a print statement, update the matching block here — this
 > section drifting from reality is exactly what session 10 had to fix.
@@ -782,7 +783,7 @@ Run: gitcollect inspect cybersecurity --user bob
 ```
 
 The "Access verified" line is `caller · <comma-joined groups, or "no
-groups">` — no literal word "groups:" in it. For a *public* collection it's
+groups">` — no literal word "groups:" in it. For a _public_ collection it's
 instead `output.Success("Public collection — %d of %d repos accessible", …)`.
 
 ### gitcollect activity — code changes, not access changes (session 7)
@@ -841,9 +842,9 @@ collection's existence is never confirmed to a non-member.
   status via API. Local manifest alone is not sufficient.
 - **Validation regexes** (compile once, reuse):
   - Collection name: `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$`
-  - Repo name:       `^[a-zA-Z0-9._-]{1,100}$`
-  - Username:        `^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`
-  - Group name:      `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,30}$`
+  - Repo name: `^[a-zA-Z0-9._-]{1,100}$`
+  - Username: `^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`
+  - Group name: `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,30}$`
   - Reject inputs containing `../`, `/`, `\`, null bytes.
 - **HTTPS only**: use `clone_url` from API always. Reject SSH patterns.
 - **File permissions**: all files under `~/.gitcollect/`: 0600. Directories: 0700.
@@ -969,16 +970,16 @@ changelog:
 
 Use stdlib `testing` only. No external assertion libraries.
 
-| Package                       | Test coverage required                                              |
-|-------------------------------|---------------------------------------------------------------------|
-| `internal/collection`         | Load, Save, Validate, AddMember, RemoveMember, AddToGroup, RemoveFromGroup, SetRepoAccess |
-| `internal/collection/access`  | Full decision table (see matrix below)                              |
-| `internal/access`             | CheckCollectionAccess, CheckRepoAccess, FilterAccessible, SyncCollaborators using mock client |
-| `internal/audit`              | Append, Read, Filter by user and duration                           |
-| `internal/api`                | GitHub + GitLab against `httptest.Server` mocks                     |
-| `internal/git`                | Correct args to git subprocess (mock exec)                          |
-| `internal/config`             | File at 0600, directory at 0700                                     |
-| `internal/output`             | Table alignment, JSON, Confirm true/false                           |
+| Package                      | Test coverage required                                                                        |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| `internal/collection`        | Load, Save, Validate, AddMember, RemoveMember, AddToGroup, RemoveFromGroup, SetRepoAccess     |
+| `internal/collection/access` | Full decision table (see matrix below)                                                        |
+| `internal/access`            | CheckCollectionAccess, CheckRepoAccess, FilterAccessible, SyncCollaborators using mock client |
+| `internal/audit`             | Append, Read, Filter by user and duration                                                     |
+| `internal/api`               | GitHub + GitLab against `httptest.Server` mocks                                               |
+| `internal/git`               | Correct args to git subprocess (mock exec)                                                    |
+| `internal/config`            | File at 0600, directory at 0700                                                               |
+| `internal/output`            | Table alignment, JSON, Confirm true/false                                                     |
 
 Minimum 80% coverage on all `internal/` packages.
 Use `t.TempDir()` for all file tests. Never touch real `~/.gitcollect/`.
@@ -1850,3 +1851,5 @@ sessions do not re-debate them.
   goroutines and lock accordingly — don't repeat this with a "simpler"
   unsynchronized mock later.
 ```
+
+<!-- v1 -->
