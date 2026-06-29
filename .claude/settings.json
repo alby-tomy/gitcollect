@@ -8,7 +8,8 @@
       "Bash(rm -rf .testhome bin)",
       "Bash(go vet *)",
       "Bash(go test *)",
-      "Bash(go run *)"
+      "Bash(go run *)",
+      "Bash(./bin/gitcollect.exe --help)"
     ]
   }
 }

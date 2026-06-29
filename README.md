@@ -34,6 +34,15 @@ make build          # -> bin/gitcollect (or bin/gitcollect.exe on Windows)
 ./bin/gitcollect --help
 ```
 
+> `make` isn't preinstalled on plain Windows. If you don't have it (e.g. via
+> [Git for Windows](https://gitforwindows.org/), [Chocolatey](https://chocolatey.org/) `choco install make`, or WSL),
+> run the build's underlying command directly instead:
+>
+> ```powershell
+> go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect.exe .
+> .\bin\gitcollect.exe --help
+> ```
+
 Or run directly without building (handy while developing):
 
 ```bash
@@ -102,6 +111,8 @@ Via the Makefile (matches CI):
 ```bash
 make test            # go test ./... -race -cover -coverprofile=coverage.out
 ```
+
+(No `make`? Run the `go test ./... -race -cover -coverprofile=coverage.out` command shown above directly.)
 
 > **Note on `-race`:** the race detector requires CGO and a C toolchain.
 > If you see `-race requires cgo; enable cgo by setting CGO_ENABLED=1` on a
