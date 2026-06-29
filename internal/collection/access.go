@@ -26,18 +26,6 @@ func (c *Collection) IsInGroup(username, group string) bool {
 	return false
 }
 
-// groupsContaining returns the names of every group username belongs to,
-// in manifest order.
-func (c *Collection) groupsContaining(username string) []string {
-	var groups []string
-	for name := range c.Groups {
-		if c.IsInGroup(username, name) {
-			groups = append(groups, name)
-		}
-	}
-	return groups
-}
-
 // repoByName returns the RepoAccess for repoName, or false if no such repo
 // is part of the collection.
 func (c *Collection) repoByName(repoName string) (RepoAccess, bool) {

@@ -10,7 +10,11 @@ import (
 	"net/url"
 )
 
-const githubBaseURL = "https://api.github.com"
+// githubBaseURL is a var, not a const, so api_test.go can point it at an
+// httptest.Server. gitlabClient already has an equivalent per-instance
+// baseURL field for the same reason; githubClient never needed one until
+// tests required it, since production code only ever talks to the real API.
+var githubBaseURL = "https://api.github.com"
 
 type githubClient struct {
 	host       string

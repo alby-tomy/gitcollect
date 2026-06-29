@@ -874,6 +874,31 @@ Completed:    main.go, go.mod, cmd/root.go, cmd/auth.go
 In progress:  (none)
 Blockers:     (none)
 Next session: Start with cmd/whoami.go
+
+Session 2 — 2026-06-29 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+NOTE: this session's table below was stale on arrival — cmd/whoami.go
+through cmd/repo.go were already done and compiling, despite being
+marked "todo". Re-verified every file against `go build ./...` before
+trusting the table; do this first in any future session too.
+Completed:    cmd/member.go, cmd/group.go, cmd/inspect.go, cmd/audit.go,
+              cmd/clone.go, cmd/pull.go, cmd/status.go, cmd/version.go,
+              Makefile, .goreleaser.yaml, and every *_test.go file listed
+              in the testing-requirements table (collection, access,
+              audit, git, config, output, api) — all packages now at
+              80%+ coverage (see `go test ./... -cover`).
+              Also fixed a real bug found while smoke-testing: internal/
+              output/output.go's Table used byte length instead of rune
+              count for column width, misaligning every table containing
+              ✓/✗ (i.e. most of inspect/member/group/repo output).
+In progress:  (none)
+Blockers:     (none)
+Next session: Feature-complete per this spec. If resuming, run
+              `go build ./... && go vet ./... && go test ./... -cover`
+              first — everything should be green — then look at
+              cmd/auth.go and cmd/list.go's public-collection-visibility
+              edge case noted in the architecture decisions log below
+              before changing anything in cmd/.
 ```
 
 ---
@@ -888,54 +913,57 @@ FILE                                         STATUS       NOTES
 ───────────────────────────────────────────  ───────────  ─────────────────────
 main.go                                      done
 go.mod                                       done
-Makefile                                     todo
-.goreleaser.yaml                             todo
+Makefile                                     done
+.goreleaser.yaml                             done
 
-cmd/root.go                                  done
+cmd/root.go                                  done         grew loadForGit (see decisions log)
 cmd/auth.go                                  done
 cmd/whoami.go                                done
 cmd/init.go                                  done
 cmd/delete.go                                done
-cmd/list.go                                  done
+cmd/list.go                                  done         see decisions log: public-collection edge case
 cmd/show.go                                  done
 cmd/visibility.go                            done
 cmd/add.go                                   done
 cmd/remove.go                                done
-cmd/repo.go                                  todo
-cmd/member.go                                todo
-cmd/group.go                                 todo
-cmd/inspect.go                               todo
-cmd/audit.go                                 todo
-cmd/clone.go                                 todo
-cmd/pull.go                                  todo
-cmd/status.go                                todo
-cmd/version.go                               todo
+cmd/repo.go                                  done
+cmd/member.go                                done
+cmd/group.go                                 done
+cmd/inspect.go                               done
+cmd/audit.go                                 done
+cmd/clone.go                                 done
+cmd/pull.go                                  done
+cmd/status.go                                done
+cmd/version.go                               done
+(shell completion: cobra's built-in `completion` subcommand covers this
+ — no separate file needed; verified with `gitcollect completion --help`)
 
 internal/collection/collection.go            done
-internal/collection/access.go                done
+internal/collection/access.go                done         groupsContaining (dead code) removed
 internal/collection/mutation.go              done
-internal/collection/collection_test.go       todo
+internal/collection/collection_test.go       done         83.1% coverage
 
 internal/access/enforce.go                   done
 internal/access/sync.go                      done
 internal/access/inspect.go                   done
-internal/access/access_test.go               todo
+internal/access/access_test.go               done         94.1% coverage
 
 internal/audit/audit.go                      done
-internal/audit/audit_test.go                 todo
+internal/audit/audit_test.go                 done         82.8% coverage
 
 internal/git/git.go                          done
-internal/git/git_test.go                     todo
+internal/git/git_test.go                     done         91.7% coverage
 
 internal/api/client.go                       done
-internal/api/github.go                       done
+internal/api/github.go                       done         githubBaseURL: const → var (see decisions log)
 internal/api/gitlab.go                       done
-internal/api/api_test.go                     todo
+internal/api/api_test.go                     done         84.8% coverage
 
 internal/config/config.go                    done
-internal/config/config_test.go               todo
+internal/config/config_test.go               done         82.8% coverage
 
-internal/output/output.go                    done
+internal/output/output.go                    done         Table/padRight: byte len → rune count (real bug fix)
+internal/output/output_test.go               done         97.9% coverage
 ```
 
 ---
@@ -1071,4 +1099,77 @@ sessions do not re-debate them.
   platform per spec), but local YAML only commits when the *overall* sync
   reported no error — this is what keeps YAML from ever claiming a state
   that wasn't fully confirmed.
+- cmd/root.go grew a third loader, loadForGit(name) (col, caller, client,
+  err), used only by clone.go/pull.go/status.go. Unlike loadForRead,
+  loadForGit ALWAYS resolves an authenticated client and caller, even for
+  public collections, because these three commands inherently need a real
+  api.Client to fetch clone URLs (GetRepo) and verify platform collaborator
+  status (CheckCollaborator via access.FilterAccessible) — there is no
+  client-free path for that the way there is for purely-local commands like
+  show/inspect. Don't try to make clone/pull/status reuse loadForRead's
+  public-collection auth-skip optimization; it doesn't apply to them.
+- cmd/member.go, cmd/group.go, cmd/inspect.go share an unexported
+  groupsForMember(col, username) []string helper (defined once, in
+  member.go, package-private to cmd) for "which groups is this user in."
+  internal/collection/access.go used to have an equivalent groupsContaining
+  method but it was dead code (never called from anywhere, including its
+  own package) — deleted rather than kept as an unused duplicate. If a
+  future session wants to export this from collection instead of
+  duplicating it in cmd, that's a reasonable cleanup, but don't reintroduce
+  the unexported version in access.go.
+- internal/output/output.go's Table/padRight measured column width with
+  len() (byte length) instead of utf8.RuneCountInString. Every multi-byte
+  glyph used throughout this codebase's output made the affected column's
+  padding too short by (byte_len - rune_count), visibly misaligning tables
+  — this was already present in cmd/repo.go's `repo show` before this
+  session and just got more visible once member/group/inspect started
+  using the same checkmark pattern. Fixed Table and padRight to use
+  utf8.RuneCountInString throughout. If you add new output helpers that pad
+  strings, use rune count, not len(), whenever the string might contain
+  non-ASCII output glyphs.
+- internal/api/github.go's githubBaseURL was a const. Changed to a
+  package-level var (same default value, "https://api.github.com") solely
+  so api_test.go can redirect it at an httptest.Server — gitlabClient
+  already had an equivalent per-instance baseURL struct field for the same
+  reason; githubClient just never needed one until the spec's own testing
+  requirement ("GitHub + GitLab against httptest.Server mocks") made it
+  necessary. No production behaviour changes.
+- cmd/version.go does NOT implement `gitcollect completion bash|zsh|fish`
+  itself — cobra's rootCmd automatically gets a built-in `completion`
+  subcommand (bash/zsh/fish/powershell) for free once the command tree has
+  subcommands, with no extra code needed. Verified via
+  `gitcollect completion --help`. Don't add a hand-rolled completion.go;
+  there's nothing for it to do that cobra doesn't already provide.
+- cmd/audit.go's --since flag accepts gitcollect's documented day-shorthand
+  (7d/30d/90d) IN ADDITION to anything time.ParseDuration understands
+  (24h, 30m, etc.) via a small parseSince() that special-cases a trailing
+  "d" before falling back to time.ParseDuration. The spec's own example
+  values (7d, 30d, 90d) are not valid time.ParseDuration input on their own.
+- KNOWN EDGE CASE, not fixed this session — cmd/list.go: a public
+  collection you are NOT a member of (and don't own) is silently skipped by
+  `gitcollect list`, because the role-selection switch's default case
+  continues past it whenever the cached username for that host is "" or
+  doesn't match owner/member. list.go's own help text says "Public
+  collections ... are shown by default," which overclaims relative to what
+  the code does — in practice "list" only ever shows collections you own or
+  are an explicit member of, public or not. Inherited from session 1,
+  confirmed via manual testing this session (a public test collection
+  didn't appear in `list` without a cached username for its host), and left
+  alone since list.go was already marked "done" — reconciling the help
+  text vs. changing actual semantics is a product decision the next
+  session should make deliberately, not a drive-by fix.
+- Manual end-to-end smoke testing this session required pointing
+  ~/.gitcollect at a temp dir. On a Windows dev box, Go's
+  os.UserHomeDir() reads %USERPROFILE%, NOT $HOME — `export HOME=...` in
+  Git Bash has no effect on the compiled binary. Set USERPROFILE (and,
+  for portability, HOME too) when manually testing on Windows. The test
+  suites already do this correctly via t.Setenv("HOME", ...) +
+  t.Setenv("USERPROFILE", ...) in every package's test helpers.
+- internal/git/git_test.go mocks the real `git` subprocess (per the
+  testing-requirements table: "Correct args to git subprocess (mock
+  exec)") by writing a fake git.bat to a t.TempDir() and pointing PATH at
+  only that directory. Confirmed empirically that Go's exec.Command on
+  Windows resolves and runs .bat files placed on PATH transparently (no
+  cmd.exe wrapping needed in the test itself). This requires t.Setenv, so
+  these tests cannot run with t.Parallel().
 ```

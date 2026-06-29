@@ -190,6 +190,34 @@ func loadForRead(name string) (col *collection.Collection, caller string, err er
 	return col, caller, nil
 }
 
+// loadForGit loads name for clone/pull/status: unlike loadForRead, it always
+// resolves an authenticated client and caller, even for public collections,
+// because these commands need a real api.Client to fetch clone URLs and
+// verify platform collaborator status — there is no client-free path for
+// them the way there is for purely-local commands like show or inspect.
+func loadForGit(name string) (col *collection.Collection, caller string, client api.Client, err error) {
+	col, err = collection.Load(name)
+	if err != nil {
+		if errors.Is(err, collection.ErrNotFound) {
+			return nil, "", nil, access.ErrForbidden
+		}
+		return nil, "", nil, err
+	}
+
+	client, err = currentClient(col.Host)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	caller, err = currentUser(client)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if err := access.CheckCollectionAccess(col, caller); err != nil {
+		return nil, "", nil, err
+	}
+	return col, caller, client, nil
+}
+
 // recordAudit appends entry to the collection's audit log. It is called
 // synchronously, not from a detached goroutine: main calls os.Exit
 // immediately after Execute returns, and a truly fire-and-forget append

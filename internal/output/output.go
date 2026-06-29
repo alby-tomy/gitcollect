@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/fatih/color"
 	"golang.org/x/term"
@@ -72,12 +73,14 @@ func Progress(current, total int, label string) {
 func Table(headers []string, rows [][]string) {
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = len(h)
+		widths[i] = utf8.RuneCountInString(h)
 	}
 	for _, row := range rows {
 		for i, cell := range row {
-			if i < len(widths) && len(cell) > widths[i] {
-				widths[i] = len(cell)
+			if i < len(widths) {
+				if w := utf8.RuneCountInString(cell); w > widths[i] {
+					widths[i] = w
+				}
 			}
 		}
 	}
@@ -107,10 +110,11 @@ func Table(headers []string, rows [][]string) {
 }
 
 func padRight(s string, width int) string {
-	if len(s) >= width {
+	n := utf8.RuneCountInString(s)
+	if n >= width {
 		return s
 	}
-	return s + strings.Repeat(" ", width-len(s))
+	return s + strings.Repeat(" ", width-n)
 }
 
 // JSON marshals v as indented JSON to stdout.
