@@ -17,67 +17,175 @@ See [PROMPT.md](PROMPT.md) for the full design spec.
 - `git` on your `PATH` (required for `clone`/`pull`/`status`)
 - A GitHub or GitLab personal access token (for `gitcollect auth`)
 
-## Setup
+All commands below are plain `go` commands — no Make, no shell scripts.
+They work identically once you're in the right shell for your OS; the only
+differences are path separators and the home-directory environment
+variable, called out per OS below.
+
+## Setup, build, and run
+
+### Windows (PowerShell)
+
+```powershell
+git clone <this-repo>
+cd gitcollect
+go mod download
+
+go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect.exe .
+.\bin\gitcollect.exe --help
+
+# or run without building a binary first
+go run . --help
+```
+
+Install onto `%GOBIN%` (or `%GOPATH%\bin`):
+
+```powershell
+go install -ldflags="-s -w" .
+```
+
+> **Home directory:** gitcollect's local state path resolves via Go's
+> `os.UserHomeDir()`, which on Windows reads `%USERPROFILE%`, **not**
+> `$HOME`. If you use Git Bash, `export HOME=...` will *not* affect the
+> compiled binary — set `$env:USERPROFILE` in PowerShell instead if you
+> need to point it at a custom directory.
+
+### macOS
 
 ```bash
 git clone <this-repo>
 cd gitcollect
 go mod download
-```
 
-## Running the project
-
-Build a binary:
-
-```bash
-make build          # -> bin/gitcollect (or bin/gitcollect.exe on Windows)
+go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect .
 ./bin/gitcollect --help
-```
 
-> `make` isn't preinstalled on plain Windows. If you don't have it (e.g. via
-> [Git for Windows](https://gitforwindows.org/), [Chocolatey](https://chocolatey.org/) `choco install make`, or WSL),
-> run the build's underlying command directly instead:
->
-> ```powershell
-> go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect.exe .
-> .\bin\gitcollect.exe --help
-> ```
-
-Or run directly without building (handy while developing):
-
-```bash
+# or run without building a binary first
 go run . --help
-go run . version
 ```
 
-Install it onto your `$GOPATH/bin` (or `$GOBIN`):
+Install onto `$GOBIN` (or `$GOPATH/bin`):
 
 ```bash
-make install
+go install -ldflags="-s -w" .
 ```
 
-### First-time use
+> macOS ships Xcode's Clang, so `go test -race` (see below) works out of
+> the box with no extra setup.
+
+### Linux
+
+```bash
+git clone <this-repo>
+cd gitcollect
+go mod download
+
+go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect .
+./bin/gitcollect --help
+
+# or run without building a binary first
+go run . --help
+```
+
+Install onto `$GOBIN` (or `$GOPATH/bin`):
+
+```bash
+go install -ldflags="-s -w" .
+```
+
+> If `go test -race` complains about a missing C compiler, install one
+> (e.g. `sudo apt install build-essential` on Debian/Ubuntu, `sudo dnf
+> groupinstall "Development Tools"` on Fedora) — most desktop/CI Linux
+> images already have gcc preinstalled.
+
+### First-time use (all platforms)
 
 ```bash
 gitcollect auth                       # store a GitHub token (hidden prompt)
 gitcollect auth --host gitlab.com     # or authenticate against GitLab
 gitcollect whoami                     # confirm it worked
 
-gitcollect init my-collection
-gitcollect add my-collection some-repo
+gitcollect init my-collection          # create the collection first
+gitcollect add my-collection some-repo # then add repos to it
 gitcollect member add my-collection some-username
 gitcollect show my-collection
 ```
+
+> `add`/`member add`/etc. all require the collection to already exist —
+> `gitcollect init <name>` first, or you'll get
+> `collection "..." not found. Run: gitcollect list`.
 
 All local state lives under `~/.gitcollect/` (`config` for tokens at file
 mode `0600`, `collections/*.yaml` for manifests, `audit/*.log` for the audit
 trail). Nothing is written there until you run `auth` or `init`.
 
-> **Windows note:** `gitcollect`'s local state path is resolved via Go's
-> `os.UserHomeDir()`, which reads `%USERPROFILE%` on Windows (not `$HOME`).
-> If you're pointing the CLI at a custom home directory for testing, set
-> `USERPROFILE`, not `HOME`, in PowerShell/cmd. Git Bash's `export HOME=...`
-> has no effect on the compiled binary.
+### Listing the repos inside a collection
+
+```bash
+gitcollect show my-collection
+```
+
+Prints a summary including a `REPO | ACCESS` table — this is the quickest
+way to see every repo in the collection and whether it's open to all
+members or restricted to specific groups/users.
+
+For a per-member access breakdown (who can reach which repo, and why),
+use `inspect` instead:
+
+```bash
+gitcollect inspect my-collection
+```
+
+```
+Collection:  my-collection
+Visibility:  private
+Members:     1
+
+MEMBER         learning-hub
+sreekutty2728  ✓
+```
+
+Each column after `MEMBER` is one repo in the collection (`learning-hub`
+above is a repo name, not a label) — `✓`/`✗` shows whether that row's
+member can access it. Use `gitcollect inspect my-collection --repo
+<repo-name>` to flip the view (one repo, every member), or `--user
+<username>` to see one member's full access map with the reason for each
+decision.
+
+### Granting or revoking one user's access to a specific repo
+
+`gitcollect repo access <collection> <repo> --users u1,u2` *replaces* a
+repo's entire individual-access list, so you need to already know everyone
+currently on it. For adding or removing just one person without touching
+anyone else's access, use `grant`/`revoke` instead:
+
+```bash
+gitcollect repo grant my-collection some-repo some-username   # add one user
+gitcollect repo revoke my-collection some-repo some-username  # remove one user
+```
+
+Both require the collection owner's token (same as every other access
+mutation) and leave the repo's group restrictions untouched. A couple of
+guardrails worth knowing:
+
+- `repo grant` refuses if the repo is currently **open to all members**
+  (no group/user restriction at all) — adding one user to an empty list
+  would flip the rule from "everyone" to "only this one user," silently
+  locking everyone else out. Use `repo access --users <name>` if you
+  actually mean to restrict an open repo.
+- `repo revoke` refuses if removing that user would leave the repo with
+  **no restriction at all**, which would silently re-open it to every
+  member. Use `repo access --users <remaining-names>` if that's what you
+  actually want.
+
+Both commands are no-ops (not errors) if the user already has, or already
+lacks, that individual grant.
+
+> A [Makefile](Makefile) and [.goreleaser.yaml](.goreleaser.yaml) wrap these
+> same commands (`make build`, `make test`, `goreleaser release`, etc.) for
+> anyone who already has GNU Make / goreleaser on their `PATH` — they're
+> optional conveniences, not requirements. Everything in this README runs
+> with plain `go` commands on every OS.
 
 ## Running the tests
 
@@ -106,18 +214,19 @@ Or view it in a browser:
 go tool cover -html=coverage.out
 ```
 
-Via the Makefile (matches CI):
+The full CI-equivalent command:
 
 ```bash
-make test            # go test ./... -race -cover -coverprofile=coverage.out
+go test ./... -race -cover -coverprofile=coverage.out
 ```
 
-(No `make`? Run the `go test ./... -race -cover -coverprofile=coverage.out` command shown above directly.)
-
 > **Note on `-race`:** the race detector requires CGO and a C toolchain.
-> If you see `-race requires cgo; enable cgo by setting CGO_ENABLED=1` on a
-> Windows box without a configured C compiler, run the plain (non-race)
-> command above instead — CI runs the race-enabled target on Linux.
+> macOS and most Linux setups have one already (see the OS sections
+> above); on Windows you'd need a C compiler such as
+> [mingw-w64](https://www.mingw-w64.org/) on `PATH` with
+> `CGO_ENABLED=1` set. If you don't have that configured, drop `-race`
+> and run the plain command above instead — CI runs the race-enabled
+> target on Linux regardless.
 
 Run a single package or test by name:
 
@@ -127,17 +236,18 @@ go test ./internal/access/... -run TestAccessDecisionMatrix -v
 
 ### What the tests don't need
 
-All tests are self-contained: they use `t.TempDir()` and `t.Setenv("HOME"/"USERPROFILE", ...)`
-to isolate `~/.gitcollect`, in-memory mock `api.Client` implementations to
-avoid real network calls, and (for `internal/git`) a fake `git` executable
-placed on `PATH` to verify subprocess arguments without invoking real git
-commands. No tokens, network access, or real GitHub/GitLab accounts are
-needed to run the suite.
+All tests are self-contained: they use `t.TempDir()` and
+`t.Setenv("HOME"/"USERPROFILE", ...)` to isolate `~/.gitcollect`, in-memory
+mock `api.Client` implementations to avoid real network calls, and (for
+`internal/git`) a fake `git` executable placed on `PATH` to verify
+subprocess arguments without invoking real git commands. No tokens, network
+access, or real GitHub/GitLab accounts are needed to run the suite, on any
+OS.
 
 ## Linting
 
 ```bash
-make lint            # requires golangci-lint on PATH
+golangci-lint run ./...
 ```
 
 ## Releasing
@@ -146,5 +256,5 @@ Release builds are configured in [.goreleaser.yaml](.goreleaser.yaml) and
 cut via:
 
 ```bash
-make release          # goreleaser release --clean
+goreleaser release --clean
 ```

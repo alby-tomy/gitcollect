@@ -61,6 +61,8 @@ gitcollect repo access <collection> <repo> --groups g1,g2   Restrict to groups
 gitcollect repo access <collection> <repo> --users u1,u2    Restrict to individuals
 gitcollect repo access <collection> <repo> --open           Open to all members
 gitcollect repo show <collection> <repo>    Show who can access this repo and why
+gitcollect repo grant <collection> <repo> <user>   Grant one user individual access (added in session 3; not in the original spec — see decisions log)
+gitcollect repo revoke <collection> <repo> <user>  Revoke one user's individually granted access (same)
 
 ── Member management ───────────────────────────────────────────────────────
 gitcollect member add <collection> <username>      Add member to collection
@@ -899,6 +901,32 @@ Next session: Feature-complete per this spec. If resuming, run
               cmd/auth.go and cmd/list.go's public-collection-visibility
               edge case noted in the architecture decisions log below
               before changing anything in cmd/.
+
+Session 3 — 2026-06-29 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Added a feature beyond the original spec, on user request: per-user
+grant/revoke for a single repo without rewriting that repo's whole
+--users list. See decisions log for the footgun this had to guard
+against (the empty-Groups-and-Users-means-"open to all members" rule).
+Completed:    collection.GrantRepoUser/RevokeRepoUser (mutation.go),
+              cmd/repo.go's `repo grant`/`repo revoke` subcommands,
+              new ErrRepoOpen/ErrRepoWouldOpen sentinels, tests for all
+              of the above in collection_test.go (idempotency, the two
+              refusal cases, sync-failure rollback for each).
+              Also fixed a real, always-on bug (not just a -race
+              finding) hit while adding those tests: internal/
+              collection/collection_test.go's mockClient wrote to a
+              plain map from SyncCollaborators' concurrent goroutines
+              with no lock — "fatal error: concurrent map writes",
+              Go's runtime-level detector, not the optional race
+              detector. Added a sync.Mutex to the three mockClient
+              methods that touch the map. If you add a new test mock
+              for api.Client anywhere, assume SyncCollaborators will
+              call it concurrently and lock accordingly from the start.
+In progress:  (none)
+Blockers:     (none)
+Next session: Feature-complete + this one extension. Same startup
+              check as session 2's note above.
 ```
 
 ---
@@ -926,7 +954,7 @@ cmd/show.go                                  done
 cmd/visibility.go                            done
 cmd/add.go                                   done
 cmd/remove.go                                done
-cmd/repo.go                                  done
+cmd/repo.go                                  done         grant/revoke subcommands added session 3
 cmd/member.go                                done
 cmd/group.go                                 done
 cmd/inspect.go                               done
@@ -940,8 +968,8 @@ cmd/version.go                               done
 
 internal/collection/collection.go            done
 internal/collection/access.go                done         groupsContaining (dead code) removed
-internal/collection/mutation.go              done
-internal/collection/collection_test.go       done         83.1% coverage
+internal/collection/mutation.go              done         +GrantRepoUser/RevokeRepoUser, session 3
+internal/collection/collection_test.go       done         85.9% coverage
 
 internal/access/enforce.go                   done
 internal/access/sync.go                      done
@@ -1172,4 +1200,55 @@ sessions do not re-debate them.
   Windows resolves and runs .bat files placed on PATH transparently (no
   cmd.exe wrapping needed in the test itself). This requires t.Setenv, so
   these tests cannot run with t.Parallel().
+- SESSION 3, FEATURE BEYOND THE ORIGINAL SPEC (user-requested): per-user
+  repo grant/revoke. Before this, the only way to change one user's
+  access to one repo was `repo access --users u1,u2,...`, which REPLACES
+  the repo's entire Users list — you had to already know and retype
+  everyone currently on it. Added collection.GrantRepoUser(repoName,
+  username, client) and RevokeRepoUser(repoName, username, client) in
+  mutation.go, following the exact same validate → mutate-in-memory →
+  SyncCollaborators → rollback-on-failure → Save pattern as
+  SetRepoAccess/AddToGroup/etc., plus `gitcollect repo grant <collection>
+  <repo> <user>` / `repo revoke <collection> <repo> <user>` in cmd/repo.go
+  (owner-only, audited as "repo.user.grant"/"repo.user.revoke", same as
+  every other mutation command).
+  THE FOOTGUN THIS GUARDS AGAINST: CanAccessRepo treats a repo with
+  Groups=[] AND Users=[] as "open to all members" — that's the whole
+  point of the empty-list convention in the spec's data model. That means:
+    - GrantRepoUser on a repo that's currently open (Groups=[] Users=[])
+      must refuse (ErrRepoOpen), not append to Users — appending would
+      flip Users from empty to non-empty, which makes CanAccessRepo
+      switch from "open to everyone" to "only check Groups/Users", and
+      since Groups is still empty, that instantly narrows access down to
+      JUST the one user being "granted," silently revoking every other
+      member. The fix is structural, not a warning: GrantRepoUser checks
+      `len(repo.Groups) == 0 && len(repo.Users) == 0` before ever
+      touching the list.
+    - RevokeRepoUser has the mirror-image bug: removing the last
+      remaining individual user from a repo whose Groups is also empty
+      would leave Groups=[] Users=[] — which CanAccessRepo reads as
+      "open to all members" again. So revoking the last person who had
+      restricted access would silently OPEN the repo to everyone.
+      RevokeRepoUser computes what Users would become *before* committing
+      and refuses (ErrRepoWouldOpen) if that result would be empty while
+      Groups is also empty.
+  Both are no-ops (not errors) when the user already has/lacks the
+  individual grant — checked once in cmd/repo.go (mirroring member.go's
+  "Already a member" pattern) and again, defensively, inside the
+  mutation methods themselves.
+  ALSO FOUND WHILE WRITING TESTS FOR THIS: internal/collection/
+  collection_test.go's mockClient.AddCollaborator/RemoveCollaborator/
+  CheckCollaborator wrote to mockClient.collaborators (a plain
+  map[string]bool) with no synchronization. SyncCollaborators always
+  calls these concurrently (up to maxConcurrentSyncs=4 goroutines), and
+  once a test exercised more than one job at a time, Go's runtime threw
+  "fatal error: concurrent map writes" — this is the Go runtime's
+  always-on concurrent-map-write panic, not the optional `-race`
+  detector, so it would have bitten any test (or even a `-race`-less CI
+  run) the moment two jobs raced, not just under `go test -race`. Fixed
+  by adding a sync.Mutex to mockClient and locking around all three
+  methods' map access. Any future mock api.Client written for this
+  package must assume SyncCollaborators will call it from multiple
+  goroutines and lock accordingly — don't repeat this with a "simpler"
+  unsynchronized mock later.
 ```

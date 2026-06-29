@@ -9,7 +9,9 @@
       "Bash(go vet *)",
       "Bash(go test *)",
       "Bash(go run *)",
-      "Bash(./bin/gitcollect.exe --help)"
+      "Bash(./bin/gitcollect.exe --help)",
+      "PowerShell(go build -ldflags=\"-s -w -X main.version=dev\" -o bin/gitcollect.exe .)",
+      "PowerShell(go test ./... -cover)"
     ]
   }
 }
