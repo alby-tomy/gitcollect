@@ -21,6 +21,15 @@ type Client interface {
 	AddCollaborator(owner, repo, username, permission string) error
 	RemoveCollaborator(owner, repo, username string) error
 	CheckCollaborator(owner, repo, username string) (bool, error)
+	// GetPendingInvite returns true if username has been granted access to
+	// owner/repo but hasn't accepted it yet. GitHub creates a pending
+	// "repository invitation" whenever AddCollaborator grants someone who
+	// isn't already org-level entitled — they show up as NOT a confirmed
+	// collaborator (CheckCollaborator false) until they accept it, which
+	// otherwise looks identical to never having been granted at all.
+	// GitLab has no equivalent state — project membership added via its
+	// API takes effect immediately — so gitlabClient always returns false.
+	GetPendingInvite(owner, repo, username string) (bool, error)
 	// ListCommits returns the most recent commits on branch, newest first,
 	// capped at limit. Used by "gitcollect activity" to report code changes
 	// — distinct from the collaborator methods above, which gitcollect's
@@ -28,6 +37,11 @@ type Client interface {
 	ListCommits(owner, repo, branch string, limit int) ([]CommitInfo, error)
 	Host() string
 }
+
+// GitHubNotificationsURL is where a user accepts a pending GitHub
+// collaborator invitation. There's no API endpoint to accept one
+// programmatically — it's always a manual, web-based step.
+const GitHubNotificationsURL = "https://github.com/notifications"
 
 // RepoInfo is the subset of platform repository metadata gitcollect needs.
 type RepoInfo struct {

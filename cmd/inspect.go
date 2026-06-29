@@ -92,14 +92,25 @@ func inspectByUser(col *collection.Collection, username string) error {
 	fmt.Println()
 
 	rows := make([][]string, 0, len(details))
+	var fixes [][]string
 	for _, d := range details {
 		mark := "✗ no"
 		if d.CanAccess {
 			mark = "✓ yes"
+		} else if d.FixCmd != "" {
+			fixes = append(fixes, []string{d.RepoName, d.FixCmd})
 		}
 		rows = append(rows, []string{d.RepoName, mark, d.Reason})
 	}
 	output.Table([]string{"REPO", "ACCESS", "REASON"}, rows)
+
+	if len(fixes) > 0 {
+		fmt.Println()
+		fmt.Println("To fix:")
+		for _, f := range fixes {
+			fmt.Printf("  %-20s %s\n", f[0], f[1])
+		}
+	}
 	return nil
 }
 
@@ -134,14 +145,25 @@ func inspectByRepo(col *collection.Collection, repoName string) error {
 	fmt.Println()
 
 	rows := make([][]string, 0, len(details))
+	var fixes [][]string
 	for _, d := range details {
 		mark := "✗ no"
 		if d.CanAccess {
 			mark = "✓ yes"
+		} else if d.FixCmd != "" {
+			fixes = append(fixes, []string{d.Username, d.FixCmd})
 		}
 		rows = append(rows, []string{d.Username, mark, d.Reason})
 	}
 	output.Table([]string{"MEMBER", "ACCESS", "REASON"}, rows)
+
+	if len(fixes) > 0 {
+		fmt.Println()
+		fmt.Println("To fix:")
+		for _, f := range fixes {
+			fmt.Printf("  %-20s %s\n", f[0], f[1])
+		}
+	}
 	return nil
 }
 

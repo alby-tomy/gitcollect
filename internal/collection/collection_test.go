@@ -69,6 +69,9 @@ func (m *mockClient) CheckCollaborator(owner, repo, username string) (bool, erro
 func (m *mockClient) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
 	return nil, nil
 }
+func (m *mockClient) GetPendingInvite(owner, repo, username string) (bool, error) {
+	return false, nil
+}
 func (m *mockClient) Host() string { return m.host }
 
 func newTestCollection(t *testing.T, visibility Visibility) *Collection {
@@ -540,11 +543,11 @@ func TestWhyCanAccess(t *testing.T) {
 	cases := []struct {
 		username, repo, want string
 	}{
-		{"owner", "open", "owner"},
+		{"owner", "open", "owner — full access"},
 		{"alice", "open", "open to all members"},
 		{"alice", "restricted", "member of group red-team"},
 		{"bob", "restricted", "individually granted"},
-		{"charlie", "restricted", "no access — group red-team required"},
+		{"charlie", "restricted", "no access — group red-team or individual grant required"},
 		{"stranger", "open", "no access — not a member"},
 		{"alice", "no-such-repo", "no access — repo not in collection"},
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/audit"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 	"github.com/alby-tomy/gitcollect/internal/output"
@@ -105,14 +106,18 @@ func runMemberAdd(cmd *cobra.Command, args []string) error {
 	})
 
 	output.Success("Added %s to %s", username, name)
-	printAccessBreakdown(col, username)
+	printAccessBreakdown(col, username, client)
 	return nil
 }
 
 // printAccessBreakdown reports, for username, which of col's repos they can
 // now reach and which they were skipped for (with why), so member add gives
 // the caller an immediate, actionable picture of the new member's access.
-func printAccessBreakdown(col *collection.Collection, username string) {
+// It also checks whether any newly granted repo left username with a
+// pending (unaccepted) collaborator invite — see api.Client.GetPendingInvite
+// — and if so, warns that they won't actually be able to clone until they
+// accept it.
+func printAccessBreakdown(col *collection.Collection, username string, client api.Client) {
 	if len(col.Repos) == 0 {
 		return
 	}
@@ -138,6 +143,24 @@ func printAccessBreakdown(col *collection.Collection, username string) {
 	if len(skipped) > 0 {
 		output.Suggestion(fmt.Sprintf("gitcollect group add %s <group> %s", col.Name, username))
 	}
+
+	if hasPendingInvite(col, username, granted, client) {
+		output.InviteWarning(username, col.Owner, api.GitHubNotificationsURL, "")
+	}
+}
+
+// hasPendingInvite reports whether username has an unaccepted invite on
+// any repo in granted. Stops at the first one found — in practice GitHub
+// creates these for every repo in the same AddCollaborator burst, so one
+// hit is enough to tell the caller they need to accept an invite.
+func hasPendingInvite(col *collection.Collection, username string, granted []string, client api.Client) bool {
+	for _, repoName := range granted {
+		has, err := client.GetPendingInvite(col.Owner, repoName, username)
+		if err == nil && has {
+			return true
+		}
+	}
+	return false
 }
 
 func runMemberRemove(cmd *cobra.Command, args []string) error {

@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"strconv"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,29 +27,40 @@ var auditCmd = &cobra.Command{
 
 func init() {
 	auditCmd.Flags().StringVar(&auditUser, "user", "", "filter the log to entries involving this user")
-	auditCmd.Flags().StringVar(&auditSince, "since", "", "filter the log to entries within this duration (e.g. 7d, 30d, 90d, 24h)")
+	auditCmd.Flags().StringVar(&auditSince, "since", "", "filter the log to entries within this duration: 1h, 24h, 7d, 30d, or 90d")
 	auditCmd.Flags().BoolVar(&auditJSON, "json", false, "machine-readable output")
 	rootCmd.AddCommand(auditCmd)
 }
 
-// parseSince accepts gitcollect's documented day-based shorthand (7d, 30d,
-// 90d) in addition to anything time.ParseDuration understands (24h, 30m).
+// sinceDurations is the exact, closed set of values --since accepts on
+// every command that uses parseSince (audit, activity) — no other
+// duration string is valid, not even otherwise-well-formed ones like 30m
+// or 2h30m. Deliberately strict rather than accepting anything
+// time.ParseDuration understands: a fixed set of values is easier to
+// document, tab-complete, and never silently misparse a typo'd flag into
+// a different duration than intended.
+var sinceDurations = map[string]time.Duration{
+	"1h":  time.Hour,
+	"24h": 24 * time.Hour,
+	"7d":  7 * 24 * time.Hour,
+	"30d": 30 * 24 * time.Hour,
+	"90d": 90 * 24 * time.Hour,
+}
+
+// parseSince accepts only the values in sinceDurations.
 func parseSince(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, nil
 	}
-	if strings.HasSuffix(s, "d") {
-		days, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
-		if err != nil {
-			return 0, fmt.Errorf("invalid --since %q: %w", s, err)
-		}
-		return time.Duration(days) * 24 * time.Hour, nil
+	if d, ok := sinceDurations[s]; ok {
+		return d, nil
 	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return 0, fmt.Errorf("invalid --since %q: %w", s, err)
+	valid := make([]string, 0, len(sinceDurations))
+	for k := range sinceDurations {
+		valid = append(valid, k)
 	}
-	return d, nil
+	sort.Strings(valid)
+	return 0, fmt.Errorf("invalid --since %q: must be one of %s", s, strings.Join(valid, ", "))
 }
 
 func runAudit(cmd *cobra.Command, args []string) error {

@@ -481,6 +481,52 @@ func TestGitHubListCommits_Error(t *testing.T) {
 	}
 }
 
+func TestGitHubGetPendingInvite(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/acme/widgets/invitations" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"invitee": map[string]string{"login": "bob"}},
+		})
+	})
+
+	has, err := client.GetPendingInvite("acme", "widgets", "bob")
+	if err != nil {
+		t.Fatalf("GetPendingInvite: %v", err)
+	}
+	if !has {
+		t.Error("expected bob to have a pending invite")
+	}
+
+	has, err = client.GetPendingInvite("acme", "widgets", "carol")
+	if err != nil {
+		t.Fatalf("GetPendingInvite: %v", err)
+	}
+	if has {
+		t.Error("expected carol (not in the invitations list) to have no pending invite")
+	}
+}
+
+func TestGitHubGetPendingInvite_Error(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	if _, err := client.GetPendingInvite("acme", "ghost", "bob"); err != ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGitLabGetPendingInvite_AlwaysFalse(t *testing.T) {
+	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("GetPendingInvite should never make a request on GitLab")
+	})
+	has, err := client.GetPendingInvite("acme", "widgets", "bob")
+	if err != nil || has {
+		t.Fatalf("expected (false, nil), got (%v, %v)", has, err)
+	}
+}
+
 func TestGitLabGetRepo_DefaultBranch(t *testing.T) {
 	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{

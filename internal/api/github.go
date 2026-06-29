@@ -218,3 +218,34 @@ func (c *githubClient) CheckCollaborator(owner, repo, username string) (bool, er
 		return false, classifyStatus(resp.StatusCode)
 	}
 }
+
+// GetPendingInvite checks GitHub's list of not-yet-accepted repository
+// invitations for owner/repo and reports whether username is among them.
+func (c *githubClient) GetPendingInvite(owner, repo, username string) (bool, error) {
+	path := fmt.Sprintf("/repos/%s/%s/invitations", url.PathEscape(owner), url.PathEscape(repo))
+	resp, err := c.do(http.MethodGet, path, nil)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, classifyStatus(resp.StatusCode)
+	}
+
+	var out []struct {
+		Invitee struct {
+			Login string `json:"login"`
+		} `json:"invitee"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return false, fmt.Errorf("could not parse response: %w", err)
+	}
+
+	for _, inv := range out {
+		if inv.Invitee.Login == username {
+			return true, nil
+		}
+	}
+	return false, nil
+}

@@ -34,11 +34,23 @@ var cloneCmd = &cobra.Command{
 }
 
 func init() {
-	cloneCmd.Flags().StringSliceVar(&clonePick, "pick", nil, "clone only these repos (comma-separated)")
+	cloneCmd.Flags().StringArrayVar(&clonePick, "pick", nil, `clone only these repos: space-separated within one value (--pick "r1 r2"), and/or --pick repeated`)
 	cloneCmd.Flags().BoolVar(&cloneDryRun, "dry-run", false, "preview what would be cloned without doing it")
 	cloneCmd.Flags().IntVar(&cloneConcurrency, "concurrency", defaultCloneConcurrency, "max repos to clone in parallel")
 	cloneCmd.Flags().StringVar(&cloneDest, "dest", ".", "directory to clone repos into")
 	rootCmd.AddCommand(cloneCmd)
+}
+
+// splitPick flattens --pick's raw values into individual repo names: each
+// value may itself be a whitespace-separated list (--pick "r1 r2"), and
+// the flag may also be repeated (--pick r1 --pick r2). Either form, or a
+// mix of both, works.
+func splitPick(raw []string) []string {
+	var picks []string
+	for _, v := range raw {
+		picks = append(picks, strings.Fields(v)...)
+	}
+	return picks
 }
 
 func runClone(cmd *cobra.Command, args []string) error {
@@ -61,7 +73,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	targets, skipped, err := selectCloneTargets(col, accessible, clonePick)
+	targets, skipped, err := selectCloneTargets(col, accessible, splitPick(clonePick))
 	if err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
@@ -103,12 +115,34 @@ func runClone(cmd *cobra.Command, args []string) error {
 	if len(skipped) > 0 {
 		fmt.Printf("  %d repo(s) skipped (no access): %s\n", len(skipped), strings.Join(skipped, ", "))
 		output.Suggestion(fmt.Sprintf("gitcollect inspect %s --user %s", name, caller))
+
+		// A repo can be "skipped" here for two very different reasons: the
+		// caller genuinely isn't entitled to it (FilterAccessible's local
+		// rule check), or they ARE entitled but GitHub still has them as a
+		// pending, unaccepted invite rather than a confirmed collaborator
+		// (CheckCollaborator reports false either way). Distinguish the
+		// second case so they're not left thinking "no access" forever.
+		if repo := firstPendingInvite(col, caller, skipped, client); repo != "" {
+			output.InviteWarning(caller, col.Owner, api.GitHubNotificationsURL, fmt.Sprintf("gitcollect clone %s", name))
+		}
 	}
 
 	if len(failed) > 0 {
 		return fmt.Errorf("clone: %d repo(s) failed", len(failed))
 	}
 	return nil
+}
+
+// firstPendingInvite returns the first repo in skipped where caller has an
+// unaccepted GitHub collaborator invite, or "" if none do.
+func firstPendingInvite(col *collection.Collection, caller string, skipped []string, client api.Client) string {
+	for _, repoName := range skipped {
+		has, err := client.GetPendingInvite(col.Owner, repoName, caller)
+		if err == nil && has {
+			return repoName
+		}
+	}
+	return ""
 }
 
 // printAccessSummary prints the "access verified" header line shared by

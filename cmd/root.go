@@ -159,11 +159,86 @@ func loadCollection(name string) (*collection.Collection, error) {
 	col, err := collection.Load(name)
 	if err != nil {
 		if errors.Is(err, collection.ErrNotFound) {
-			return nil, fmt.Errorf("collection %q not found. Run: gitcollect list", name)
+			msg := fmt.Sprintf("collection %q not found. Run: gitcollect list", name)
+			if suggestion := suggestCollectionName(name); suggestion != "" {
+				msg += fmt.Sprintf("\nDid you mean %q?", suggestion)
+			}
+			return nil, errors.New(msg)
 		}
 		return nil, err
 	}
 	return col, nil
+}
+
+// suggestCollectionName returns the closest existing local collection name
+// to name (Levenshtein distance <= 2), or "" if none is close enough or
+// the lookup itself fails. Only ever compared against your OWN local
+// ~/.gitcollect/collections/*.yaml filenames — never against anything you
+// don't already have a local file for — so this can't be used to probe
+// for the existence of a private collection you're not a member of.
+func suggestCollectionName(name string) string {
+	names, err := collection.List()
+	if err != nil {
+		return ""
+	}
+
+	best, bestDist := "", 3 // distance must be <= 2 to suggest anything
+	for _, candidate := range names {
+		if candidate == name {
+			continue
+		}
+		if d := levenshtein(name, candidate); d < bestDist {
+			best, bestDist = candidate, d
+		}
+	}
+	return best
+}
+
+// levenshtein returns the edit distance between a and b (insertions,
+// deletions, substitutions, each cost 1) via the standard O(len(a)*len(b))
+// dynamic-programming table.
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	if len(ra) == 0 {
+		return len(rb)
+	}
+	if len(rb) == 0 {
+		return len(ra)
+	}
+
+	prev := make([]int, len(rb)+1)
+	curr := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+
+	for i := 1; i <= len(ra); i++ {
+		curr[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			curr[j] = min3(
+				prev[j]+1,      // deletion
+				curr[j-1]+1,    // insertion
+				prev[j-1]+cost, // substitution
+			)
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(rb)]
+}
+
+func min3(a, b, c int) int {
+	m := a
+	if b < m {
+		m = b
+	}
+	if c < m {
+		m = c
+	}
+	return m
 }
 
 // loadForRead loads name for a read/discovery command (show, inspect,

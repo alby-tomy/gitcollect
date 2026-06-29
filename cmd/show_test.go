@@ -15,7 +15,7 @@ func TestBuildShowRepoRows(t *testing.T) {
 	}
 	details := []access.RepoAccessDetail{
 		{RepoName: "open-repo", CanAccess: true, Reason: "open to all members"},
-		{RepoName: "group-repo", CanAccess: false, Reason: "no access — group red-team required"},
+		{RepoName: "group-repo", CanAccess: false, Reason: "no access — group red-team required", FixCmd: "gitcollect group add acme red-team alice"},
 		{RepoName: "user-repo", CanAccess: true, Reason: "individually granted"},
 	}
 
@@ -24,8 +24,11 @@ func TestBuildShowRepoRows(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
-	if len(denied) != 1 || denied[0] != "group-repo" {
+	if len(denied) != 1 || denied[0].repo != "group-repo" {
 		t.Fatalf("expected only group-repo to be denied, got %v", denied)
+	}
+	if denied[0].fixCmd != "gitcollect group add acme red-team alice" {
+		t.Errorf("expected denied entry to carry the exact fix command, got %q", denied[0].fixCmd)
 	}
 
 	if rows[0][2] != "✓ yes" {
@@ -75,7 +78,40 @@ func TestToShowOutput_OwnerNotListedAsMember(t *testing.T) {
 	if !out.Repos[0].YouCanAccess {
 		t.Errorf("expected the owner to access their own collection's repo even though not a listed member")
 	}
-	if out.Repos[0].YouReason != "owner" {
-		t.Errorf("expected reason %q, got %q", "owner", out.Repos[0].YouReason)
+	if out.Repos[0].YouReason != "owner — full access" {
+		t.Errorf("expected reason %q, got %q", "owner — full access", out.Repos[0].YouReason)
+	}
+	if out.Repos[0].YouFixCmd != "" {
+		t.Errorf("expected no fix command for someone who already has access, got %q", out.Repos[0].YouFixCmd)
+	}
+}
+
+func TestBuildOwnerShowRepoRows(t *testing.T) {
+	col, err := collection.New("acme", "github.com", "owner", collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice", "bob", "charlie"}
+	col.Groups = map[string][]string{"red-team": {"alice", "bob"}}
+	col.Repos = []collection.RepoAccess{
+		{Name: "open-repo", Groups: []string{}, Users: []string{}},
+		{Name: "restricted", Groups: []string{"red-team"}},
+		{Name: "nobody-yet", Groups: []string{"empty-group"}},
+	}
+	col.Groups["empty-group"] = []string{}
+
+	rows := buildOwnerShowRepoRows(col)
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
+	}
+
+	if rows[0][2] != "alice, bob, charlie (3)" {
+		t.Errorf("expected open-repo to list all 3 members, got %q", rows[0][2])
+	}
+	if rows[1][2] != "alice, bob (2)" {
+		t.Errorf("expected restricted to list red-team's 2 members, got %q", rows[1][2])
+	}
+	if rows[2][2] != "—" {
+		t.Errorf("expected nobody-yet to show the empty placeholder, got %q", rows[2][2])
 	}
 }

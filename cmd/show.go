@@ -34,6 +34,7 @@ type showOutput struct {
 	Members     []string            `json:"members"`
 	Groups      map[string][]string `json:"groups"`
 	Repos       []showRepo          `json:"repos"`
+	StaleDays   int                 `json:"stale_days,omitempty"`
 }
 
 type showRepo struct {
@@ -42,6 +43,8 @@ type showRepo struct {
 	Users        []string `json:"users"`
 	YouCanAccess bool     `json:"you_can_access"`
 	YouReason    string   `json:"you_reason"`
+	YouFixCmd    string   `json:"you_fix_cmd,omitempty"`
+	WhoHasAccess []string `json:"who_has_access"`
 }
 
 func runShow(cmd *cobra.Command, args []string) error {
@@ -56,12 +59,22 @@ func runShow(cmd *cobra.Command, args []string) error {
 		return output.JSON(toShowOutput(col, caller))
 	}
 
+	if days := staleDays(col.UpdatedAt); days > 0 {
+		output.StaleWarning(col.Name, days)
+	}
+
+	isOwner := caller != "" && caller == col.Owner
+
 	fmt.Printf("Collection:  %s\n", col.Name)
 	if col.Description != "" {
 		fmt.Printf("Description: %s\n", col.Description)
 	}
 	fmt.Printf("Host:        %s\n", col.Host)
-	fmt.Printf("Owner:       %s\n", col.Owner)
+	if isOwner {
+		fmt.Printf("Owner:       %s (you)\n", col.Owner)
+	} else {
+		fmt.Printf("Owner:       %s\n", col.Owner)
+	}
 	fmt.Printf("Visibility:  %s\n", col.Visibility)
 	fmt.Printf("Members:     %d\n", len(col.Members))
 	fmt.Printf("Groups:      %d\n", len(col.Groups))
@@ -85,48 +98,91 @@ func runShow(cmd *cobra.Command, args []string) error {
 		output.Table([]string{"GROUP", "MEMBERS"}, rows)
 	}
 
-	if len(col.Repos) > 0 {
-		details := access.UserAccessMap(col, caller)
-		rows, denied := buildShowRepoRows(col.Repos, details)
-		fmt.Println()
-		output.Table([]string{"REPO", "ACCESS RULE", "YOU"}, rows)
+	if len(col.Repos) == 0 {
+		return nil
+	}
 
-		if len(denied) > 0 {
-			fmt.Println()
-			fmt.Printf("  You can't access %d repo(s): %s\n", len(denied), strings.Join(denied, ", "))
-			output.Suggestion(fmt.Sprintf("gitcollect inspect %s --user %s", name, caller))
+	fmt.Println()
+	if isOwner {
+		// Owners always pass CanAccessRepo, so a YOU column would just be
+		// "✓ yes" on every row — useless. WHO HAS ACCESS is the
+		// information an owner actually wants: who can reach each repo.
+		output.Table([]string{"REPO", "ACCESS RULE", "WHO HAS ACCESS"}, buildOwnerShowRepoRows(col))
+		return nil
+	}
+
+	details := access.UserAccessMap(col, caller)
+	rows, denied := buildShowRepoRows(col.Repos, details)
+	output.Table([]string{"REPO", "ACCESS RULE", "YOU"}, rows)
+
+	if len(denied) > 0 {
+		fmt.Println()
+		fmt.Printf("  You can't access %d repo(s):\n", len(denied))
+		for _, d := range denied {
+			fmt.Printf("    %-20s (%s) → %s\n", d.repo, d.reason, d.fixCmd)
 		}
+		output.Suggestion(fmt.Sprintf("gitcollect inspect %s --user %s", name, caller))
 	}
 
 	return nil
 }
 
+func describeAccessRule(r collection.RepoAccess) string {
+	switch {
+	case len(r.Groups) > 0 && len(r.Users) > 0:
+		return fmt.Sprintf("groups: %v, users: %v", r.Groups, r.Users)
+	case len(r.Groups) > 0:
+		return fmt.Sprintf("groups: %v", r.Groups)
+	case len(r.Users) > 0:
+		return fmt.Sprintf("users: %v", r.Users)
+	default:
+		return "open to all members"
+	}
+}
+
+type deniedRepo struct {
+	repo   string
+	reason string
+	fixCmd string
+}
+
 // buildShowRepoRows pairs repos (in collection order) with the calling
 // user's per-repo access.RepoAccessDetail (same order, same length — both
 // come from iterating the same col.Repos slice) into REPO/ACCESS RULE/YOU
-// table rows, and separately collects the names of repos the caller is
-// denied, for the "you can't access N repo(s)" footer.
-func buildShowRepoRows(repos []collection.RepoAccess, details []access.RepoAccessDetail) (rows [][]string, denied []string) {
+// table rows, and separately collects the repos the caller is denied
+// (with reason and exact fix command) for the footer below the table.
+func buildShowRepoRows(repos []collection.RepoAccess, details []access.RepoAccessDetail) (rows [][]string, denied []deniedRepo) {
 	rows = make([][]string, 0, len(repos))
 	for i, r := range repos {
-		rule := "open to all members"
-		switch {
-		case len(r.Groups) > 0 && len(r.Users) > 0:
-			rule = fmt.Sprintf("groups: %v, users: %v", r.Groups, r.Users)
-		case len(r.Groups) > 0:
-			rule = fmt.Sprintf("groups: %v", r.Groups)
-		case len(r.Users) > 0:
-			rule = fmt.Sprintf("users: %v", r.Users)
-		}
-
 		you := "✓ yes"
 		if i < len(details) && !details[i].CanAccess {
 			you = "✗ no — " + details[i].Reason
-			denied = append(denied, r.Name)
+			denied = append(denied, deniedRepo{repo: r.Name, reason: details[i].Reason, fixCmd: details[i].FixCmd})
 		}
-		rows = append(rows, []string{r.Name, rule, you})
+		rows = append(rows, []string{r.Name, describeAccessRule(r), you})
 	}
 	return rows, denied
+}
+
+// buildOwnerShowRepoRows builds the owner-only REPO/ACCESS RULE/WHO HAS
+// ACCESS rows: for each repo, every member who can reach it, joined with a
+// trailing count.
+func buildOwnerShowRepoRows(col *collection.Collection) [][]string {
+	rows := make([][]string, 0, len(col.Repos))
+	for _, r := range col.Repos {
+		var who []string
+		for _, m := range access.RepoAccessMap(col, r.Name) {
+			if m.CanAccess {
+				who = append(who, m.Username)
+			}
+		}
+		whoCol := "—"
+		if len(who) > 0 {
+			whoCol = fmt.Sprintf("%s (%d)", strings.Join(who, ", "), len(who))
+		}
+		rows = append(rows, []string{r.Name, describeAccessRule(r), whoCol})
+	}
+	return rows
 }
 
 func toShowOutput(col *collection.Collection, caller string) showOutput {
@@ -138,6 +194,12 @@ func toShowOutput(col *collection.Collection, caller string) showOutput {
 		if i < len(details) {
 			repo.YouCanAccess = details[i].CanAccess
 			repo.YouReason = details[i].Reason
+			repo.YouFixCmd = details[i].FixCmd
+		}
+		for _, m := range access.RepoAccessMap(col, r.Name) {
+			if m.CanAccess {
+				repo.WhoHasAccess = append(repo.WhoHasAccess, m.Username)
+			}
 		}
 		repos = append(repos, repo)
 	}
@@ -150,5 +212,6 @@ func toShowOutput(col *collection.Collection, caller string) showOutput {
 		Members:     col.Members,
 		Groups:      col.Groups,
 		Repos:       repos,
+		StaleDays:   staleDays(col.UpdatedAt),
 	}
 }

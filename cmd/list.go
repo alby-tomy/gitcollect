@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -9,6 +10,21 @@ import (
 	"github.com/alby-tomy/gitcollect/internal/config"
 	"github.com/alby-tomy/gitcollect/internal/output"
 )
+
+// staleAfter is how long since a collection's UpdatedAt before list/show
+// warn that the local manifest might no longer reflect the owner's latest
+// changes. Informational only — never blocks anything.
+const staleAfter = 30 * 24 * time.Hour
+
+// staleDays returns the whole number of days since updatedAt, or 0 if
+// that's under staleAfter (i.e. not stale).
+func staleDays(updatedAt time.Time) int {
+	age := time.Since(updatedAt)
+	if age < staleAfter {
+		return 0
+	}
+	return int(age.Hours() / 24)
+}
 
 var (
 	listPrivate bool
@@ -43,6 +59,7 @@ type listRow struct {
 	Role       string `json:"role"`
 	Members    int    `json:"members"`
 	Repos      int    `json:"repos"`
+	StaleDays  int    `json:"stale_days,omitempty"`
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -95,6 +112,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			Role:       role,
 			Members:    len(col.Members),
 			Repos:      len(col.Repos),
+			StaleDays:  staleDays(col.UpdatedAt),
 		})
 	}
 
@@ -107,5 +125,11 @@ func runList(cmd *cobra.Command, args []string) error {
 		tableRows = append(tableRows, []string{r.Name, r.Visibility, r.Role, fmt.Sprintf("%d", r.Members), fmt.Sprintf("%d", r.Repos)})
 	}
 	output.Table([]string{"NAME", "VISIBILITY", "ROLE", "MEMBERS", "REPOS"}, tableRows)
+
+	for _, r := range rows {
+		if r.StaleDays > 0 {
+			output.StaleWarning(r.Name, r.StaleDays)
+		}
+	}
 	return nil
 }

@@ -11,6 +11,8 @@ import (
 	"github.com/alby-tomy/gitcollect/internal/output"
 )
 
+var whoamiJSON bool
+
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami",
 	Short: "Show the authenticated user for each host you've run gitcollect auth on",
@@ -19,7 +21,14 @@ var whoamiCmd = &cobra.Command{
 }
 
 func init() {
+	whoamiCmd.Flags().BoolVar(&whoamiJSON, "json", false, "machine-readable output")
 	rootCmd.AddCommand(whoamiCmd)
+}
+
+type whoamiEntry struct {
+	Host  string `json:"host"`
+	User  string `json:"user,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 func runWhoami(cmd *cobra.Command, args []string) error {
@@ -31,7 +40,7 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not authenticated. Run: gitcollect auth")
 	}
 
-	rows := make([][]string, 0, len(hosts))
+	entries := make([]whoamiEntry, 0, len(hosts))
 	anyRejected := false
 	for _, host := range hosts {
 		token, err := config.LoadToken(host)
@@ -45,12 +54,24 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 			if errors.Is(err, api.ErrUnauthorized) {
 				anyRejected = true
 			}
-			rows = append(rows, []string{host, fmt.Sprintf("error: %v", err)})
+			entries = append(entries, whoamiEntry{Host: host, Error: err.Error()})
 			continue
 		}
-		rows = append(rows, []string{host, username})
+		entries = append(entries, whoamiEntry{Host: host, User: username})
 	}
 
+	if whoamiJSON {
+		return output.JSON(entries)
+	}
+
+	rows := make([][]string, 0, len(entries))
+	for _, e := range entries {
+		user := e.User
+		if e.Error != "" {
+			user = "error: " + e.Error
+		}
+		rows = append(rows, []string{e.Host, user})
+	}
 	output.Table([]string{"HOST", "USER"}, rows)
 	if anyRejected {
 		output.Suggestion("gitcollect auth  # for any host shown above with a rejected token")

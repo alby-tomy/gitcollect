@@ -148,3 +148,27 @@ func readLine() string {
 func Suggestion(cmd string) {
 	dimColor.Fprintln(os.Stderr, "Run: "+cmd)
 }
+
+// StaleWarning warns that collectionName's local manifest hasn't been
+// updated in daysSince days, so it may no longer reflect the owner's
+// latest changes — informational only, never blocks the command.
+func StaleWarning(collectionName string, daysSince int) {
+	Warn("%q was last updated %d days ago.", collectionName, daysSince)
+	dimColor.Fprintln(os.Stderr, "  If you are not the owner, ask them for the latest collection file.")
+}
+
+// InviteWarning explains a pending GitHub collaborator invite: username
+// has been granted access on the manifest's side, but GitHub itself won't
+// let them collaborate until they accept the emailed invite at notifURL.
+// If retryCmd is non-empty, a "Then retry: <retryCmd>" line is appended —
+// used when this is printed in response to a failed clone/pull/status,
+// where there's a concrete next command to re-run; omitted for the
+// informational notice printed right after a successful member/repo
+// grant, where there's nothing to retry yet.
+func InviteWarning(username, owner, notifURL, retryCmd string) {
+	Warn("%s has a pending collaborator invite from %s.", username, owner)
+	dimColor.Fprintln(os.Stderr, "  Accept it at: "+notifURL)
+	if retryCmd != "" {
+		dimColor.Fprintln(os.Stderr, "  Then retry: "+retryCmd)
+	}
+}

@@ -282,3 +282,10 @@ func (c *gitlabClient) CheckCollaborator(owner, repo, username string) (bool, er
 		return false, classifyStatus(resp.StatusCode)
 	}
 }
+
+// GetPendingInvite always returns false: GitLab project membership added
+// via the API takes effect immediately, with no GitHub-style "pending,
+// must be accepted" state to detect.
+func (c *gitlabClient) GetPendingInvite(owner, repo, username string) (bool, error) {
+	return false, nil
+}

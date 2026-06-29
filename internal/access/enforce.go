@@ -43,12 +43,14 @@ func CheckCollectionAccess(col *collection.Collection, caller string) error {
 // CheckRepoAccess verifies caller can reach repoName in col: they must be a
 // collection member (or owner), satisfy the local CanAccessRepo rule, and
 // actually hold collaborator access on the platform. All three must pass.
+// CanAccessRepo itself always passes the owner, so there's no separate
+// owner check needed here.
 func CheckRepoAccess(col *collection.Collection, repoName, caller string, client api.Client) error {
 	if err := CheckCollectionAccess(col, caller); err != nil {
 		return err
 	}
 
-	if caller != col.Owner && !col.CanAccessRepo(caller, repoName) {
+	if !col.CanAccessRepo(caller, repoName) {
 		return fmt.Errorf("%w: %s", ErrGroupDenied, col.WhyCanAccess(caller, repoName))
 	}
 
@@ -63,16 +65,15 @@ func CheckRepoAccess(col *collection.Collection, repoName, caller string, client
 }
 
 // FilterAccessible returns only the repos accessible to caller, combining
-// local rules with platform verification.
+// local rules with platform verification. col.AccessibleRepos already
+// returns every repo for the owner (CanAccessRepo always passes them), so
+// no separate owner branch is needed here.
 func FilterAccessible(col *collection.Collection, caller string, client api.Client) ([]collection.RepoAccess, error) {
 	if err := CheckCollectionAccess(col, caller); err != nil {
 		return nil, err
 	}
 
-	candidates := col.Repos
-	if caller != col.Owner {
-		candidates = col.AccessibleRepos(caller)
-	}
+	candidates := col.AccessibleRepos(caller)
 
 	accessible := make([]collection.RepoAccess, 0, len(candidates))
 	for _, repo := range candidates {
