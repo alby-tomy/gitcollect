@@ -85,6 +85,16 @@ func Execute() int {
 
 	output.Error("%s", err.Error())
 
+	// A stored token that the platform itself has since rejected (expired,
+	// revoked, scopes changed) surfaces here as api.ErrUnauthorized from
+	// deep inside whatever API call the command happened to make — there's
+	// no single call site to attach this hint to, so it's centralized here
+	// instead, the same way the no-token-at-all case is hinted at the point
+	// currentClient first discovers ErrNotAuthenticated.
+	if errors.Is(err, api.ErrUnauthorized) {
+		output.Suggestion("gitcollect auth")
+	}
+
 	var usageErr *UsageError
 	if errors.As(err, &usageErr) {
 		return ExitUsage

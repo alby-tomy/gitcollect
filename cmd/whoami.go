@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -31,6 +32,7 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 	}
 
 	rows := make([][]string, 0, len(hosts))
+	anyRejected := false
 	for _, host := range hosts {
 		token, err := config.LoadToken(host)
 		if err != nil {
@@ -40,6 +42,9 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 		client := api.NewClient(host, token)
 		username, err := client.GetAuthenticatedUser()
 		if err != nil {
+			if errors.Is(err, api.ErrUnauthorized) {
+				anyRejected = true
+			}
 			rows = append(rows, []string{host, fmt.Sprintf("error: %v", err)})
 			continue
 		}
@@ -47,5 +52,8 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 	}
 
 	output.Table([]string{"HOST", "USER"}, rows)
+	if anyRejected {
+		output.Suggestion("gitcollect auth  # for any host shown above with a rejected token")
+	}
 	return nil
 }

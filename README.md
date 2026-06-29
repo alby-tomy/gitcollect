@@ -9,7 +9,13 @@ gitcollect's local YAML manifest is a *declaration of intent*; the
 GitHub/GitLab platform is the *enforcement point*. Every access mutation
 drives the platform API to completion before the local YAML is written.
 
-See [PROMPT.md](PROMPT.md) for the full design spec.
+See [PROMPT.md](PROMPT.md) for the full design spec, or browse the
+**[full command reference and docs page](docs/index.html)** for every
+command and flag with descriptions.
+(It's a static HTML file — open `docs/index.html` directly in a browser,
+or enable GitHub Pages on this repo pointed at `/docs` to host it online;
+clicking the link on GitHub's own file viewer shows the raw source, not
+the rendered page.)
 
 ## Prerequisites
 
@@ -114,6 +120,23 @@ gitcollect show my-collection
 > `add`/`member add`/etc. all require the collection to already exist —
 > `gitcollect init <name>` first, or you'll get
 > `collection "..." not found. Run: gitcollect list`.
+
+`gitcollect auth` only needs to be run once per host. The token is saved
+to `~/.gitcollect/config` and reused by every later command — gitcollect
+never re-prompts just because time has passed. It only stops working once
+the token itself actually expires/is revoked on GitHub's or GitLab's side
+(whatever expiration you picked when generating it); the next command you
+run after that will fail with something like `invalid or missing token`
+plus a `Run: gitcollect auth` hint telling you to generate a fresh one.
+
+`gitcollect list` shows every collection you own or are a member of, public
+or private. Narrow it to one visibility with `--private` or `--public`:
+
+```bash
+gitcollect list             # everything you own or are a member of
+gitcollect list --private   # just the private ones
+gitcollect list --public    # just the public ones
+```
 
 All local state lives under `~/.gitcollect/` (`config` for tokens at file
 mode `0600`, `collections/*.yaml` for manifests, `audit/*.log` for the audit

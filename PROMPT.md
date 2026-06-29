@@ -49,8 +49,11 @@ gitcollect whoami                            Show authenticated user + token sco
 ── Collection lifecycle ────────────────────────────────────────────────────
 gitcollect init <name>                        Create collection (default: private)
 gitcollect delete <collection>               Delete collection + revoke all access
-gitcollect list                              List your collections (owned + member)
-gitcollect list --all                        Include private if owner
+gitcollect list                              List your collections (owned + member), any visibility
+gitcollect list --private                    Filter to private collections only
+gitcollect list --public                     Filter to public collections only
+  (REVISED session 4, on user request — original spec's "list --all" is gone;
+   see decisions log. "list" with no flags now shows everything --all used to.)
 gitcollect show <collection>                 Summary: repos, members, groups
 gitcollect visibility <collection> public|private   Change visibility
 
@@ -923,10 +926,113 @@ Completed:    collection.GrantRepoUser/RevokeRepoUser (mutation.go),
               methods that touch the map. If you add a new test mock
               for api.Client anywhere, assume SyncCollaborators will
               call it concurrently and lock accordingly from the start.
+              Also diagnosed and fixed the OTHER half of session 2's
+              "KNOWN EDGE CASE" note below: `gitcollect list` with no
+              flags printed a silent empty table for a private
+              collection you own but aren't a member of (the exact
+              scenario from this session's manual testing — init
+              defaults to private, and init does NOT auto-add the
+              owner as a member). That's cmd/list.go's real, documented
+              behavior (`--all: include private if owner`), not a bug,
+              but it gave zero feedback when it happened. Added a
+              hiddenPrivateOwned counter; if the final table is empty
+              AND collections were hidden specifically for that reason,
+              print "no collections shown — you own N private
+              collection(s) you haven't joined as a member" +
+              `Run: gitcollect list --all`. The session 2 note's OTHER
+              scenario (a public collection you're not a member of,
+              with no cached username for its host) is still open —
+              that's a different code path (the role-switch's default
+              case, not the owner+private+!listAll branch) and wasn't
+              touched.
 In progress:  (none)
 Blockers:     (none)
-Next session: Feature-complete + this one extension. Same startup
+Next session: Feature-complete + these two extensions. Same startup
               check as session 2's note above.
+
+Session 4 — 2026-06-29 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+User-requested redesign of cmd/list.go, replacing --all entirely
+(not additive — see decisions log for why and for the bug this caught
+in my own prior advice).
+Completed:    cmd/list.go: removed --all; `list` with no flags now
+              shows every collection you own or are a member of, any
+              visibility (this is what --all used to do). Added
+              --private/--public as visibility filters instead
+              (passing both = passing neither = no filter). Updated
+              PROMPT.md's command surface and README.md to match.
+              Reverted the hiddenPrivateOwned hint message added
+              session 3 — it's dead with the filter gone, nothing
+              is hidden by default anymore.
+In progress:  (none)
+Blockers:     (none)
+Next session: Feature-complete + all extensions through this session.
+              Same startup check as session 2's note. cmd/ has no
+              automated tests per the testing-requirements table —
+              changes to cmd/*.go are only verified by manual
+              smoke-testing (hand-built ~/.gitcollect fixtures) in
+              this transcript, not by a test suite. Consider whether
+              cmd/ deserves test coverage now that it's accumulated
+              real logic (list filtering, repo grant/revoke flows)
+              beyond thin command-line plumbing.
+
+Session 5 — 2026-06-29 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Progress-tracker housekeeping only — no code changes this session.
+Verified the file completion table below is accurate (every listed
+file already "done"; re-ran `go build ./... && go vet ./... && go
+test ./... -cover` to confirm) and closed out session 4's pointer
+with the exact "Next session should start with" phrasing the tracker's
+own protocol expects.
+Completed:    (none — documentation/verification only)
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: cmd/list_test.go (new file). cmd/ is
+the only package below the spec's 80% coverage bar — it's currently
+at 0% (see `go test ./... -cover`) despite cmd/list.go now having real
+branching logic (visibility filtering, the owner/member role switch)
+that's only been exercised by manual smoke tests in this transcript,
+not by an automated suite. Start with cmd/list.go's filtering logic
+since it's the most recently changed and least covered; cmd/repo.go's
+grant/revoke flows (session 3) are the next most logic-heavy and
+untested after that.
+
+Session 6 — 2026-06-29 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+User asked for confirmation that a saved auth token persists until it
+actually expires (it already did — gitcollect has never re-prompted
+based on elapsed time, only on the platform rejecting the token), then
+asked for a UX improvement: surface a "Run: gitcollect auth" hint
+whenever a stored token gets rejected (expired/revoked/scope-changed),
+matching the hint that already existed for the no-token-at-all case.
+Completed:    cmd/root.go's Execute() now checks errors.Is(err,
+              api.ErrUnauthorized) on any command's final returned
+              error and prints output.Suggestion("gitcollect auth") —
+              centralized here (not per-command) since ErrUnauthorized
+              can originate from any API call buried inside any
+              command. Verified against `gitcollect show` with a
+              token that real GitHub rejects (network call, not
+              mocked) — hint fires correctly.
+              cmd/whoami.go needed its OWN copy of this hint: it
+              deliberately does NOT return an error when one host's
+              token is rejected (it loops over every authenticated
+              host and reports each inline, "error: ..." in that
+              host's row, specifically so one bad host doesn't hide
+              the others' valid status) — so Execute()'s centralized
+              check never sees that error. Added an anyRejected bool
+              tracked across the loop; prints the same suggestion
+              once after the table if any row hit ErrUnauthorized.
+              Verified against real GitHub the same way.
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: cmd/list_test.go — unchanged from
+session 5's pointer; this session touched cmd/root.go and
+cmd/whoami.go but added no tests for either (cmd/ is still at 0%
+coverage). If picking up cmd/ test coverage as planned, fold in
+coverage for Execute()'s new ErrUnauthorized branch and whoami.go's
+anyRejected branch while there — both are easy to hit with a fake
+unauthenticated httptest.Server, same pattern as internal/api/
+api_test.go already uses.
 ```
 
 ---
@@ -944,12 +1050,12 @@ go.mod                                       done
 Makefile                                     done
 .goreleaser.yaml                             done
 
-cmd/root.go                                  done         grew loadForGit (see decisions log)
+cmd/root.go                                  done         +ErrUnauthorized hint in Execute(), session 6
 cmd/auth.go                                  done
-cmd/whoami.go                                done
+cmd/whoami.go                                done         +anyRejected hint, session 6
 cmd/init.go                                  done
 cmd/delete.go                                done
-cmd/list.go                                  done         see decisions log: public-collection edge case
+cmd/list.go                                  done         redesigned session 4 — see decisions log
 cmd/show.go                                  done
 cmd/visibility.go                            done
 cmd/add.go                                   done
@@ -1112,14 +1218,22 @@ sessions do not re-debate them.
   that call); cmd/root.go's currentUser() also refreshes this cache
   whenever any other command does end up calling GetAuthenticatedUser, so
   the cache only ever goes stale, never wrong-direction.
-- cmd/list.go semantics: a collection is "yours" if the cached username for
-  its Host equals col.Owner ("owner") or appears in col.Members ("member").
-  Public collections and any membership are shown by default; --all
-  additionally surfaces private collections you own but haven't added
-  yourself to as a member (the literal reading of "--all: include private
-  if owner"). Collections on a host you've never authenticated to (no
-  cached username) are skipped with a warning rather than erroring the
-  whole command — one bad/foreign manifest shouldn't break `list`.
+- cmd/list.go semantics (REVISED session 4 — this entry describes the
+  CURRENT behavior, not the original spec's): a collection is "yours" if
+  the cached username for its Host equals col.Owner ("owner") or appears
+  in col.Members ("member"); --all no longer exists, `list` with no flags
+  now shows every collection that's "yours" regardless of visibility.
+  --private/--public filter that set down to one visibility (passing both
+  is the same as passing neither). Collections on a host you've never
+  authenticated to (no cached username) are skipped with a warning rather
+  than erroring the whole command — one bad/foreign manifest shouldn't
+  break `list`. NOTE: the role switch checks `username == col.Owner`
+  BEFORE `col.IsMember(username)`, so being the owner always wins —
+  adding yourself as a member of your own collection does NOT change
+  role from "owner" to "member". This bit a piece of advice I gave the
+  user in session 3/4 before verifying it empirically; don't repeat that
+  mistake — check switch/case ordering before claiming a workaround
+  exists, especially for early-matching-wins constructs like this one.
 - Mutation save semantics: every mutator only calls c.Save() if
   SyncCollaborators/revokeAllAccess returned err == nil, restoring the
   pre-mutation in-memory state on failure. The platform may have partially
@@ -1173,19 +1287,18 @@ sessions do not re-debate them.
   (24h, 30m, etc.) via a small parseSince() that special-cases a trailing
   "d" before falling back to time.ParseDuration. The spec's own example
   values (7d, 30d, 90d) are not valid time.ParseDuration input on their own.
-- KNOWN EDGE CASE, not fixed this session — cmd/list.go: a public
-  collection you are NOT a member of (and don't own) is silently skipped by
-  `gitcollect list`, because the role-selection switch's default case
-  continues past it whenever the cached username for that host is "" or
-  doesn't match owner/member. list.go's own help text says "Public
-  collections ... are shown by default," which overclaims relative to what
-  the code does — in practice "list" only ever shows collections you own or
-  are an explicit member of, public or not. Inherited from session 1,
-  confirmed via manual testing this session (a public test collection
-  didn't appear in `list` without a cached username for its host), and left
-  alone since list.go was already marked "done" — reconciling the help
-  text vs. changing actual semantics is a product decision the next
-  session should make deliberately, not a drive-by fix.
+- STILL TRUE after the session 4 redesign (not a bug, just worth knowing):
+  a public collection you are NOT a member of (and don't own) is still
+  invisible to `gitcollect list` regardless of any flag — the role-switch's
+  default case always `continue`s past it. `list`/`list --private`/`list
+  --public` are about collections you BELONG to; there's no "browse every
+  public collection that exists" command, by design (gitcollect never
+  scans other users' manifests). The session-1-era help text used to
+  overclaim "Public collections ... are shown by default" in a way that
+  implied otherwise; the session 4 rewrite of Long no longer makes that
+  claim ("every collection you own or are a member of, public or
+  private"), so the docs/behavior mismatch from earlier sessions is
+  resolved even though the underlying limitation itself is unchanged.
 - Manual end-to-end smoke testing this session required pointing
   ~/.gitcollect at a temp dir. On a Windows dev box, Go's
   os.UserHomeDir() reads %USERPROFILE%, NOT $HOME — `export HOME=...` in

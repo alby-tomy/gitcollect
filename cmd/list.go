@@ -11,25 +11,27 @@ import (
 )
 
 var (
-	listAll  bool
-	listJSON bool
+	listPrivate bool
+	listPublic  bool
+	listJSON    bool
 )
 
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List your collections (owned + member)",
-	Long: `Lists collections you belong to, reading only local manifests under
-~/.gitcollect/collections — no network calls are made.
+	Long: `Lists every collection you own or are a member of, public or private,
+reading only local manifests under ~/.gitcollect/collections — no network
+calls are made.
 
-Public collections and any collection you're explicitly listed as a member
-of are shown by default. Pass --all to also include private collections
-you own but haven't added yourself to as a member.`,
+Pass --private or --public to narrow the list to just one visibility.
+Passing both is the same as passing neither (no filter).`,
 	Args: cobra.NoArgs,
 	RunE: runList,
 }
 
 func init() {
-	listCmd.Flags().BoolVar(&listAll, "all", false, "include private collections you own even if you aren't a member")
+	listCmd.Flags().BoolVar(&listPrivate, "private", false, "show only private collections")
+	listCmd.Flags().BoolVar(&listPublic, "public", false, "show only public collections")
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "machine-readable output")
 	rootCmd.AddCommand(listCmd)
 }
@@ -48,6 +50,10 @@ func runList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("list: %w", err)
 	}
+
+	// Passing both --private and --public is the same as passing neither:
+	// no filter, since a collection can't be excluded by both at once.
+	filterVisibility := listPrivate != listPublic
 
 	rows := make([]listRow, 0, len(names))
 	for _, name := range names {
@@ -73,8 +79,13 @@ func runList(cmd *cobra.Command, args []string) error {
 			continue // not yours
 		}
 
-		if role == "owner" && col.Visibility == collection.VisibilityPrivate && !listAll {
-			continue
+		if filterVisibility {
+			if listPrivate && col.Visibility != collection.VisibilityPrivate {
+				continue
+			}
+			if listPublic && col.Visibility != collection.VisibilityPublic {
+				continue
+			}
 		}
 
 		rows = append(rows, listRow{

@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gitcollect — command reference &amp; docs</title>
+<meta name="description" content="gitcollect groups GitHub/GitLab repositories into access-controlled collections. Full command reference and documentation.">
+<style>
+  :root{
+    --bg:#0d1117; --bg-alt:#11161d; --panel:#161b22; --border:#30363d;
+    --text:#c9d1d9; --muted:#8b949e; --accent:#58a6ff; --accent-soft:#1f6feb22;
+    --green:#3fb950; --yellow:#d29922; --red:#f85149; --code-bg:#0a0d12;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  code, pre, .mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;}
+  a{color:var(--accent); text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  .wrap{max-width:1080px; margin:0 auto; padding:0 24px;}
+
+  header.hero{
+    border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg, var(--bg-alt), var(--bg));
+    padding:64px 0 40px;
+  }
+  header.hero h1{
+    font-size:2.6rem; margin:0 0 8px; letter-spacing:-0.02em;
+  }
+  header.hero h1 .dim{color:var(--muted); font-weight:400;}
+  header.hero p.tagline{
+    font-size:1.15rem; color:var(--muted); max-width:680px; margin:0 0 24px;
+  }
+  .badges{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:28px;}
+  .badge{
+    border:1px solid var(--border); border-radius:999px; padding:4px 12px;
+    font-size:0.8rem; color:var(--muted); background:var(--panel);
+  }
+  .hero-actions{display:flex; gap:12px; flex-wrap:wrap;}
+  .btn{
+    display:inline-block; padding:10px 18px; border-radius:8px; font-weight:600;
+    font-size:0.95rem; border:1px solid var(--border);
+  }
+  .btn.primary{background:var(--accent); color:#0d1117; border-color:var(--accent);}
+  .btn.primary:hover{background:#79b8ff; text-decoration:none;}
+  .btn.secondary{background:var(--panel); color:var(--text);}
+  .btn.secondary:hover{background:#1c2330; text-decoration:none;}
+
+  nav.toc{
+    position:sticky; top:0; z-index:10; background:rgba(13,17,23,0.92);
+    backdrop-filter:blur(6px); border-bottom:1px solid var(--border);
+  }
+  nav.toc .wrap{display:flex; gap:18px; overflow-x:auto; padding:12px 24px; white-space:nowrap;}
+  nav.toc a{color:var(--muted); font-size:0.88rem; font-weight:600;}
+  nav.toc a:hover{color:var(--accent); text-decoration:none;}
+
+  section{padding:48px 0; border-bottom:1px solid var(--border);}
+  section:last-of-type{border-bottom:none;}
+  section h2{font-size:1.6rem; margin:0 0 8px;}
+  section > .wrap > p.lead{color:var(--muted); max-width:720px; margin:0 0 28px;}
+
+  .philosophy{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:24px 28px; margin:24px 0; border-left:3px solid var(--accent);
+  }
+  .philosophy p{margin:0 0 10px;}
+  .philosophy p:last-child{margin-bottom:0;}
+
+  pre.codeblock{
+    background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+    padding:16px 18px; overflow-x:auto; font-size:0.88rem; line-height:1.55;
+    color:#e6edf3;
+  }
+  pre.codeblock .c{color:var(--muted);}
+
+  .diagram{
+    background:#fff; border:1px solid var(--border); border-radius:10px;
+    padding:16px; margin:24px 0; text-align:center;
+  }
+  .diagram img{max-width:100%; height:auto; display:block; margin:0 auto;}
+  .diagram figcaption{
+    color:var(--muted); font-size:0.85rem; margin-top:10px; font-style:italic;
+  }
+
+  .group{margin-bottom:36px;}
+  .group h3{
+    font-size:1.05rem; color:var(--accent); margin:0 0 14px;
+    text-transform:uppercase; letter-spacing:0.04em; font-weight:700;
+  }
+  .cmd{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:16px 20px; margin-bottom:12px;
+  }
+  .cmd .sig{
+    font-size:0.95rem; font-weight:600; color:#e6edf3; margin:0 0 6px;
+    display:flex; flex-wrap:wrap; align-items:baseline; gap:8px;
+  }
+  .cmd .sig .prog{color:var(--green);}
+  .cmd .desc{color:var(--muted); margin:0 0 0;}
+  .cmd .flags{margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);}
+  .cmd .flags table{width:100%; border-collapse:collapse; font-size:0.85rem;}
+  .cmd .flags td{padding:4px 8px 4px 0; vertical-align:top;}
+  .cmd .flags td.flagname{color:var(--yellow); white-space:nowrap; width:1%;}
+  .cmd .flags td.flagdesc{color:var(--muted);}
+
+  table.refmatrix{width:100%; border-collapse:collapse; margin:16px 0;}
+  table.refmatrix th, table.refmatrix td{
+    border:1px solid var(--border); padding:8px 12px; text-align:left; font-size:0.88rem;
+  }
+  table.refmatrix th{background:var(--panel); color:var(--accent);}
+  table.refmatrix td.yes{color:var(--green); text-align:center;}
+  table.refmatrix td.no{color:var(--red); text-align:center;}
+
+  footer{padding:40px 0 60px; color:var(--muted); font-size:0.9rem;}
+  footer a{color:var(--text);}
+  footer .links{display:flex; gap:18px; flex-wrap:wrap; margin-bottom:16px;}
+
+  ::selection{background:var(--accent-soft);}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>gitcollect <span class="dim">/ docs</span></h1>
+    <p class="tagline">
+      A standalone Go CLI that groups GitHub/GitLab repositories into named
+      <strong>collections</strong> and controls who can access them — at both the
+      collection level (membership) and the repo level (which groups or
+      individuals can reach which repos).
+    </p>
+    <div class="badges">
+      <span class="badge">Go 1.26+</span>
+      <span class="badge">GitHub &amp; GitLab</span>
+      <span class="badge">No daemon, no DB</span>
+      <span class="badge">HTTPS-only clone</span>
+    </div>
+    <div class="hero-actions">
+      <a class="btn primary" href="#commands">Browse commands</a>
+      <a class="btn secondary" href="https://github.com/alby-tomy/gitcollect" target="_blank" rel="noopener">View on GitHub</a>
+      <a class="btn secondary" href="../README.md">README</a>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <a href="#philosophy">Philosophy</a>
+    <a href="#install">Install</a>
+    <a href="#commands">Commands</a>
+    <a href="#auth-cmds">Auth</a>
+    <a href="#collection-cmds">Collections</a>
+    <a href="#repo-cmds">Repos</a>
+    <a href="#member-cmds">Members</a>
+    <a href="#group-cmds">Groups</a>
+    <a href="#inspect-cmds">Inspect &amp; audit</a>
+    <a href="#git-cmds">Git ops</a>
+    <a href="#system-cmds">System</a>
+  </div>
+</nav>
+
+<section id="philosophy">
+  <div class="wrap">
+    <h2>Philosophy</h2>
+    <p class="lead">The single rule everything else in gitcollect follows.</p>
+    <div class="philosophy">
+      <p>gitcollect's local YAML manifest is a <strong>declaration of intent</strong> —
+      it describes who <em>should</em> have access. The GitHub/GitLab platform is the
+      <strong>enforcement point</strong> — it's where access is actually granted or revoked.</p>
+      <p>These two must never diverge. Every access mutation drives the platform
+      API to completion <em>before</em> the local YAML is written. If the API call
+      fails, the YAML does not change. There is no in-between state, and no
+      shadow permission system.</p>
+    </div>
+    <table class="refmatrix">
+      <tr><th>Concept</th><th>What it means</th></tr>
+      <tr><td><strong>Collection</strong></td><td>A named group of repos with shared membership/visibility rules. Stored as one YAML file under <code>~/.gitcollect/collections/</code>.</td></tr>
+      <tr><td><strong>Member</strong></td><td>A person who belongs to a collection. On a private collection, non-members can't even discover it exists.</td></tr>
+      <tr><td><strong>Group</strong></td><td>A named subset of members, used to restrict which repos a collection's members can reach.</td></tr>
+      <tr><td><strong>Repo access</strong></td><td>Per-repo rule: open to all members, restricted to one or more groups, restricted to specific users, or a union of both.</td></tr>
+      <tr><td><strong>Audit log</strong></td><td>Every mutation — success or failure — is appended to <code>~/.gitcollect/audit/&lt;collection&gt;.log</code> as newline-delimited JSON.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install &amp; first run</h2>
+    <p class="lead">Plain <code>go</code> commands — no Make required. See the <a href="../README.md">README</a> for full per-OS instructions.</p>
+    <pre class="codeblock"><span class="c"># build</span>
+go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect .
+
+<span class="c"># authenticate once per host — token persists until it's revoked/expires</span>
+gitcollect auth
+gitcollect whoami
+
+<span class="c"># create a collection, add a repo, add a member</span>
+gitcollect init my-collection
+gitcollect add my-collection some-repo
+gitcollect member add my-collection some-username
+gitcollect show my-collection</pre>
+  </div>
+</section>
+
+<section id="commands">
+  <div class="wrap">
+    <h2>Command reference</h2>
+    <p class="lead">Every command gitcollect ships, grouped the way the CLI itself groups them. Run <code>gitcollect &lt;command&gt; --help</code> for the live version of any of this.</p>
+
+    <div class="group" id="auth-cmds">
+      <h3>Authentication</h3>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> auth</p>
+        <p class="desc">Authenticate with GitHub or GitLab and store the access token. Prompts for a personal access token (input hidden), verifies it against the platform API, then saves it to <code>~/.gitcollect/config</code> (mode <code>0600</code>). The token is reused by every later command until the platform itself rejects it — there's no local expiry tracking, and no need to re-run this unless the token actually stops working.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--host</td><td class="flagdesc">platform host to authenticate (default <code>github.com</code>; e.g. <code>gitlab.com</code> or a self-hosted GitLab domain)</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> whoami</p>
+        <p class="desc">Show the authenticated user for every host you've run <code>auth</code> on. If a stored token has been rejected (expired/revoked), that host's row shows the error inline instead of hiding the others' valid status, plus a hint to re-run <code>auth</code>.</p>
+      </div>
+    </div>
+
+    <div class="group" id="collection-cmds">
+      <h3>Collection lifecycle</h3>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> init &lt;name&gt;</p>
+        <p class="desc">Create a new collection. Private by default — being the owner does not automatically make you a "member"; add yourself explicitly if you want <code>member</code>-only views to include you.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--host</td><td class="flagdesc">platform host the collection's repos live on (default <code>github.com</code>)</td></tr>
+          <tr><td class="flagname">--description</td><td class="flagdesc">human-readable description</td></tr>
+          <tr><td class="flagname">--public</td><td class="flagdesc">create as public instead of the default, private</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> delete &lt;collection&gt;</p>
+        <p class="desc">Delete a collection and revoke every member's access to every repo in it before removing the manifest. Requires typing the collection's name to confirm.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> list</p>
+        <p class="desc">List every collection you own or are a member of, public or private, reading only local manifests (no network calls). Narrow the results to one visibility instead of seeing both.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--private</td><td class="flagdesc">show only private collections</td></tr>
+          <tr><td class="flagname">--public</td><td class="flagdesc">show only public collections</td></tr>
+          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> show &lt;collection&gt;</p>
+        <p class="desc">Show a summary of a collection: description, owner, visibility, and tables of its members, groups, and repos with their access rules.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> visibility &lt;collection&gt; &lt;public|private&gt;</p>
+        <p class="desc">Change a collection's visibility. Switching to public prompts for confirmation, since it makes the collection's existence discoverable to non-members.</p>
+      </div>
+    </div>
+
+    <div class="group" id="repo-cmds">
+      <h3>Repo management</h3>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> add &lt;collection&gt; &lt;repo&gt;</p>
+        <p class="desc">Add a repo to a collection, open to all members by default. Syncs collaborator access on the platform before saving the manifest.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> remove &lt;collection&gt; &lt;repo&gt;</p>
+        <p class="desc">Remove a repo from a collection and revoke every member's collaborator access to it on the platform first. Prompts for confirmation.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> repo access &lt;collection&gt; &lt;repo&gt;</p>
+        <p class="desc">Replace a repo's entire access rule: restrict to groups, restrict to specific users, or open it to all members. Groups and users are unioned (either satisfies access), and exactly one of the three flags below is required.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--groups g1,g2</td><td class="flagdesc">restrict to these groups (comma-separated)</td></tr>
+          <tr><td class="flagname">--users u1,u2</td><td class="flagdesc">restrict to these individual users (comma-separated)</td></tr>
+          <tr><td class="flagname">--open</td><td class="flagdesc">open the repo to all members (clears any restriction)</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> repo show &lt;collection&gt; &lt;repo&gt;</p>
+        <p class="desc">Show a repo's current access rule and a per-member table of who can reach it and why.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> repo grant &lt;collection&gt; &lt;repo&gt; &lt;username&gt;</p>
+        <p class="desc">Grant one user individual access to a repo without rewriting its whole <code>--users</code> list or touching its group restriction. Refuses if the repo is currently open to all members — adding one user to an empty list would narrow access down to just that user, silently revoking everyone else. No-op if the user already has individual access.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> repo revoke &lt;collection&gt; &lt;repo&gt; &lt;username&gt;</p>
+        <p class="desc">Revoke one user's individually granted access to a repo, leaving group restrictions and other users untouched. Refuses if removing this user would leave the repo with no restriction at all — that would silently re-open it to every member. No-op if the user doesn't have individual access.</p>
+      </div>
+    </div>
+
+    <div class="group" id="member-cmds">
+      <h3>Member management</h3>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> member add &lt;collection&gt; &lt;username&gt;</p>
+        <p class="desc">Add a member to a collection and sync their access across every repo they're now entitled to. Reports which repos were granted and which were skipped (with the reason), plus a suggested next command for restricted repos.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> member remove &lt;collection&gt; &lt;username&gt;</p>
+        <p class="desc">Remove a member from a collection and every group, revoking their collaborator access across every repo first. Prompts for confirmation; removing yourself additionally requires <code>--confirm-self</code>.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--confirm-self</td><td class="flagdesc">required if the username being removed is your own</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> member list &lt;collection&gt;</p>
+        <p class="desc">List a collection's members and which groups each one belongs to.</p>
+      </div>
+    </div>
+
+    <div class="group" id="group-cmds">
+      <h3>Group management</h3>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> group create &lt;collection&gt; &lt;group&gt;</p>
+        <p class="desc">Create a new, empty group within a collection.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> group delete &lt;collection&gt; &lt;group&gt;</p>
+        <p class="desc">Delete a group. Blocked, with the list of blocking repos, if any repo still restricts access to this group — clear those restrictions first.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> group add &lt;collection&gt; &lt;group&gt; &lt;username&gt;</p>
+        <p class="desc">Add a member to a group, then sync their repo access. Guides you to <code>member add</code> first if the user isn't a collection member yet.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> group remove &lt;collection&gt; &lt;group&gt; &lt;username&gt;</p>
+        <p class="desc">Remove a member from a group and re-sync their repo access to match.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> group list &lt;collection&gt;</p>
+        <p class="desc">List every group in a collection with its member count and members.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> group show &lt;collection&gt; &lt;group&gt;</p>
+        <p class="desc">Show a group's members and which repos are restricted to it.</p>
+      </div>
+    </div>
+
+    <div class="group" id="inspect-cmds">
+      <h3>Access inspection &amp; audit</h3>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> inspect &lt;collection&gt;</p>
+        <p class="desc">Show access decisions for the whole collection, one user, or one repo. With no flags: the full member × repo access matrix. <code>--user</code> and <code>--repo</code> are mutually exclusive.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--user &lt;name&gt;</td><td class="flagdesc">show the full access map for this user, repo by repo, with the reason for each decision</td></tr>
+          <tr><td class="flagname">--repo &lt;name&gt;</td><td class="flagdesc">show who can access this repo and why, member by member</td></tr>
+          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> audit &lt;collection&gt;</p>
+        <p class="desc">Show the access change log for a collection — every mutation ever attempted, including failures, newest first.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--user &lt;name&gt;</td><td class="flagdesc">filter to entries where this user is the actor or the target</td></tr>
+          <tr><td class="flagname">--since &lt;dur&gt;</td><td class="flagdesc">filter to entries within this duration — accepts <code>7d</code>/<code>30d</code>/<code>90d</code> as well as anything Go's <code>time.ParseDuration</code> understands (<code>24h</code>, <code>30m</code>)</td></tr>
+          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="group" id="git-cmds">
+      <h3>Git operations</h3>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> clone &lt;collection&gt;</p>
+        <p class="desc">Clone every repo you can access in a collection. "Access" here means both the local YAML rule <em>and</em> a live platform check that you actually hold collaborator status — local rules alone are never trusted for cloning. Repos you can't reach are skipped and reported, not errored on.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--pick r1,r2</td><td class="flagdesc">clone only these repos, out of the ones you can access</td></tr>
+          <tr><td class="flagname">--dry-run</td><td class="flagdesc">preview exactly what would be cloned without doing it</td></tr>
+          <tr><td class="flagname">--concurrency N</td><td class="flagdesc">max repos to clone in parallel (default 4)</td></tr>
+          <tr><td class="flagname">--dest &lt;dir&gt;</td><td class="flagdesc">directory to clone repos into (default current directory)</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> pull &lt;collection&gt;</p>
+        <p class="desc"><code>git pull</code> inside every accessible repo that's already cloned locally. Repos that exist in the collection but aren't cloned yet are reported, not treated as errors.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--dest &lt;dir&gt;</td><td class="flagdesc">directory repos were cloned into (default current directory)</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> status &lt;collection&gt;</p>
+        <p class="desc"><code>git status</code> inside every accessible repo that's already cloned, summarized as a clean/changed table.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--dest &lt;dir&gt;</td><td class="flagdesc">directory repos were cloned into (default current directory)</td></tr>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="group" id="system-cmds">
+      <h3>System</h3>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> version</p>
+        <p class="desc">Print the build version and platform (<code>GOOS/GOARCH</code>).</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> completion &lt;bash|zsh|fish|powershell&gt;</p>
+        <p class="desc">Generate a shell autocompletion script. Provided automatically by the underlying CLI framework (Cobra) — every command and flag above is completion-aware out of the box.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="../README.md">README</a>
+      <a href="../PROMPT.md">Design spec (PROMPT.md)</a>
+      <a href="https://github.com/alby-tomy/gitcollect" target="_blank" rel="noopener">GitHub repository</a>
+    </div>
+    <p>gitcollect wraps Git and the GitHub/GitLab APIs — it never replaces either. Local YAML is intent; the platform is enforcement.</p>
+  </div>
+</footer>
+
+</body>
+</html>
