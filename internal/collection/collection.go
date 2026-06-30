@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/config"
 )
 
@@ -27,8 +28,16 @@ const (
 	VisibilityPrivate Visibility = "private"
 )
 
-// CurrentVersion is written into every new collection manifest.
-const CurrentVersion = "1"
+// CurrentVersion is written into every new collection manifest. Bumped to
+// "2" when Owner/Members/Groups/RepoAccess.Users moved from storing
+// platform usernames (mutable — broke ownership/membership checks on
+// rename) to storing platform IDs (immutable) plus a Logins cache for API
+// calls and display. A file still on "1" is migrated opportunistically —
+// see cmd/root.go's migrateIfNeeded — by whichever command next loads it
+// with an authenticated client already in hand. Load() itself never
+// touches the network, so a "1" file loads and validates exactly as it
+// always has until something migrates it.
+const CurrentVersion = "2"
 
 var (
 	ErrNotFound      = errors.New("collection not found")
@@ -85,7 +94,10 @@ func containsUnsafe(s string) bool {
 
 // RepoAccess defines who can access a single repo within the collection.
 // Groups and Users are unioned, not intersected: a caller needs to satisfy
-// only one of the two restrictions, if either is set.
+// only one of the two restrictions, if either is set. Users holds each
+// individually-granted member's platform ID once the parent Collection is
+// on CurrentVersion (legacy usernames on a still-"1" file) — resolve to a
+// login via the parent Collection's Logins map.
 type RepoAccess struct {
 	Name   string   `yaml:"name"`
 	Groups []string `yaml:"groups"`
@@ -96,17 +108,33 @@ type RepoAccess struct {
 // of repositories: who belongs to it, what groups they form, and which
 // repos each group or individual may reach.
 type Collection struct {
-	Version     string              `yaml:"version"`
-	Name        string              `yaml:"name"`
-	Description string              `yaml:"description"`
-	Host        string              `yaml:"host"`
-	Owner       string              `yaml:"owner"`
-	Visibility  Visibility          `yaml:"visibility"`
-	Members     []string            `yaml:"members"`
-	Groups      map[string][]string `yaml:"groups"`
-	Repos       []RepoAccess        `yaml:"repos"`
-	CreatedAt   time.Time           `yaml:"created_at"`
-	UpdatedAt   time.Time           `yaml:"updated_at"`
+	Version     string `yaml:"version"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Host        string `yaml:"host"`
+	// Owner is the collection administrator's immutable platform ID once
+	// Version is CurrentVersion — never their login, which can change.
+	// On a file still at Version "1" (not yet migrated), this is still
+	// the legacy username string. Resolve to a login via Logins[Owner].
+	Owner      string     `yaml:"owner"`
+	Visibility Visibility `yaml:"visibility"`
+	// Members holds each member's platform ID once Version is
+	// CurrentVersion (legacy usernames on a "1" file). Same Logins[id]
+	// resolution rule as Owner.
+	Members []string `yaml:"members"`
+	// Groups maps a group name to the platform IDs of its members (legacy
+	// usernames on a "1" file) — same ID/login split as Members.
+	Groups map[string][]string `yaml:"groups"`
+	Repos  []RepoAccess        `yaml:"repos"`
+	// Logins caches each known ID's current login: the one place
+	// gitcollect resolves an ID back to something a human can read or an
+	// API call can use as a path component. Populated whenever a member
+	// is resolved (member add/group add/repo grant already need the
+	// login to get the ID in the first place) and when an old-format file
+	// is migrated. Empty/nil on a "1" file that hasn't been migrated yet.
+	Logins    map[string]string `yaml:"logins"`
+	CreatedAt time.Time         `yaml:"created_at"`
+	UpdatedAt time.Time         `yaml:"updated_at"`
 
 	path string // absolute path on disk; not serialised
 }
@@ -119,8 +147,11 @@ func manifestPath(name string) (string, error) {
 	return filepath.Join(dir, name+".yaml"), nil
 }
 
-// New creates a fresh, in-memory Collection. Call Save to persist it.
-func New(name, host, owner string, visibility Visibility) (*Collection, error) {
+// New creates a fresh, in-memory Collection, already on CurrentVersion.
+// Call Save to persist it. owner is the resolved identity of whoever ran
+// "gitcollect init" — see cmd/init.go, which resolves it via
+// api.Client.GetAuthenticatedUser before calling New.
+func New(name, host string, owner api.UserInfo, visibility Visibility) (*Collection, error) {
 	if err := ValidateCollectionName(name); err != nil {
 		return nil, err
 	}
@@ -133,11 +164,12 @@ func New(name, host, owner string, visibility Visibility) (*Collection, error) {
 		Version:     CurrentVersion,
 		Name:        name,
 		Host:        host,
-		Owner:       owner,
+		Owner:       owner.ID,
 		Visibility:  visibility,
 		Members:     []string{},
 		Groups:      map[string][]string{},
 		Repos:       []RepoAccess{},
+		Logins:      map[string]string{owner.ID: owner.Login},
 		CreatedAt:   now,
 		UpdatedAt:   now,
 		path:        path,
@@ -216,7 +248,15 @@ func List() ([]string, error) {
 
 // Validate checks structural integrity of the manifest: every group member
 // must be a collection member, and every repo's group/user references must
-// resolve to real groups and members.
+// resolve to real groups and members. These checks are version-agnostic —
+// they only verify internal consistency between Members/Groups/
+// RepoAccess.Users, which holds whether those are usernames (Version "1")
+// or IDs (CurrentVersion). On a CurrentVersion file, Validate additionally
+// requires every member to have a cached Logins entry; a "1" file skips
+// that check, since it has no Logins map until something migrates it —
+// Validate must not block Load() from returning an unmigrated file, or
+// the opportunistic migration in cmd/root.go would never get a chance to
+// run.
 func (c *Collection) Validate() error {
 	if err := ValidateCollectionName(c.Name); err != nil {
 		return err
@@ -253,6 +293,17 @@ func (c *Collection) Validate() error {
 		for _, u := range r.Users {
 			if !members[u] {
 				return fmt.Errorf("repo %q references %q, who is not a member", r.Name, u)
+			}
+		}
+	}
+
+	if c.Version == CurrentVersion {
+		if c.Owner != "" && c.Logins[c.Owner] == "" {
+			return fmt.Errorf("owner %q has no cached login in Logins", c.Owner)
+		}
+		for _, m := range c.Members {
+			if c.Logins[m] == "" {
+				return fmt.Errorf("member %q has no cached login in Logins", m)
 			}
 		}
 	}

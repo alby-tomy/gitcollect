@@ -63,12 +63,12 @@ func runActivity(cmd *cobra.Command, args []string) error {
 		return NewUsageError(fmt.Errorf("activity: --limit must be at least 1"))
 	}
 
-	col, caller, client, err := loadForGit(name)
+	col, _, callerID, client, err := loadForGit(name)
 	if err != nil {
 		return fmt.Errorf("activity: %w", err)
 	}
 
-	accessible, err := access.FilterAccessible(col, caller, client)
+	accessible, err := access.FilterAccessible(col, callerID, client)
 	if err != nil {
 		return fmt.Errorf("activity: %w", err)
 	}
@@ -179,6 +179,7 @@ func fetchActivity(col *collection.Collection, client api.Client, targets []coll
 		err     error
 	}
 	results := make([]result, len(targets))
+	ownerLogin := col.Logins[col.Owner]
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, defaultActivityConcurrency)
@@ -189,7 +190,7 @@ func fetchActivity(col *collection.Collection, client api.Client, targets []coll
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			info, err := client.GetRepo(col.Owner, repoName)
+			info, err := client.GetRepo(ownerLogin, repoName)
 			if err != nil {
 				results[i] = result{err: fmt.Errorf("%s: could not look up repo: %w", repoName, err)}
 				return
@@ -199,7 +200,7 @@ func fetchActivity(col *collection.Collection, client api.Client, targets []coll
 				branch = "main"
 			}
 
-			commits, err := client.ListCommits(col.Owner, repoName, branch, limit)
+			commits, err := client.ListCommits(ownerLogin, repoName, branch, limit)
 			if err != nil {
 				results[i] = result{err: fmt.Errorf("%s: %w", repoName, err)}
 				return

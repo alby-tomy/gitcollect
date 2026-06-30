@@ -50,20 +50,21 @@ type showRepo struct {
 func runShow(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	col, caller, err := loadForRead(name)
+	col, caller, callerID, err := loadForRead(name)
 	if err != nil {
 		return fmt.Errorf("show: %w", err)
 	}
 
 	if showJSON {
-		return output.JSON(toShowOutput(col, caller))
+		return output.JSON(toShowOutput(col, caller, callerID))
 	}
 
 	if days := staleDays(col.UpdatedAt); days > 0 {
 		output.StaleWarning(col.Name, days)
 	}
 
-	isOwner := caller != "" && caller == col.Owner
+	isOwner := callerID != "" && col.IsOwner(callerID)
+	ownerLogin := col.Logins[col.Owner]
 
 	fmt.Printf("Collection:  %s\n", col.Name)
 	if col.Description != "" {
@@ -71,9 +72,9 @@ func runShow(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Host:        %s\n", col.Host)
 	if isOwner {
-		fmt.Printf("Owner:       %s (you)\n", col.Owner)
+		fmt.Printf("Owner:       %s (you)\n", ownerLogin)
 	} else {
-		fmt.Printf("Owner:       %s\n", col.Owner)
+		fmt.Printf("Owner:       %s\n", ownerLogin)
 	}
 	fmt.Printf("Visibility:  %s\n", col.Visibility)
 	fmt.Printf("Members:     %d\n", len(col.Members))
@@ -82,8 +83,8 @@ func runShow(cmd *cobra.Command, args []string) error {
 
 	if len(col.Members) > 0 {
 		rows := make([][]string, 0, len(col.Members))
-		for _, m := range col.Members {
-			rows = append(rows, []string{m})
+		for _, login := range loginsFor(col, col.Members) {
+			rows = append(rows, []string{login})
 		}
 		fmt.Println()
 		output.Table([]string{"MEMBER"}, rows)
@@ -111,8 +112,8 @@ func runShow(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	details := access.UserAccessMap(col, caller)
-	rows, denied := buildShowRepoRows(col.Repos, details)
+	details := access.UserAccessMap(col, callerID, caller)
+	rows, denied := buildShowRepoRows(col, col.Repos, details)
 	output.Table([]string{"REPO", "ACCESS RULE", "YOU"}, rows)
 
 	if len(denied) > 0 {
@@ -127,14 +128,17 @@ func runShow(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func describeAccessRule(r collection.RepoAccess) string {
+// describeAccessRule renders r's access rule for display. r.Users holds
+// platform IDs (see collection.RepoAccess's doc comment), so col is
+// needed to resolve them to logins before printing.
+func describeAccessRule(col *collection.Collection, r collection.RepoAccess) string {
 	switch {
 	case len(r.Groups) > 0 && len(r.Users) > 0:
-		return fmt.Sprintf("groups: %v, users: %v", r.Groups, r.Users)
+		return fmt.Sprintf("groups: %v, users: %v", r.Groups, loginsFor(col, r.Users))
 	case len(r.Groups) > 0:
 		return fmt.Sprintf("groups: %v", r.Groups)
 	case len(r.Users) > 0:
-		return fmt.Sprintf("users: %v", r.Users)
+		return fmt.Sprintf("users: %v", loginsFor(col, r.Users))
 	default:
 		return "open to all members"
 	}
@@ -151,7 +155,7 @@ type deniedRepo struct {
 // come from iterating the same col.Repos slice) into REPO/ACCESS RULE/YOU
 // table rows, and separately collects the repos the caller is denied
 // (with reason and exact fix command) for the footer below the table.
-func buildShowRepoRows(repos []collection.RepoAccess, details []access.RepoAccessDetail) (rows [][]string, denied []deniedRepo) {
+func buildShowRepoRows(col *collection.Collection, repos []collection.RepoAccess, details []access.RepoAccessDetail) (rows [][]string, denied []deniedRepo) {
 	rows = make([][]string, 0, len(repos))
 	for i, r := range repos {
 		you := "✓ yes"
@@ -159,7 +163,7 @@ func buildShowRepoRows(repos []collection.RepoAccess, details []access.RepoAcces
 			you = "✗ no — " + details[i].Reason
 			denied = append(denied, deniedRepo{repo: r.Name, reason: details[i].Reason, fixCmd: details[i].FixCmd})
 		}
-		rows = append(rows, []string{r.Name, describeAccessRule(r), you})
+		rows = append(rows, []string{r.Name, describeAccessRule(col, r), you})
 	}
 	return rows, denied
 }
@@ -180,17 +184,27 @@ func buildOwnerShowRepoRows(col *collection.Collection) [][]string {
 		if len(who) > 0 {
 			whoCol = fmt.Sprintf("%s (%d)", strings.Join(who, ", "), len(who))
 		}
-		rows = append(rows, []string{r.Name, describeAccessRule(r), whoCol})
+		rows = append(rows, []string{r.Name, describeAccessRule(col, r), whoCol})
 	}
 	return rows
 }
 
-func toShowOutput(col *collection.Collection, caller string) showOutput {
-	details := access.UserAccessMap(col, caller)
+// toShowOutput builds show --json's payload for caller (their login) /
+// callerID (their platform ID). Every ID-based field on col (Owner,
+// Members, Groups' member lists, each repo's Users) is resolved to logins
+// here — the JSON output is user-facing the same way the table is, so it
+// stays login-based rather than exposing raw platform IDs.
+func toShowOutput(col *collection.Collection, caller, callerID string) showOutput {
+	details := access.UserAccessMap(col, callerID, caller)
+
+	groupLogins := make(map[string][]string, len(col.Groups))
+	for group, ids := range col.Groups {
+		groupLogins[group] = loginsFor(col, ids)
+	}
 
 	repos := make([]showRepo, 0, len(col.Repos))
 	for i, r := range col.Repos {
-		repo := showRepo{Name: r.Name, Groups: r.Groups, Users: r.Users}
+		repo := showRepo{Name: r.Name, Groups: r.Groups, Users: loginsFor(col, r.Users)}
 		if i < len(details) {
 			repo.YouCanAccess = details[i].CanAccess
 			repo.YouReason = details[i].Reason
@@ -207,10 +221,10 @@ func toShowOutput(col *collection.Collection, caller string) showOutput {
 		Name:        col.Name,
 		Description: col.Description,
 		Host:        col.Host,
-		Owner:       col.Owner,
+		Owner:       col.Logins[col.Owner],
 		Visibility:  string(col.Visibility),
-		Members:     col.Members,
-		Groups:      col.Groups,
+		Members:     loginsFor(col, col.Members),
+		Groups:      groupLogins,
 		Repos:       repos,
 		StaleDays:   staleDays(col.UpdatedAt),
 	}

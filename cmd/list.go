@@ -80,19 +80,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		username, err := config.LoadUser(col.Host)
-		if err != nil {
-			output.Warn("skipping %q: %v", name, err)
-			continue
-		}
-
-		var role string
-		switch {
-		case username != "" && username == col.Owner:
-			role = "owner"
-		case username != "" && col.IsMember(username):
-			role = "member"
-		default:
+		role, ok := roleFor(col)
+		if !ok {
 			continue // not yours
 		}
 
@@ -132,4 +121,47 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+// roleFor determines the caller's role in col ("owner"/"member"), or ""
+// (ok=false) if col isn't theirs — without ever touching the network, since
+// list must stay usable offline across however many different hosts the
+// caller's local collections span (its own doc comment promises "no
+// network calls are made"). A col already on CurrentVersion compares the
+// cached platform ID (config.LoadUserID, populated by auth); a col still
+// on the legacy "1" format compares the cached login instead (config.
+// LoadUser), exactly as before this migration — list never migrates a
+// collection itself (see migrateIfNeeded's doc comment for why), so it has
+// to keep working against both formats indefinitely. IsOwner/IsMember
+// don't need to know which format they're being called with: as long as
+// the caller passes the matching kind of value (ID for a CurrentVersion
+// col, login for a "1" col), plain string equality is correct either way.
+func roleFor(col *collection.Collection) (role string, ok bool) {
+	if col.Version == collection.CurrentVersion {
+		id, err := config.LoadUserID(col.Host)
+		if err != nil || id == "" {
+			return "", false
+		}
+		switch {
+		case col.IsOwner(id):
+			return "owner", true
+		case col.IsMember(id):
+			return "member", true
+		default:
+			return "", false
+		}
+	}
+
+	username, err := config.LoadUser(col.Host)
+	if err != nil || username == "" {
+		return "", false
+	}
+	switch {
+	case username == col.Owner:
+		return "owner", true
+	case col.IsMember(username):
+		return "member", true
+	default:
+		return "", false
+	}
 }

@@ -49,7 +49,7 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 		}
 
 		client := api.NewClient(host, token)
-		username, err := client.GetAuthenticatedUser()
+		user, err := client.GetAuthenticatedUser()
 		if err != nil {
 			if errors.Is(err, api.ErrUnauthorized) {
 				anyRejected = true
@@ -57,7 +57,7 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 			entries = append(entries, whoamiEntry{Host: host, Error: err.Error()})
 			continue
 		}
-		entries = append(entries, whoamiEntry{Host: host, User: username})
+		entries = append(entries, whoamiEntry{Host: host, User: user.Login})
 	}
 
 	if whoamiJSON {

@@ -54,21 +54,12 @@ func runMemberAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	usernames := args[1:]
 
-	col, err := loadCollection(name)
+	col, caller, callerID, client, err := loadForOwner("member add", name)
 	if err != nil {
-		return fmt.Errorf("member add: %w", err)
+		return err
 	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return fmt.Errorf("member add: %w", err)
-	}
-	caller, err := currentUser(client)
-	if err != nil {
-		return fmt.Errorf("member add: %w", err)
-	}
-	if caller != col.Owner {
-		return fmt.Errorf("member add: only %s (the owner) can add members to %q", col.Owner, name)
+	if !col.IsOwner(callerID) {
+		return fmt.Errorf("member add: only %s (the owner) can add members to %q", col.Logins[col.Owner], name)
 	}
 
 	var failed []string
@@ -95,7 +86,9 @@ func runMemberAdd(cmd *cobra.Command, args []string) error {
 // invocation can continue past an individual failure instead of aborting
 // the whole batch.
 func addOneMember(col *collection.Collection, name, caller, username string, client api.Client) error {
-	if col.IsMember(username) {
+	// No-network pre-check (IDForLogin, not GetUser): "already a member"
+	// only needs to match something already recorded locally.
+	if id := col.IDForLogin(username); id != "" && col.IsMember(id) {
 		recordAudit(audit.AuditEntry{
 			Collection: name,
 			Actor:      caller,
@@ -145,15 +138,19 @@ func printAccessBreakdown(col *collection.Collection, username string, client ap
 	if len(col.Repos) == 0 {
 		return
 	}
+	// AddMember (called just before this) already added username's ID to
+	// col.Members and its login to col.Logins, so this is a no-network
+	// lookup, not a fresh resolve.
+	id := col.IDForLogin(username)
 
 	var granted, skipped []string
 	skippedReason := map[string]string{}
 	for _, r := range col.Repos {
-		if col.CanAccessRepo(username, r.Name) {
+		if col.CanAccessRepo(id, r.Name) {
 			granted = append(granted, r.Name)
 		} else {
 			skipped = append(skipped, r.Name)
-			skippedReason[r.Name] = col.WhyCanAccess(username, r.Name)
+			skippedReason[r.Name] = col.WhyCanAccess(id, r.Name)
 		}
 	}
 
@@ -169,7 +166,7 @@ func printAccessBreakdown(col *collection.Collection, username string, client ap
 	}
 
 	if hasPendingInvite(col, username, granted, client) {
-		output.InviteWarning(username, col.Owner, api.GitHubNotificationsURL, "")
+		output.InviteWarning(username, col.Logins[col.Owner], api.GitHubNotificationsURL, "")
 	}
 }
 
@@ -178,8 +175,9 @@ func printAccessBreakdown(col *collection.Collection, username string, client ap
 // creates these for every repo in the same AddCollaborator burst, so one
 // hit is enough to tell the caller they need to accept an invite.
 func hasPendingInvite(col *collection.Collection, username string, granted []string, client api.Client) bool {
+	ownerLogin := col.Logins[col.Owner]
 	for _, repoName := range granted {
-		has, err := client.GetPendingInvite(col.Owner, repoName, username)
+		has, err := client.GetPendingInvite(ownerLogin, repoName, username)
 		if err == nil && has {
 			return true
 		}
@@ -191,29 +189,20 @@ func runMemberRemove(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	username := args[1]
 
-	col, err := loadCollection(name)
+	col, caller, callerID, client, err := loadForOwner("member remove", name)
 	if err != nil {
-		return fmt.Errorf("member remove: %w", err)
-	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return fmt.Errorf("member remove: %w", err)
-	}
-	caller, err := currentUser(client)
-	if err != nil {
-		return fmt.Errorf("member remove: %w", err)
+		return err
 	}
 
 	isSelf := caller == username
-	if caller != col.Owner && !isSelf {
-		return fmt.Errorf("member remove: only %s (the owner) can remove other members from %q", col.Owner, name)
+	if !col.IsOwner(callerID) && !isSelf {
+		return fmt.Errorf("member remove: only %s (the owner) can remove other members from %q", col.Logins[col.Owner], name)
 	}
 	if isSelf && !memberConfirmSelf {
 		return NewUsageError(fmt.Errorf("member remove: removing yourself requires --confirm-self"))
 	}
 
-	if !col.IsMember(username) {
+	if id := col.IDForLogin(username); id == "" || !col.IsMember(id) {
 		return fmt.Errorf("member remove: %q is not a member of %q", username, name)
 	}
 
@@ -250,7 +239,7 @@ func runMemberRemove(cmd *cobra.Command, args []string) error {
 func runMemberList(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	col, _, err := loadForRead(name)
+	col, _, _, err := loadForRead(name)
 	if err != nil {
 		return fmt.Errorf("member list: %w", err)
 	}
@@ -261,22 +250,26 @@ func runMemberList(cmd *cobra.Command, args []string) error {
 	}
 
 	rows := make([][]string, 0, len(col.Members))
-	for _, m := range col.Members {
-		groups := groupsForMember(col, m)
+	for _, id := range col.Members {
+		groups := groupsForMember(col, id)
 		groupList := "—"
 		if len(groups) > 0 {
 			groupList = strings.Join(groups, ", ")
 		}
-		rows = append(rows, []string{m, groupList})
+		rows = append(rows, []string{col.Logins[id], groupList})
 	}
 	output.Table([]string{"MEMBER", "GROUPS"}, rows)
 	return nil
 }
 
-func groupsForMember(col *collection.Collection, username string) []string {
+// groupsForMember returns the names of every group id belongs to. id is a
+// platform ID — see collection.Collection's Owner/Members doc comments —
+// since it's compared against col.Groups' ID-based member lists via
+// IsInGroup.
+func groupsForMember(col *collection.Collection, id string) []string {
 	var groups []string
 	for group := range col.Groups {
-		if col.IsInGroup(username, group) {
+		if col.IsInGroup(id, group) {
 			groups = append(groups, group)
 		}
 	}

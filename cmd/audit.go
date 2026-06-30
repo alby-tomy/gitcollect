@@ -71,7 +71,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 		return NewUsageError(fmt.Errorf("audit: %w", err))
 	}
 
-	if _, _, err := loadForRead(name); err != nil {
+	if _, _, _, err := loadForRead(name); err != nil {
 		return fmt.Errorf("audit: %w", err)
 	}
 

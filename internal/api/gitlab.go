@@ -74,24 +74,44 @@ func (c *gitlabClient) do(method, path string, body any) (*http.Response, error)
 	return resp, nil
 }
 
-func (c *gitlabClient) GetAuthenticatedUser() (string, error) {
+func (c *gitlabClient) GetAuthenticatedUser() (UserInfo, error) {
 	resp, err := c.do(http.MethodGet, "/user", nil)
 	if err != nil {
-		return "", err
+		return UserInfo{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", classifyStatus(resp.StatusCode)
+		return UserInfo{}, classifyStatus(resp.StatusCode)
 	}
 
 	var out struct {
+		ID       int64  `json:"id"`
 		Username string `json:"username"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("could not parse response: %w", err)
+		return UserInfo{}, fmt.Errorf("could not parse response: %w", err)
 	}
-	return out.Username, nil
+	return UserInfo{ID: strconv.FormatInt(out.ID, 10), Login: out.Username}, nil
+}
+
+// GetUser resolves username to its GitLab account ID. Built on top of
+// lookupUserID below — a different, pre-existing concern (GitLab's
+// project-member endpoints require a numeric ID in the request, not a
+// username, so AddCollaborator/RemoveCollaborator/CheckCollaborator have
+// always needed to resolve one internally) that happens to call the same
+// GET /users?username= endpoint GetUser needs. GitLab's exact-match query
+// means the input username is already confirmed correct on success, so
+// there's no need to re-decode it from the response.
+func (c *gitlabClient) GetUser(username string) (UserInfo, error) {
+	id, err := c.lookupUserID(username)
+	if err != nil {
+		if err == ErrNotFound {
+			return UserInfo{}, fmt.Errorf("%w: %s", ErrUserNotFound, username)
+		}
+		return UserInfo{}, err
+	}
+	return UserInfo{ID: strconv.Itoa(id), Login: username}, nil
 }
 
 func (c *gitlabClient) GetRepo(owner, repo string) (RepoInfo, error) {

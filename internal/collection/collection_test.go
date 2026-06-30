@@ -22,7 +22,7 @@ func useTempHome(t *testing.T) {
 // any network access. Collaborator state is tracked per "owner/repo/user".
 type mockClient struct {
 	host          string
-	user          string
+	user          api.UserInfo
 	mu            sync.Mutex
 	collaborators map[string]bool
 	failAdd       bool
@@ -31,7 +31,7 @@ type mockClient struct {
 }
 
 func newMockClient() *mockClient {
-	return &mockClient{host: "github.com", user: "owner", collaborators: map[string]bool{}}
+	return &mockClient{host: "github.com", user: api.UserInfo{ID: "owner", Login: "owner"}, collaborators: map[string]bool{}}
 }
 
 func key(owner, repo, username string) string { return owner + "/" + repo + "/" + username }
@@ -39,7 +39,10 @@ func key(owner, repo, username string) string { return owner + "/" + repo + "/" 
 func (m *mockClient) GetRepo(owner, repo string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: repo, CloneURL: "https://example.com/" + owner + "/" + repo + ".git"}, nil
 }
-func (m *mockClient) GetAuthenticatedUser() (string, error) { return m.user, nil }
+func (m *mockClient) GetAuthenticatedUser() (api.UserInfo, error) { return m.user, nil }
+func (m *mockClient) GetUser(username string) (api.UserInfo, error) {
+	return api.UserInfo{ID: username, Login: username}, nil
+}
 func (m *mockClient) AddCollaborator(owner, repo, username, permission string) error {
 	if m.failAdd {
 		return errors.New("mock add failure")
@@ -76,9 +79,12 @@ func (m *mockClient) Host() string { return m.host }
 
 func newTestCollection(t *testing.T, visibility Visibility) *Collection {
 	t.Helper()
-	col, err := New("acme", "github.com", "owner", visibility)
+	col, err := New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, visibility)
 	if err != nil {
 		t.Fatalf("New: %v", err)
+	}
+	for _, login := range []string{"alice", "bob", "charlie", "ghost", "not-a-member", "nobody"} {
+		col.Logins[login] = login
 	}
 	return col
 }
@@ -162,7 +168,7 @@ func TestList(t *testing.T) {
 	useTempHome(t)
 
 	for _, name := range []string{"alpha", "beta"} {
-		col, err := New(name, "github.com", "owner", VisibilityPublic)
+		col, err := New(name, "github.com", api.UserInfo{ID: "owner", Login: "owner"}, VisibilityPublic)
 		if err != nil {
 			t.Fatalf("New(%s): %v", name, err)
 		}
@@ -571,7 +577,7 @@ func TestWhyCanAccess(t *testing.T) {
 }
 
 func TestNew_InvalidName(t *testing.T) {
-	if _, err := New("", "github.com", "owner", VisibilityPrivate); !errors.Is(err, ErrInvalidName) {
+	if _, err := New("", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, VisibilityPrivate); !errors.Is(err, ErrInvalidName) {
 		t.Fatalf("expected ErrInvalidName for an empty collection name, got %v", err)
 	}
 }

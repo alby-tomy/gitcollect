@@ -33,17 +33,17 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("status: %w", err)
 	}
 
-	col, caller, client, err := loadForGit(name)
+	col, caller, callerID, client, err := loadForGit(name)
 	if err != nil {
 		return fmt.Errorf("status: %w", err)
 	}
 
-	accessible, err := access.FilterAccessible(col, caller, client)
+	accessible, err := access.FilterAccessible(col, callerID, client)
 	if err != nil {
 		return fmt.Errorf("status: %w", err)
 	}
 
-	printAccessSummary(col, caller, len(accessible), len(col.Repos))
+	printAccessSummary(col, caller, callerID, len(accessible), len(col.Repos))
 
 	var missing, failed []string
 	rows := make([][]string, 0, len(accessible))

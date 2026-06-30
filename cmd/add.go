@@ -33,21 +33,12 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	col, err := loadCollection(name)
+	col, caller, callerID, client, err := loadForOwner("add", name)
 	if err != nil {
-		return fmt.Errorf("add: %w", err)
+		return err
 	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return fmt.Errorf("add: %w", err)
-	}
-	caller, err := currentUser(client)
-	if err != nil {
-		return fmt.Errorf("add: %w", err)
-	}
-	if caller != col.Owner {
-		return fmt.Errorf("add: only %s (the owner) can add repos to %q", col.Owner, name)
+	if !col.IsOwner(callerID) {
+		return fmt.Errorf("add: only %s (the owner) can add repos to %q", col.Logins[col.Owner], name)
 	}
 
 	var failed []string
@@ -73,8 +64,9 @@ func addOneRepo(col *collection.Collection, name, caller, repoName string, clien
 		}
 	}
 
-	if _, err := client.GetRepo(col.Owner, repoName); err != nil {
-		return fmt.Errorf("could not find %s/%s: %w", col.Owner, repoName, err)
+	ownerLogin := col.Logins[col.Owner]
+	if _, err := client.GetRepo(ownerLogin, repoName); err != nil {
+		return fmt.Errorf("could not find %s/%s: %w", ownerLogin, repoName, err)
 	}
 
 	col.Repos = append(col.Repos, collection.RepoAccess{Name: repoName, Groups: []string{}, Users: []string{}})

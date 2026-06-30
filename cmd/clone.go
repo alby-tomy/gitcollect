@@ -63,12 +63,12 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	col, caller, client, err := loadForGit(name)
+	col, caller, callerID, client, err := loadForGit(name)
 	if err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	accessible, err := access.FilterAccessible(col, caller, client)
+	accessible, err := access.FilterAccessible(col, callerID, client)
 	if err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
@@ -78,7 +78,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	printAccessSummary(col, caller, len(accessible), len(col.Repos))
+	printAccessSummary(col, caller, callerID, len(accessible), len(col.Repos))
 
 	if len(targets) == 0 {
 		output.Info("no repos to clone")
@@ -123,7 +123,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		// (CheckCollaborator reports false either way). Distinguish the
 		// second case so they're not left thinking "no access" forever.
 		if repo := firstPendingInvite(col, caller, skipped, client); repo != "" {
-			output.InviteWarning(caller, col.Owner, api.GitHubNotificationsURL, fmt.Sprintf("gitcollect clone %s", name))
+			output.InviteWarning(caller, col.Logins[col.Owner], api.GitHubNotificationsURL, fmt.Sprintf("gitcollect clone %s", name))
 		}
 	}
 
@@ -133,11 +133,12 @@ func runClone(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// firstPendingInvite returns the first repo in skipped where caller has an
-// unaccepted GitHub collaborator invite, or "" if none do.
+// firstPendingInvite returns the first repo in skipped where caller (a
+// login) has an unaccepted GitHub collaborator invite, or "" if none do.
 func firstPendingInvite(col *collection.Collection, caller string, skipped []string, client api.Client) string {
+	ownerLogin := col.Logins[col.Owner]
 	for _, repoName := range skipped {
-		has, err := client.GetPendingInvite(col.Owner, repoName, caller)
+		has, err := client.GetPendingInvite(ownerLogin, repoName, caller)
 		if err == nil && has {
 			return repoName
 		}
@@ -147,13 +148,15 @@ func firstPendingInvite(col *collection.Collection, caller string, skipped []str
 
 // printAccessSummary prints the "access verified" header line shared by
 // clone/pull/status: who the caller is, what groups grant them access, and
-// how many of the collection's repos they can reach.
-func printAccessSummary(col *collection.Collection, caller string, accessibleCount, totalCount int) {
+// how many of the collection's repos they can reach. caller is their login
+// (for display); callerID is their platform ID (for the group-membership
+// lookup, which compares against col.Groups' ID-based member lists).
+func printAccessSummary(col *collection.Collection, caller, callerID string, accessibleCount, totalCount int) {
 	switch {
 	case col.Visibility == collection.VisibilityPublic:
 		output.Success("Public collection — %d of %d repos accessible", accessibleCount, totalCount)
 	default:
-		groups := strings.Join(groupsForMember(col, caller), ", ")
+		groups := strings.Join(groupsForMember(col, callerID), ", ")
 		if groups == "" {
 			groups = "no groups"
 		}
@@ -246,9 +249,10 @@ func cloneAll(col *collection.Collection, client api.Client, targets []collectio
 // cloneOne resolves repoName's HTTPS clone URL via the platform API and
 // clones it into <dest>/<repoName>.
 func cloneOne(col *collection.Collection, client api.Client, repoName, dest string, dryRun bool) error {
-	info, err := client.GetRepo(col.Owner, repoName)
+	ownerLogin := col.Logins[col.Owner]
+	info, err := client.GetRepo(ownerLogin, repoName)
 	if err != nil {
-		return fmt.Errorf("could not look up %s/%s: %w", col.Owner, repoName, err)
+		return fmt.Errorf("could not look up %s/%s: %w", ownerLogin, repoName, err)
 	}
 	if dryRun {
 		return nil

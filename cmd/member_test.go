@@ -34,7 +34,12 @@ func (m *multiAddMock) key(owner, repo, username string) string {
 func (m *multiAddMock) GetRepo(owner, repo string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: repo, CloneURL: "https://example.com/" + owner + "/" + repo + ".git"}, nil
 }
-func (m *multiAddMock) GetAuthenticatedUser() (string, error) { return "owner", nil }
+func (m *multiAddMock) GetAuthenticatedUser() (api.UserInfo, error) {
+	return api.UserInfo{ID: "owner", Login: "owner"}, nil
+}
+func (m *multiAddMock) GetUser(username string) (api.UserInfo, error) {
+	return api.UserInfo{ID: username, Login: username}, nil
+}
 func (m *multiAddMock) AddCollaborator(owner, repo, username, permission string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -73,7 +78,12 @@ type pendingInviteMock struct {
 func (m *pendingInviteMock) GetRepo(owner, repo string) (api.RepoInfo, error) {
 	return api.RepoInfo{}, nil
 }
-func (m *pendingInviteMock) GetAuthenticatedUser() (string, error) { return "", nil }
+func (m *pendingInviteMock) GetAuthenticatedUser() (api.UserInfo, error) {
+	return api.UserInfo{}, nil
+}
+func (m *pendingInviteMock) GetUser(username string) (api.UserInfo, error) {
+	return api.UserInfo{ID: username, Login: username}, nil
+}
 func (m *pendingInviteMock) AddCollaborator(owner, repo, username, permission string) error {
 	return nil
 }
@@ -90,7 +100,7 @@ func (m *pendingInviteMock) ListCommits(owner, repo, branch string, limit int) (
 func (m *pendingInviteMock) Host() string { return "github.com" }
 
 func TestHasPendingInvite(t *testing.T) {
-	col, err := collection.New("acme", "github.com", "owner", collection.VisibilityPrivate)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
 	if err != nil {
 		t.Fatalf("collection.New: %v", err)
 	}
@@ -118,7 +128,7 @@ func TestAddOneMember(t *testing.T) {
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
 
-	col, err := collection.New("acme", "github.com", "owner", collection.VisibilityPrivate)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
 	if err != nil {
 		t.Fatalf("collection.New: %v", err)
 	}

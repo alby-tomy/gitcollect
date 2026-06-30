@@ -3,6 +3,7 @@ package cmd
 import (
 	"testing"
 
+	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 )
 
@@ -16,11 +17,14 @@ func TestAddOneToGroup(t *testing.T) {
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
 
-	col, err := collection.New("acme", "github.com", "owner", collection.VisibilityPrivate)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
 	if err != nil {
 		t.Fatalf("collection.New: %v", err)
 	}
 	col.Members = []string{"alice", "bob", "charlie"}
+	for _, login := range col.Members {
+		col.Logins[login] = login
+	}
 	if err := col.CreateGroup("red-team"); err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}

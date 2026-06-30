@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 )
 
@@ -31,7 +32,7 @@ func TestSplitPick(t *testing.T) {
 }
 
 func TestFirstPendingInvite(t *testing.T) {
-	col, err := collection.New("acme", "github.com", "owner", collection.VisibilityPrivate)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
 	if err != nil {
 		t.Fatalf("collection.New: %v", err)
 	}

@@ -34,17 +34,17 @@ func runPull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("pull: %w", err)
 	}
 
-	col, caller, client, err := loadForGit(name)
+	col, caller, callerID, client, err := loadForGit(name)
 	if err != nil {
 		return fmt.Errorf("pull: %w", err)
 	}
 
-	accessible, err := access.FilterAccessible(col, caller, client)
+	accessible, err := access.FilterAccessible(col, callerID, client)
 	if err != nil {
 		return fmt.Errorf("pull: %w", err)
 	}
 
-	printAccessSummary(col, caller, len(accessible), len(col.Repos))
+	printAccessSummary(col, caller, callerID, len(accessible), len(col.Repos))
 
 	var pulled, missing, failed []string
 	for _, repo := range accessible {

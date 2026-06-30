@@ -22,7 +22,12 @@ func key(owner, repo, username string) string { return owner + "/" + repo + "/" 
 func (m *mockClient) GetRepo(owner, repo string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: repo, CloneURL: "https://example.com/" + owner + "/" + repo + ".git"}, nil
 }
-func (m *mockClient) GetAuthenticatedUser() (string, error) { return "owner", nil }
+func (m *mockClient) GetAuthenticatedUser() (api.UserInfo, error) {
+	return api.UserInfo{ID: "owner", Login: "owner"}, nil
+}
+func (m *mockClient) GetUser(username string) (api.UserInfo, error) {
+	return api.UserInfo{ID: username, Login: username}, nil
+}
 func (m *mockClient) AddCollaborator(owner, repo, username, permission string) error {
 	m.collaborators[key(owner, repo, username)] = true
 	return nil
@@ -47,9 +52,12 @@ func (m *mockClient) Host() string { return "github.com" }
 
 func newCol(t *testing.T, visibility collection.Visibility) *collection.Collection {
 	t.Helper()
-	col, err := collection.New("acme", "github.com", "owner", visibility)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, visibility)
 	if err != nil {
 		t.Fatalf("collection.New: %v", err)
+	}
+	for _, login := range []string{"alice", "bob", "charlie", "diana", "stranger"} {
+		col.Logins[login] = login
 	}
 	return col
 }
@@ -254,7 +262,7 @@ func TestUserAccessMapAndRepoAccessMapAndFullMatrix(t *testing.T) {
 		{Name: "restricted", Groups: []string{"red-team"}},
 	}
 
-	userMap := UserAccessMap(col, "bob")
+	userMap := UserAccessMap(col, "bob", "bob")
 	if len(userMap) != 2 {
 		t.Fatalf("expected 2 repo entries, got %d", len(userMap))
 	}
@@ -307,7 +315,7 @@ func TestUserAccessMap_OwnerBypass(t *testing.T) {
 		{Name: "restricted", Groups: []string{"red-team"}},
 	}
 
-	details := UserAccessMap(col, "owner")
+	details := UserAccessMap(col, "owner", "owner")
 	if len(details) != 2 {
 		t.Fatalf("expected 2 repo entries, got %d", len(details))
 	}

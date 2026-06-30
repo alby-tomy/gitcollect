@@ -48,7 +48,7 @@ func runAuth(cmd *cobra.Command, args []string) error {
 
 	client := api.NewClient(host, token)
 
-	username, err := client.GetAuthenticatedUser()
+	user, err := client.GetAuthenticatedUser()
 	if err != nil {
 		return fmt.Errorf("auth: token rejected by %s: %w", host, err)
 	}
@@ -56,11 +56,14 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	if err := config.SaveToken(host, token); err != nil {
 		return fmt.Errorf("auth: failed to save token: %w", err)
 	}
-	if err := config.SaveUser(host, username); err != nil {
+	if err := config.SaveUser(host, user.Login); err != nil {
 		return fmt.Errorf("auth: failed to cache username: %w", err)
 	}
+	if err := config.SaveUserID(host, user.ID); err != nil {
+		return fmt.Errorf("auth: failed to cache user ID: %w", err)
+	}
 
-	output.Success("Authenticated as %s on %s", username, host)
+	output.Success("Authenticated as %s on %s", user.Login, host)
 	return nil
 }
 

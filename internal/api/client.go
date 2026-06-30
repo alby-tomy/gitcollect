@@ -17,7 +17,12 @@ const requestTimeout = 15 * time.Second
 // APIs.
 type Client interface {
 	GetRepo(owner, repo string) (RepoInfo, error)
-	GetAuthenticatedUser() (string, error)
+	GetAuthenticatedUser() (UserInfo, error)
+	// GetUser resolves username (as typed on the command line — by "member
+	// add", "group add", "repo grant", "repo access --users", or during
+	// old-format-collection migration) to that account's platform identity.
+	// Returns ErrUserNotFound if no account with that username exists.
+	GetUser(username string) (UserInfo, error)
 	AddCollaborator(owner, repo, username, permission string) error
 	RemoveCollaborator(owner, repo, username string) error
 	CheckCollaborator(owner, repo, username string) (bool, error)
@@ -42,6 +47,22 @@ type Client interface {
 // collaborator invitation. There's no API endpoint to accept one
 // programmatically — it's always a manual, web-based step.
 const GitHubNotificationsURL = "https://github.com/notifications"
+
+// UserInfo identifies a platform account. ID is the platform's own
+// immutable numeric identifier, stable across username/login renames —
+// gitcollect stores this, never the login, anywhere it needs to decide
+// "is this the same person" (Collection.Owner, Members, group membership,
+// per-repo individual grants). Login is the current, human-readable
+// username: required for API path-building (GitHub and GitLab both
+// address repos and collaborators by login in the URL, never by ID) and
+// anywhere gitcollect displays or types out a command involving this
+// person. Both are carried as strings — ID is numeric on both platforms,
+// but kept as a string here so gitcollect's storage/comparison code never
+// has to special-case GitHub's int64 range vs GitLab's int.
+type UserInfo struct {
+	ID    string
+	Login string
+}
 
 // RepoInfo is the subset of platform repository metadata gitcollect needs.
 type RepoInfo struct {
@@ -69,6 +90,11 @@ var (
 	ErrUnauthorized = errors.New("invalid or missing token")
 	ErrForbidden    = errors.New("insufficient permissions")
 	ErrRateLimit    = errors.New("API rate limit exceeded")
+	// ErrUserNotFound is returned by GetUser when no account with the
+	// given username exists on the platform — distinct from ErrNotFound,
+	// which means "repository not found", so callers can tell the two
+	// apart in error messages.
+	ErrUserNotFound = errors.New("platform user not found")
 )
 
 // NewClient returns the Client implementation for host: GitHub for

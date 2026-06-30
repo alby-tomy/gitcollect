@@ -49,7 +49,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("init: %w", err)
 	}
-	owner, err := currentUser(client)
+	owner, err := currentUserInfo(client)
 	if err != nil {
 		return fmt.Errorf("init: %w", err)
 	}
@@ -68,7 +68,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err := col.Save(); err != nil {
 		recordAudit(audit.AuditEntry{
 			Collection: name,
-			Actor:      owner,
+			Actor:      owner.Login,
 			Action:     "init",
 			Target:     name,
 			Detail:     fmt.Sprintf("Collection creation failed (%s)", visibility),
@@ -79,7 +79,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	recordAudit(audit.AuditEntry{
 		Collection: name,
-		Actor:      owner,
+		Actor:      owner.Login,
 		Action:     "init",
 		Target:     name,
 		Detail:     fmt.Sprintf("Collection created (%s)", visibility),

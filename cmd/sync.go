@@ -52,18 +52,18 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("sync: %w", err)
 	}
 
-	col, caller, client, err := loadForGit(name)
+	col, caller, callerID, client, err := loadForGit(name)
 	if err != nil {
 		return fmt.Errorf("sync: %w", err)
 	}
 
-	accessible, err := access.FilterAccessible(col, caller, client)
+	accessible, err := access.FilterAccessible(col, callerID, client)
 	if err != nil {
 		return fmt.Errorf("sync: %w", err)
 	}
 	_, skipped, _ := selectCloneTargets(col, accessible, nil)
 
-	printAccessSummary(col, caller, len(accessible), len(col.Repos))
+	printAccessSummary(col, caller, callerID, len(accessible), len(col.Repos))
 
 	if len(accessible) == 0 {
 		output.Info("no repos to sync")

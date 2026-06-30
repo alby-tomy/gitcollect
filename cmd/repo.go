@@ -84,29 +84,20 @@ func runRepoAccess(cmd *cobra.Command, args []string) error {
 		users = []string{}
 	}
 
-	col, err := loadCollection(name)
+	col, caller, callerID, client, err := loadForOwner("repo access", name)
 	if err != nil {
-		return fmt.Errorf("repo access: %w", err)
+		return err
 	}
 
 	before, found := repoAccessOf(col, repoName)
 	if !found {
 		return fmt.Errorf("repo access: %q is not in collection %q", repoName, name)
 	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return fmt.Errorf("repo access: %w", err)
-	}
-	caller, err := currentUser(client)
-	if err != nil {
-		return fmt.Errorf("repo access: %w", err)
-	}
-	if caller != col.Owner {
-		return fmt.Errorf("repo access: only %s (the owner) can change access for %s", col.Owner, repoName)
+	if !col.IsOwner(callerID) {
+		return fmt.Errorf("repo access: only %s (the owner) can change access for %s", col.Logins[col.Owner], repoName)
 	}
 
-	beforeDesc := describeAccess(before)
+	beforeDesc := describeAccess(col, before)
 
 	if err := col.SetRepoAccess(repoName, groups, users, client); err != nil {
 		recordAudit(audit.AuditEntry{
@@ -121,7 +112,7 @@ func runRepoAccess(cmd *cobra.Command, args []string) error {
 	}
 
 	after, _ := repoAccessOf(col, repoName)
-	afterDesc := describeAccess(after)
+	afterDesc := describeAccess(col, after)
 
 	recordAudit(audit.AuditEntry{
 		Collection: name,
@@ -144,29 +135,23 @@ func runRepoGrant(cmd *cobra.Command, args []string) error {
 	repoName := args[1]
 	username := args[2]
 
-	col, err := loadCollection(name)
+	col, caller, callerID, client, err := loadForOwner("repo grant", name)
 	if err != nil {
-		return fmt.Errorf("repo grant: %w", err)
+		return err
 	}
 
 	before, found := repoAccessOf(col, repoName)
 	if !found {
 		return fmt.Errorf("repo grant: %q is not in collection %q", repoName, name)
 	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return fmt.Errorf("repo grant: %w", err)
-	}
-	caller, err := currentUser(client)
-	if err != nil {
-		return fmt.Errorf("repo grant: %w", err)
-	}
-	if caller != col.Owner {
-		return fmt.Errorf("repo grant: only %s (the owner) can change access for %s", col.Owner, repoName)
+	if !col.IsOwner(callerID) {
+		return fmt.Errorf("repo grant: only %s (the owner) can change access for %s", col.Logins[col.Owner], repoName)
 	}
 
-	if containsExact(before.Users, username) {
+	// No-network pre-check, same reasoning as IDForLogin's doc comment:
+	// "already granted" only needs to match something already recorded
+	// locally, not a live platform lookup.
+	if id := col.IDForLogin(username); id != "" && containsExact(before.Users, id) {
 		output.Info("%s already has individual access to %s", username, repoName)
 		return nil
 	}
@@ -200,13 +185,13 @@ func runRepoGrant(cmd *cobra.Command, args []string) error {
 		Actor:      caller,
 		Action:     "repo.user.grant",
 		Target:     fmt.Sprintf("%s → %s", username, repoName),
-		Detail:     fmt.Sprintf("%s → %s", describeAccess(before), describeAccess(after)),
+		Detail:     fmt.Sprintf("%s → %s", describeAccess(col, before), describeAccess(col, after)),
 		Result:     "ok",
 	})
 
 	output.Success("Granted %s individual access to %s", username, repoName)
-	fmt.Printf("  Before: %s\n", describeAccess(before))
-	fmt.Printf("  After:  %s\n", describeAccess(after))
+	fmt.Printf("  Before: %s\n", describeAccess(col, before))
+	fmt.Printf("  After:  %s\n", describeAccess(col, after))
 	output.Suggestion(fmt.Sprintf("gitcollect inspect %s --repo %s", name, repoName))
 	return nil
 }
@@ -216,29 +201,22 @@ func runRepoRevoke(cmd *cobra.Command, args []string) error {
 	repoName := args[1]
 	username := args[2]
 
-	col, err := loadCollection(name)
+	col, caller, callerID, client, err := loadForOwner("repo revoke", name)
 	if err != nil {
-		return fmt.Errorf("repo revoke: %w", err)
+		return err
 	}
 
 	before, found := repoAccessOf(col, repoName)
 	if !found {
 		return fmt.Errorf("repo revoke: %q is not in collection %q", repoName, name)
 	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return fmt.Errorf("repo revoke: %w", err)
-	}
-	caller, err := currentUser(client)
-	if err != nil {
-		return fmt.Errorf("repo revoke: %w", err)
-	}
-	if caller != col.Owner {
-		return fmt.Errorf("repo revoke: only %s (the owner) can change access for %s", col.Owner, repoName)
+	if !col.IsOwner(callerID) {
+		return fmt.Errorf("repo revoke: only %s (the owner) can change access for %s", col.Logins[col.Owner], repoName)
 	}
 
-	if !containsExact(before.Users, username) {
+	// Same no-network pre-check pattern as runRepoGrant.
+	id := col.IDForLogin(username)
+	if id == "" || !containsExact(before.Users, id) {
 		output.Info("%s does not have individually granted access to %s", username, repoName)
 		return nil
 	}
@@ -266,13 +244,13 @@ func runRepoRevoke(cmd *cobra.Command, args []string) error {
 		Actor:      caller,
 		Action:     "repo.user.revoke",
 		Target:     fmt.Sprintf("%s → %s", username, repoName),
-		Detail:     fmt.Sprintf("%s → %s", describeAccess(before), describeAccess(after)),
+		Detail:     fmt.Sprintf("%s → %s", describeAccess(col, before), describeAccess(col, after)),
 		Result:     "ok",
 	})
 
 	output.Success("Revoked %s's individual access to %s", username, repoName)
-	fmt.Printf("  Before: %s\n", describeAccess(before))
-	fmt.Printf("  After:  %s\n", describeAccess(after))
+	fmt.Printf("  Before: %s\n", describeAccess(col, before))
+	fmt.Printf("  After:  %s\n", describeAccess(col, after))
 	output.Suggestion(fmt.Sprintf("gitcollect inspect %s --repo %s", name, repoName))
 	return nil
 }
@@ -295,16 +273,19 @@ func repoAccessOf(col *collection.Collection, repoName string) (collection.RepoA
 	return collection.RepoAccess{}, false
 }
 
-func describeAccess(r collection.RepoAccess) string {
+// describeAccess renders r's access rule for display. r.Users holds
+// platform IDs (see collection.RepoAccess's doc comment), so col is
+// needed to resolve them to logins via loginsFor before joining.
+func describeAccess(col *collection.Collection, r collection.RepoAccess) string {
 	switch {
 	case len(r.Groups) == 0 && len(r.Users) == 0:
 		return "open to all members"
 	case len(r.Groups) > 0 && len(r.Users) > 0:
-		return fmt.Sprintf("groups: %s, users: %s", strings.Join(r.Groups, ", "), strings.Join(r.Users, ", "))
+		return fmt.Sprintf("groups: %s, users: %s", strings.Join(r.Groups, ", "), strings.Join(loginsFor(col, r.Users), ", "))
 	case len(r.Groups) > 0:
 		return fmt.Sprintf("groups: %s", strings.Join(r.Groups, ", "))
 	default:
-		return fmt.Sprintf("users: %s", strings.Join(r.Users, ", "))
+		return fmt.Sprintf("users: %s", strings.Join(loginsFor(col, r.Users), ", "))
 	}
 }
 
@@ -312,7 +293,7 @@ func runRepoShow(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	repoName := args[1]
 
-	col, _, err := loadForRead(name)
+	col, _, _, err := loadForRead(name)
 	if err != nil {
 		return fmt.Errorf("repo show: %w", err)
 	}
@@ -323,7 +304,7 @@ func runRepoShow(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Repo:   %s\n", repo.Name)
-	fmt.Printf("Access: %s\n", describeAccess(repo))
+	fmt.Printf("Access: %s\n", describeAccess(col, repo))
 	fmt.Println()
 
 	details := access.RepoAccessMap(col, repoName)

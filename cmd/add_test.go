@@ -3,6 +3,7 @@ package cmd
 import (
 	"testing"
 
+	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 )
 
@@ -16,7 +17,7 @@ func TestAddOneRepo(t *testing.T) {
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
 
-	col, err := collection.New("acme", "github.com", "owner", collection.VisibilityPrivate)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
 	if err != nil {
 		t.Fatalf("collection.New: %v", err)
 	}
@@ -34,6 +35,7 @@ func TestAddOneRepo(t *testing.T) {
 	}
 
 	col.Members = []string{"bob"}
+	col.Logins["bob"] = "bob"
 	client.failAddFor["bob"] = true
 	if err := addOneRepo(col, "acme", "owner", "repo2", client); err == nil {
 		t.Fatal("addOneRepo(repo2) = nil, want an error from the failing sync")

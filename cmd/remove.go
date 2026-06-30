@@ -30,9 +30,9 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	repoName := args[1]
 
-	col, err := loadCollection(name)
+	col, caller, callerID, client, err := loadForOwner("remove", name)
 	if err != nil {
-		return fmt.Errorf("remove: %w", err)
+		return err
 	}
 
 	idx := -1
@@ -45,17 +45,8 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	if idx == -1 {
 		return fmt.Errorf("remove: %q is not in collection %q", repoName, name)
 	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return fmt.Errorf("remove: %w", err)
-	}
-	caller, err := currentUser(client)
-	if err != nil {
-		return fmt.Errorf("remove: %w", err)
-	}
-	if caller != col.Owner {
-		return fmt.Errorf("remove: only %s (the owner) can remove repos from %q", col.Owner, name)
+	if !col.IsOwner(callerID) {
+		return fmt.Errorf("remove: only %s (the owner) can remove repos from %q", col.Logins[col.Owner], name)
 	}
 
 	prompt := fmt.Sprintf("This will remove %q from %q and revoke access for %d member(s)", repoName, name, len(col.Members))
@@ -97,6 +88,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 // access from repoName, concurrently, before the repo is dropped from the
 // manifest.
 func revokeRepoAccess(col *collection.Collection, repoName string, client api.Client) error {
+	ownerLogin := col.Logins[col.Owner]
 	var (
 		mu   sync.Mutex
 		errs []error
@@ -104,17 +96,18 @@ func revokeRepoAccess(col *collection.Collection, repoName string, client api.Cl
 		wg   sync.WaitGroup
 	)
 	for _, member := range col.Members {
+		memberLogin := col.Logins[member]
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(member string) {
+		go func(memberLogin string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := client.RemoveCollaborator(col.Owner, repoName, member); err != nil {
+			if err := client.RemoveCollaborator(ownerLogin, repoName, memberLogin); err != nil {
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", member, err))
+				errs = append(errs, fmt.Errorf("%s: %w", memberLogin, err))
 				mu.Unlock()
 			}
-		}(member)
+		}(memberLogin)
 	}
 	wg.Wait()
 	if len(errs) > 0 {

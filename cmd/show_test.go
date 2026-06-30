@@ -4,10 +4,16 @@ import (
 	"testing"
 
 	"github.com/alby-tomy/gitcollect/internal/access"
+	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 )
 
 func TestBuildShowRepoRows(t *testing.T) {
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Logins["alice"] = "alice"
 	repos := []collection.RepoAccess{
 		{Name: "open-repo", Groups: []string{}, Users: []string{}},
 		{Name: "group-repo", Groups: []string{"red-team"}},
@@ -19,7 +25,7 @@ func TestBuildShowRepoRows(t *testing.T) {
 		{RepoName: "user-repo", CanAccess: true, Reason: "individually granted"},
 	}
 
-	rows, denied := buildShowRepoRows(repos, details)
+	rows, denied := buildShowRepoRows(col, repos, details)
 
 	if len(rows) != 3 {
 		t.Fatalf("expected 3 rows, got %d", len(rows))
@@ -53,14 +59,18 @@ func TestBuildShowRepoRows(t *testing.T) {
 }
 
 func TestBuildShowRepoRows_Empty(t *testing.T) {
-	rows, denied := buildShowRepoRows(nil, nil)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	rows, denied := buildShowRepoRows(col, nil, nil)
 	if len(rows) != 0 || len(denied) != 0 {
 		t.Fatalf("expected empty output for empty input, got rows=%v denied=%v", rows, denied)
 	}
 }
 
 func TestToShowOutput_OwnerNotListedAsMember(t *testing.T) {
-	col, err := collection.New("acme", "github.com", "owner", collection.VisibilityPrivate)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
 	if err != nil {
 		t.Fatalf("collection.New: %v", err)
 	}
@@ -71,7 +81,7 @@ func TestToShowOutput_OwnerNotListedAsMember(t *testing.T) {
 		{Name: "restricted", Groups: []string{"red-team"}},
 	}
 
-	out := toShowOutput(col, "owner")
+	out := toShowOutput(col, "owner", "owner")
 	if len(out.Repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d", len(out.Repos))
 	}
@@ -87,11 +97,14 @@ func TestToShowOutput_OwnerNotListedAsMember(t *testing.T) {
 }
 
 func TestBuildOwnerShowRepoRows(t *testing.T) {
-	col, err := collection.New("acme", "github.com", "owner", collection.VisibilityPrivate)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
 	if err != nil {
 		t.Fatalf("collection.New: %v", err)
 	}
 	col.Members = []string{"alice", "bob", "charlie"}
+	for _, login := range col.Members {
+		col.Logins[login] = login
+	}
 	col.Groups = map[string][]string{"red-team": {"alice", "bob"}}
 	col.Repos = []collection.RepoAccess{
 		{Name: "open-repo", Groups: []string{}, Users: []string{}},

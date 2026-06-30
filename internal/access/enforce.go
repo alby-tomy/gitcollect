@@ -25,59 +25,69 @@ var (
 	ErrNoAccess = errors.New("access denied")
 )
 
-// CheckCollectionAccess verifies caller can use col. On private
+// CheckCollectionAccess verifies callerID can use col. On private
 // collections, "not found" and "not a member" both produce ErrForbidden.
-func CheckCollectionAccess(col *collection.Collection, caller string) error {
+// callerID is a platform ID, not a login — see collection.Collection's
+// Owner/Members doc comments. Callers in cmd/ keep a separate, login-typed
+// caller variable for display/audit; only the ID form is passed in here.
+func CheckCollectionAccess(col *collection.Collection, callerID string) error {
 	if col.Visibility == collection.VisibilityPublic {
 		return nil
 	}
-	if caller == col.Owner {
+	if col.IsOwner(callerID) {
 		return nil
 	}
-	if !col.IsMember(caller) {
+	if !col.IsMember(callerID) {
 		return ErrForbidden
 	}
 	return nil
 }
 
-// CheckRepoAccess verifies caller can reach repoName in col: they must be a
-// collection member (or owner), satisfy the local CanAccessRepo rule, and
+// CheckRepoAccess verifies callerID can reach repoName in col: they must be
+// a collection member (or owner), satisfy the local CanAccessRepo rule, and
 // actually hold collaborator access on the platform. All three must pass.
 // CanAccessRepo itself always passes the owner, so there's no separate
-// owner check needed here.
-func CheckRepoAccess(col *collection.Collection, repoName, caller string, client api.Client) error {
-	if err := CheckCollectionAccess(col, caller); err != nil {
+// owner check needed here. The platform check resolves both the owner's
+// and callerID's logins via col.Logins before calling the API, since
+// CheckCollaborator (like every api.Client method) addresses accounts by
+// login, never by ID.
+func CheckRepoAccess(col *collection.Collection, repoName, callerID string, client api.Client) error {
+	if err := CheckCollectionAccess(col, callerID); err != nil {
 		return err
 	}
 
-	if !col.CanAccessRepo(caller, repoName) {
-		return fmt.Errorf("%w: %s", ErrGroupDenied, col.WhyCanAccess(caller, repoName))
+	if !col.CanAccessRepo(callerID, repoName) {
+		return fmt.Errorf("%w: %s", ErrGroupDenied, col.WhyCanAccess(callerID, repoName))
 	}
 
-	has, err := client.CheckCollaborator(col.Owner, repoName, caller)
+	ownerLogin := col.Logins[col.Owner]
+	has, err := client.CheckCollaborator(ownerLogin, repoName, col.Logins[callerID])
 	if err != nil {
 		return fmt.Errorf("could not verify platform access to %s: %w", repoName, err)
 	}
 	if !has {
-		return fmt.Errorf("%w: not yet a collaborator on %s/%s — access has not synced", ErrNoAccess, col.Owner, repoName)
+		return fmt.Errorf("%w: not yet a collaborator on %s/%s — access has not synced", ErrNoAccess, ownerLogin, repoName)
 	}
 	return nil
 }
 
-// FilterAccessible returns only the repos accessible to caller, combining
+// FilterAccessible returns only the repos accessible to callerID, combining
 // local rules with platform verification. col.AccessibleRepos already
 // returns every repo for the owner (CanAccessRepo always passes them), so
 // no separate owner branch is needed here.
-func FilterAccessible(col *collection.Collection, caller string, client api.Client) ([]collection.RepoAccess, error) {
-	if err := CheckCollectionAccess(col, caller); err != nil {
+func FilterAccessible(col *collection.Collection, callerID string, client api.Client) ([]collection.RepoAccess, error) {
+	if err := CheckCollectionAccess(col, callerID); err != nil {
 		return nil, err
 	}
 
-	candidates := col.AccessibleRepos(caller)
+	candidates := col.AccessibleRepos(callerID)
+
+	ownerLogin := col.Logins[col.Owner]
+	callerLogin := col.Logins[callerID]
 
 	accessible := make([]collection.RepoAccess, 0, len(candidates))
 	for _, repo := range candidates {
-		has, err := client.CheckCollaborator(col.Owner, repo.Name, caller)
+		has, err := client.CheckCollaborator(ownerLogin, repo.Name, callerLogin)
 		if err != nil {
 			return nil, fmt.Errorf("could not verify platform access to %s: %w", repo.Name, err)
 		}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -61,24 +62,53 @@ func (c *githubClient) do(method, path string, body any) (*http.Response, error)
 	return resp, nil
 }
 
-func (c *githubClient) GetAuthenticatedUser() (string, error) {
+func (c *githubClient) GetAuthenticatedUser() (UserInfo, error) {
 	resp, err := c.do(http.MethodGet, "/user", nil)
 	if err != nil {
-		return "", err
+		return UserInfo{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", classifyStatus(resp.StatusCode)
+		return UserInfo{}, classifyStatus(resp.StatusCode)
 	}
 
 	var out struct {
+		ID    int64  `json:"id"`
 		Login string `json:"login"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("could not parse response: %w", err)
+		return UserInfo{}, fmt.Errorf("could not parse response: %w", err)
 	}
-	return out.Login, nil
+	return UserInfo{ID: strconv.FormatInt(out.ID, 10), Login: out.Login}, nil
+}
+
+// GetUser resolves username to its GitHub account ID via GET /users/{username}
+// — distinct from GetAuthenticatedUser, which resolves whoever the current
+// token belongs to via GET /user.
+func (c *githubClient) GetUser(username string) (UserInfo, error) {
+	path := fmt.Sprintf("/users/%s", url.PathEscape(username))
+	resp, err := c.do(http.MethodGet, path, nil)
+	if err != nil {
+		return UserInfo{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return UserInfo{}, fmt.Errorf("%w: %s", ErrUserNotFound, username)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return UserInfo{}, classifyStatus(resp.StatusCode)
+	}
+
+	var out struct {
+		ID    int64  `json:"id"`
+		Login string `json:"login"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return UserInfo{}, fmt.Errorf("could not parse response: %w", err)
+	}
+	return UserInfo{ID: strconv.FormatInt(out.ID, 10), Login: out.Login}, nil
 }
 
 func (c *githubClient) GetRepo(owner, repo string) (RepoInfo, error) {
