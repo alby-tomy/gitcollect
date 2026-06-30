@@ -7,6 +7,10 @@
 Group your GitHub and GitLab repositories into named collections — with
 per-repo access control neither platform gives you natively.
 
+**[Full command reference & docs](https://alby-tomy.github.io/gitcollect/)**
+— every command and flag, plus a worked two-person walkthrough of sharing a
+collection end to end.
+
 ## The problem
 
 GitHub and GitLab give you a flat list of repos under an org or a user, and
@@ -146,6 +150,9 @@ what it fetches — they can never disagree. Run `gitcollect <command>
 --help` for the live version of anything below.
 
 ## Full command reference
+
+The same reference below, browsable, is at
+[alby-tomy.github.io/gitcollect](https://alby-tomy.github.io/gitcollect/).
 
 <details open>
 <summary><strong>Authentication</strong></summary>
