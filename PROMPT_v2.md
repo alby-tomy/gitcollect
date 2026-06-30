@@ -1,5 +1,21 @@
 # gitcollect — Master Build Prompt
 
+> **STATUS (session 11, 2026-06-30): MERGED, HISTORICAL REFERENCE ONLY.**
+> This file's PROGRESS TRACKER below was never live — it ships as a blank
+> template (every file "todo", Session 1 blank) and was never updated, even
+> though this codebase was already 10 sessions deep and fully working when
+> this file was introduced. Per an explicit user decision, this file was
+> treated as a **delta spec** against the real implementation: it was diffed
+> against the actual codebase, every genuinely new or changed piece was
+> implemented directly into the real source files, and progress is tracked in
+> [PROMPT.md](PROMPT.md)'s own PROGRESS TRACKER (see Session 11 there) —
+> not here. See PROMPT.md's "Architecture decisions log" entry
+> "PROMPT_v2.md TREATED AS A DELTA SPEC" for the full reasoning.
+>
+> **If you are starting a new session: do not restart a from-scratch build
+> off this file's tracker.** PROMPT.md is canonical. This file is kept only
+> as a record of what the session-11 delta was sourced from.
+
 > Paste this entire file into Claude (or any capable LLM) to generate the
 > complete gitcollect codebase. Every section is intentional — do not skip,
 > summarise, or reorder any part. Read the PROGRESS TRACKER at the bottom

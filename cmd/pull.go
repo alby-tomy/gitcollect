@@ -63,7 +63,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	output.Success("Pulled %d repo(s)", len(pulled))
 	if len(missing) > 0 {
 		output.Info("%d repo(s) not cloned locally, skipped: %v", len(missing), missing)
-		output.Suggestion(fmt.Sprintf("gitcollect clone %s --pick %s", name, strings.Join(missing, ",")))
+		output.Suggestion(fmt.Sprintf("gitcollect clone %s --pick %q", name, strings.Join(missing, " ")))
 	}
 	if len(failed) > 0 {
 		output.Error("%d repo(s) failed to pull:", len(failed))

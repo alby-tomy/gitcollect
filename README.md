@@ -22,7 +22,7 @@ the rendered page.)
 ## Prerequisites
 
 - Go 1.26+ (see `go.mod`)
-- `git` on your `PATH` (required for `clone`/`pull`/`status`)
+- `git` on your `PATH` (required for `clone`/`pull`/`status`/`sync`)
 - A GitHub or GitLab personal access token (for `gitcollect auth`)
 
 All commands below are plain `go` commands — no Make, no shell scripts.
@@ -112,6 +112,7 @@ go install -ldflags="-s -w" .
 gitcollect auth                       # store a GitHub token (hidden prompt)
 gitcollect auth --host gitlab.com     # or authenticate against GitLab
 gitcollect whoami                     # confirm it worked
+gitcollect whoami --json              # same, machine-readable
 
 gitcollect init my-collection          # create the collection first
 gitcollect add my-collection some-repo # then add repos to it
@@ -122,6 +123,27 @@ gitcollect show my-collection
 > `add`/`member add`/etc. all require the collection to already exist —
 > `gitcollect init <name>` first, or you'll get
 > `collection "..." not found. Run: gitcollect list`.
+
+`add`, `member add`, and `group add` all accept more than one value in a
+single command — useful for onboarding a whole team or wiring up several
+repos at once instead of running the command once per item:
+
+```bash
+gitcollect add my-collection repo-a repo-b repo-c
+gitcollect member add my-collection alice bob charlie
+gitcollect group add my-collection red-team alice bob
+```
+
+Each value is processed independently. One bad value (a typo'd username, a
+repo already in the collection) doesn't abort the rest — every value is
+still attempted, and the command reports all the failures together at the
+end, exiting non-zero only if at least one actually failed. An already-
+satisfied value (already a member, already in the group) is a no-op, not a
+failure, even inside an otherwise-failing batch. `member add` additionally
+prints a `--- username ---` header before each user's block when given more
+than one, since that block is several lines (a success line plus the
+granted/skipped access breakdown); `group add` and `add` skip the header
+since their per-item output is a single line each.
 
 `gitcollect auth` only needs to be run once per host. The token is saved
 to `~/.gitcollect/config` and reused by every later command — gitcollect
@@ -156,10 +178,18 @@ RULE` is the configured rule (open to all members / restricted to groups
 or users); `YOU` is personal to whoever runs the command — `✓ yes`, or
 `✗ no — <reason>` if you're denied (e.g. `✗ no — no access — group
 red-team required`). If anything is denied, a line below the table lists
-every repo you can't reach and points you at `inspect --user` for more
-detail. `gitcollect clone` only ever clones the repos marked `✓` here —
-the two are backed by the same access decision, so `show` always tells
-you in advance what `clone` will actually fetch.
+every repo you can't reach, the exact command to fix each one (e.g. `gitcollect
+group add my-collection red-team alice`), and points you at `inspect --user`
+for more detail. `gitcollect clone` only ever clones the repos marked `✓`
+here — the two are backed by the same access decision, so `show` always
+tells you in advance what `clone` will actually fetch.
+
+If you run `show` as the collection's **owner**, the `YOU` column is
+replaced with `WHO HAS ACCESS` — a list of every member who can reach each
+repo — since `YOU` is trivially always `✓` for an owner and isn't useful
+information. And if the collection's YAML hasn't been updated in over 30
+days, both `show` and `list` print a warning that the file may be stale and
+suggest asking the owner for a fresh copy.
 
 For a per-member access breakdown (who can reach which repo, and why),
 use `inspect` instead:
@@ -213,6 +243,36 @@ guardrails worth knowing:
 Both commands are no-ops (not errors) if the user already has, or already
 lacks, that individual grant.
 
+If `member add` grants access to a repo but GitHub leaves the user as a
+**pending, unaccepted collaborator invite** rather than an immediate
+collaborator (which is how GitHub's API behaves unless the invitee already
+has access), gitcollect warns about it and points you at
+https://github.com/notifications so they know to accept it. `clone` does the
+same check on any repo it had to skip — distinguishing "you're not entitled
+to this repo" from "you're entitled but haven't accepted the invite yet."
+This pending-invite state doesn't exist on GitLab — project membership added
+through GitLab's API takes effect immediately, so this warning never fires
+there.
+
+### Cloning and keeping repos up to date
+
+```bash
+gitcollect clone my-collection              # clone every accessible repo
+gitcollect clone my-collection --pick "r1 r2"   # clone only these repos
+gitcollect pull my-collection               # git pull inside every repo already cloned
+gitcollect status my-collection             # git status inside every repo already cloned
+gitcollect sync my-collection               # clone what's missing, pull what's already there
+```
+
+`sync` is the one-shot version of running `clone` then `pull`: for every
+accessible repo, it clones it if it isn't present yet at `--dest`, or runs
+`git pull` if it already is, reporting `✓ done (1.4s)` for a fresh clone and
+either `✓ up to date` or `✓ N new commit(s)` for a pull — useful as the one
+command to run before starting work each day. All three of `clone`/`pull`/
+`sync` accept `--dest <dir>` (default `.`) and `--dry-run`; `clone` and
+`sync` also accept `--concurrency N` (default 4) to control how many repos
+run in parallel.
+
 ### Seeing code changes across a collection's repos
 
 `gitcollect audit` only tracks *access* changes — member/group/repo-access
@@ -238,12 +298,12 @@ learning-hub  main    bob     9f8e7d6  Add tests        2026-06-27 09:11
 
 Useful flags:
 - `--repo <name>` — only check one repo instead of every accessible one
-- `--since 7d` — only show commits within the last N days (also accepts `24h`, `30m`, etc.)
+- `--since <duration>` — only show commits within this window; must be exactly one of `1h`, `24h`, `7d`, `30d`, or `90d` (strict allow-list, no other value accepted)
 - `--limit N` — how many commits to fetch per repo this run (default 10) — this only bounds the live fetch; previously recorded commits beyond that window are still shown from the log
 - `--json` — machine-readable output
 
-Like `clone`/`pull`/`status`, this always needs a live, authenticated API
-call (to resolve the default branch and list commits), even for public
+Like `clone`/`pull`/`status`/`sync`, this always needs a live, authenticated
+API call (to resolve the default branch and list commits), even for public
 collections — there's no local-only path for "what got committed."
 
 > A [Makefile](Makefile) and [.goreleaser.yaml](.goreleaser.yaml) wrap these

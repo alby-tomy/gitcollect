@@ -234,6 +234,62 @@ gitcollect add cybersecurity vuln-scanner</pre>
     email — that's GitHub's behavior, not something gitcollect prints; the teammate
     has to accept that invite before the access actually works.</p>
 
+    <h3>Bulk operations: adding several repos, members, or group members at once</h3>
+    <p><code>add</code>, <code>member add</code>, and <code>group add</code> all
+    accept more than one name in a single command — useful when standing up a
+    new collection or onboarding a whole team instead of running the command
+    once per item. Here's the same idea applied to a fresh collection,
+    <code>research</code>:</p>
+    <pre class="codeblock">gitcollect add research repo-a repo-b repo-c</pre>
+    <pre class="codeblock dim">✓ Added repo-a to "research" (open to all 0 members)
+Run: gitcollect repo access research repo-a --groups &lt;g1,g2&gt;
+✓ Added repo-b to "research" (open to all 0 members)
+Run: gitcollect repo access research repo-b --groups &lt;g1,g2&gt;
+✓ Added repo-c to "research" (open to all 0 members)
+Run: gitcollect repo access research repo-c --groups &lt;g1,g2&gt;</pre>
+    <pre class="codeblock">gitcollect member add research alice bob charlie</pre>
+    <pre class="codeblock dim">--- alice ---
+✓ Added alice to research
+
+  Granted access: repo-a, repo-b, repo-c
+
+--- bob ---
+✓ Added bob to research
+
+  Granted access: repo-a, repo-b, repo-c
+
+--- charlie ---
+✓ Added charlie to research
+
+  Granted access: repo-a, repo-b, repo-c</pre>
+    <p>Past two usernames, <code>member add</code> prints a <code>---
+    username ---</code> header before each one's block so the per-user
+    "Added"/"Granted access" lines never run together — <code>group add</code>
+    and <code>add</code> skip the header since their per-item output is
+    already a single line each:</p>
+    <pre class="codeblock">gitcollect group create research red-team
+gitcollect group add research red-team alice bob</pre>
+    <pre class="codeblock dim">✓ Created group red-team in research
+Run: gitcollect group add research red-team &lt;username&gt;
+✓ Added alice to group red-team in research
+✓ Added bob to group red-team in research</pre>
+    <p>One bad name in the batch — a malformed username, a repo already in
+    the collection, a sync failure — doesn't stop the rest. Every name is
+    attempted independently; the header for each prints before that name is
+    attempted, so you can see exactly which one was in progress when
+    something failed. Failures are collected and reported together as the
+    very last line, once the whole batch has run, and the command only
+    exits non-zero if at least one name actually failed:</p>
+    <pre class="codeblock dim">$ gitcollect member add research alice bad_name
+--- alice ---
+alice is already a member of "research"
+
+--- bad_name ---
+✗ member add: 1 of 2 failed: bad_name (invalid name: username "bad_name" must match ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$)</pre>
+    <p class="dim"><code>alice</code> above is left exactly as before:
+    already-a-member is a no-op, not a failure, even inside a batch where a
+    different name failed.</p>
+
     <h3>3. Get the collection file to your teammate (you)</h3>
     <p>gitcollect has no server, no database, and no <code>fetch</code> command —
     a collection is nothing but that one YAML file on your disk. Your teammate
@@ -339,6 +395,9 @@ exploit-db  ✗ no     no access — group red-team required</pre>
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> whoami</p>
         <p class="desc">Show the authenticated user for every host you've run <code>auth</code> on. If a stored token has been rejected (expired/revoked), that host's row shows the error inline instead of hiding the others' valid status, plus a hint to re-run <code>auth</code>.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
+        </table></div>
       </div>
     </div>
 
@@ -362,7 +421,7 @@ exploit-db  ✗ no     no access — group red-team required</pre>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> list</p>
-        <p class="desc">List every collection you own or are a member of, public or private, reading only local manifests (no network calls). Narrow the results to one visibility instead of seeing both.</p>
+        <p class="desc">List every collection you own or are a member of, public or private, reading only local manifests (no network calls). Narrow the results to one visibility instead of seeing both. Any collection whose YAML hasn't been updated in over 30 days gets a stale-file warning printed below the table, suggesting you ask the owner for a fresh copy if you're not the owner yourself.</p>
         <div class="flags"><table>
           <tr><td class="flagname">--private</td><td class="flagdesc">show only private collections</td></tr>
           <tr><td class="flagname">--public</td><td class="flagdesc">show only public collections</td></tr>
@@ -372,7 +431,7 @@ exploit-db  ✗ no     no access — group red-team required</pre>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> show &lt;collection&gt;</p>
-        <p class="desc">Show a summary of a collection: description, owner, visibility, and tables of its members, groups, and repos. The repo table's <code>YOU</code> column is personal to whoever runs the command — <code>✓ yes</code> or <code>✗ no — &lt;reason&gt;</code> — so you immediately see which repos you can and can't reach, before trying to clone. <code>clone</code> only ever clones the ones marked <code>✓</code> here.</p>
+        <p class="desc">Show a summary of a collection: description, owner, visibility, and tables of its members, groups, and repos. The repo table's <code>YOU</code> column is personal to whoever runs the command — <code>✓ yes</code> or <code>✗ no — &lt;reason&gt;</code> — so you immediately see which repos you can and can't reach, before trying to clone. <code>clone</code> only ever clones the ones marked <code>✓</code> here. Any denied repo gets the exact fix command in a footer below the table (e.g. <code>gitcollect group add my-collection red-team alice</code>). If you're the collection's <strong>owner</strong>, the <code>YOU</code> column is replaced with <code>WHO HAS ACCESS</code> — every member who can reach each repo — since <code>YOU</code> is trivially always <code>✓</code> for an owner. Also prints the same &gt;30-day stale-file warning as <code>list</code>.</p>
         <div class="flags"><table>
           <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output (adds <code>you_can_access</code>/<code>you_reason</code> per repo)</td></tr>
         </table></div>
@@ -388,8 +447,8 @@ exploit-db  ✗ no     no access — group red-team required</pre>
       <h3>Repo management</h3>
 
       <div class="cmd">
-        <p class="sig"><span class="prog">gitcollect</span> add &lt;collection&gt; &lt;repo&gt;</p>
-        <p class="desc">Add a repo to a collection, open to all members by default. Syncs collaborator access on the platform before saving the manifest.</p>
+        <p class="sig"><span class="prog">gitcollect</span> add &lt;collection&gt; &lt;repo&gt; [repo...]</p>
+        <p class="desc">Add one or more repos to a collection, each open to all members by default. Syncs collaborator access on the platform and saves the manifest after each repo, so if a later repo in the batch fails, every repo before it is still kept. Repos are validated up front (a malformed name anywhere in the batch fails the whole command before anything is added); each remaining failure (already in the collection, not found, sync error) is reported per-repo and the command exits non-zero listing exactly which repos failed and why, without rolling back the ones that succeeded.</p>
       </div>
 
       <div class="cmd">
@@ -427,8 +486,8 @@ exploit-db  ✗ no     no access — group red-team required</pre>
       <h3>Member management</h3>
 
       <div class="cmd">
-        <p class="sig"><span class="prog">gitcollect</span> member add &lt;collection&gt; &lt;username&gt;</p>
-        <p class="desc">Add a member to a collection and sync their access across every repo they're now entitled to. Reports which repos were granted and which were skipped (with the reason), plus a suggested next command for restricted repos.</p>
+        <p class="sig"><span class="prog">gitcollect</span> member add &lt;collection&gt; &lt;username&gt; [username...]</p>
+        <p class="desc">Add one or more members to a collection, syncing each one's access across every repo they're now entitled to. Reports which repos were granted and which were skipped (with the reason), plus a suggested next command for restricted repos. On GitHub, if a newly granted repo leaves a user with a pending, unaccepted collaborator invite rather than immediate access, warns about it with a link to accept it — this state doesn't exist on GitLab, where membership added via the API is immediate. With more than one username, each one's output is printed under its own <code>--- username ---</code> header; one username failing (e.g. an invalid name) doesn't stop the rest — the command reports every failure together at the end and exits non-zero only if at least one failed.</p>
       </div>
 
       <div class="cmd">
@@ -459,8 +518,8 @@ exploit-db  ✗ no     no access — group red-team required</pre>
       </div>
 
       <div class="cmd">
-        <p class="sig"><span class="prog">gitcollect</span> group add &lt;collection&gt; &lt;group&gt; &lt;username&gt;</p>
-        <p class="desc">Add a member to a group, then sync their repo access. Guides you to <code>member add</code> first if the user isn't a collection member yet.</p>
+        <p class="sig"><span class="prog">gitcollect</span> group add &lt;collection&gt; &lt;group&gt; &lt;username&gt; [username...]</p>
+        <p class="desc">Add one or more members to a group, syncing each one's repo access afterward. Guides you to <code>member add</code> first for any username that isn't a collection member yet. One username failing doesn't stop the rest — every failure is reported together at the end and the command exits non-zero only if at least one failed.</p>
       </div>
 
       <div class="cmd">
@@ -484,7 +543,7 @@ exploit-db  ✗ no     no access — group red-team required</pre>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> inspect &lt;collection&gt;</p>
-        <p class="desc">Show access decisions for the whole collection, one user, or one repo. With no flags: the full member × repo access matrix. <code>--user</code> and <code>--repo</code> are mutually exclusive.</p>
+        <p class="desc">Show access decisions for the whole collection, one user, or one repo. With no flags: the full member × repo access matrix. <code>--user</code> and <code>--repo</code> are mutually exclusive. Every denied entry shown by <code>--user</code> or <code>--repo</code> is collected into a "To fix:" footer listing the exact command to grant access.</p>
         <div class="flags"><table>
           <tr><td class="flagname">--user &lt;name&gt;</td><td class="flagdesc">show the full access map for this user, repo by repo, with the reason for each decision</td></tr>
           <tr><td class="flagname">--repo &lt;name&gt;</td><td class="flagdesc">show who can access this repo and why, member by member</td></tr>
@@ -497,7 +556,7 @@ exploit-db  ✗ no     no access — group red-team required</pre>
         <p class="desc">Show the access change log for a collection — every mutation ever attempted, including failures, newest first.</p>
         <div class="flags"><table>
           <tr><td class="flagname">--user &lt;name&gt;</td><td class="flagdesc">filter to entries where this user is the actor or the target</td></tr>
-          <tr><td class="flagname">--since &lt;dur&gt;</td><td class="flagdesc">filter to entries within this duration — accepts <code>7d</code>/<code>30d</code>/<code>90d</code> as well as anything Go's <code>time.ParseDuration</code> understands (<code>24h</code>, <code>30m</code>)</td></tr>
+          <tr><td class="flagname">--since &lt;dur&gt;</td><td class="flagdesc">filter to entries within this duration — must be exactly one of <code>1h</code>, <code>24h</code>, <code>7d</code>, <code>30d</code>, <code>90d</code> (strict allow-list, no other value accepted)</td></tr>
           <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
         </table></div>
       </div>
@@ -507,7 +566,7 @@ exploit-db  ✗ no     no access — group red-team required</pre>
         <p class="desc">Show code changes, not access changes: fetches the most recent commits on each accessible repo's default branch live from GitHub/GitLab, records any genuinely new ones to <code>~/.gitcollect/activity/&lt;collection&gt;.log</code>, and prints the combined history (this run's fetch plus everything previously recorded) — repo, branch, author, SHA, message, and timestamp for every commit, newest first.</p>
         <div class="flags"><table>
           <tr><td class="flagname">--repo &lt;name&gt;</td><td class="flagdesc">only check this one repo instead of every accessible one</td></tr>
-          <tr><td class="flagname">--since &lt;dur&gt;</td><td class="flagdesc">only show commits within this duration of when they were made</td></tr>
+          <tr><td class="flagname">--since &lt;dur&gt;</td><td class="flagdesc">only show commits within this duration — must be exactly one of <code>1h</code>, <code>24h</code>, <code>7d</code>, <code>30d</code>, <code>90d</code> (strict allow-list, no other value accepted)</td></tr>
           <tr><td class="flagname">--limit &lt;n&gt;</td><td class="flagdesc">max commits to fetch per repo this run (default 10) — bounds the live fetch only; older recorded commits are still shown from the log</td></tr>
           <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
         </table></div>
@@ -519,9 +578,9 @@ exploit-db  ✗ no     no access — group red-team required</pre>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> clone &lt;collection&gt;</p>
-        <p class="desc">Clone every repo you can access in a collection. "Access" here means both the local YAML rule <em>and</em> a live platform check that you actually hold collaborator status — local rules alone are never trusted for cloning. Repos you can't reach are skipped and reported, not errored on.</p>
+        <p class="desc">Clone every repo you can access in a collection. "Access" here means both the local YAML rule <em>and</em> a live platform check that you actually hold collaborator status — local rules alone are never trusted for cloning. Repos you can't reach are skipped and reported, not errored on. On GitHub, if a skipped repo turns out to be a pending, unaccepted collaborator invite rather than a genuine denial, warns about it separately with a link to accept it and a retry command.</p>
         <div class="flags"><table>
-          <tr><td class="flagname">--pick r1,r2</td><td class="flagdesc">clone only these repos, out of the ones you can access</td></tr>
+          <tr><td class="flagname">--pick "r1 r2"</td><td class="flagdesc">clone only these repos, out of the ones you can access — value is whitespace-separated; repeating <code>--pick</code> also works</td></tr>
           <tr><td class="flagname">--dry-run</td><td class="flagdesc">preview exactly what would be cloned without doing it</td></tr>
           <tr><td class="flagname">--concurrency N</td><td class="flagdesc">max repos to clone in parallel (default 4)</td></tr>
           <tr><td class="flagname">--dest &lt;dir&gt;</td><td class="flagdesc">directory to clone repos into (default current directory)</td></tr>
@@ -541,6 +600,16 @@ exploit-db  ✗ no     no access — group red-team required</pre>
         <p class="desc"><code>git status</code> inside every accessible repo that's already cloned, summarized as a clean/changed table.</p>
         <div class="flags"><table>
           <tr><td class="flagname">--dest &lt;dir&gt;</td><td class="flagdesc">directory repos were cloned into (default current directory)</td></tr>
+        </table></div>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> sync &lt;collection&gt;</p>
+        <p class="desc">One command instead of two: for every accessible repo, clones it if it isn't present yet at <code>--dest</code>, or runs <code>git pull</code> if it already is. Reports <code>✓ done (1.4s)</code> for a fresh clone, and either <code>✓ up to date</code> or <code>✓ N new commit(s)</code> for a pull. Equivalent to running <code>clone</code> then <code>pull</code> back to back, but in a single pass and a single access check.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--dest &lt;dir&gt;</td><td class="flagdesc">directory to clone into, or where repos were already cloned (default current directory)</td></tr>
+          <tr><td class="flagname">--dry-run</td><td class="flagdesc">preview what would be cloned/pulled without doing it</td></tr>
+          <tr><td class="flagname">--concurrency N</td><td class="flagdesc">max repos to sync in parallel (default 4)</td></tr>
         </table></div>
       </div>
     </div>

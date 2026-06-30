@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -63,6 +64,40 @@ func Pull(dir string) error {
 		return err
 	}
 	return nil
+}
+
+// PullWithSummary runs "git pull" inside dir and reports how many new
+// commits it brought in, by comparing HEAD before and after. Returns 0 if
+// the repo was already up to date.
+func PullWithSummary(dir string) (newCommits int, err error) {
+	before, err := run(dir, "rev-parse", "HEAD")
+	if err != nil {
+		return 0, err
+	}
+
+	if _, err := run(dir, "pull"); err != nil {
+		return 0, err
+	}
+
+	after, err := run(dir, "rev-parse", "HEAD")
+	if err != nil {
+		return 0, err
+	}
+	if before == after {
+		return 0, nil
+	}
+
+	count, err := run(dir, "rev-list", "--count", before+".."+after)
+	if err != nil {
+		// The pull itself already succeeded; not being able to count the
+		// commits afterward shouldn't be reported as a failed sync.
+		return 0, nil
+	}
+	n, err := strconv.Atoi(count)
+	if err != nil {
+		return 0, nil
+	}
+	return n, nil
 }
 
 // Status returns the output of "git status --short" for dir.

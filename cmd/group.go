@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/audit"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 	"github.com/alby-tomy/gitcollect/internal/output"
@@ -32,9 +33,9 @@ var groupDeleteCmd = &cobra.Command{
 }
 
 var groupAddCmd = &cobra.Command{
-	Use:   "add <collection> <group> <username>",
-	Short: "Add a member to a group",
-	Args:  cobra.ExactArgs(3),
+	Use:   "add <collection> <group> <username> [username...]",
+	Short: "Add one or more members to a group",
+	Args:  cobra.MinimumNArgs(3),
 	RunE:  runGroupAdd,
 }
 
@@ -173,7 +174,7 @@ func runGroupDelete(cmd *cobra.Command, args []string) error {
 func runGroupAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	group := args[1]
-	username := args[2]
+	usernames := args[2:]
 
 	col, caller, err := requireOwner("group add", name)
 	if err != nil {
@@ -185,6 +186,24 @@ func runGroupAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("group add: %w", err)
 	}
 
+	var failed []string
+	for _, username := range usernames {
+		if err := addOneToGroup(col, name, group, caller, username, client); err != nil {
+			failed = append(failed, fmt.Sprintf("%s (%v)", username, err))
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("group add: %d of %d failed: %s", len(failed), len(usernames), strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+// addOneToGroup adds a single username to group within col, reporting and
+// auditing the result. Factored out of runGroupAdd so adding several members
+// to a group in one invocation can continue past an individual failure
+// instead of aborting the whole batch.
+func addOneToGroup(col *collection.Collection, name, group, caller, username string, client api.Client) error {
 	if err := col.AddToGroup(username, group, client); err != nil {
 		recordAudit(audit.AuditEntry{
 			Collection: name,
@@ -197,9 +216,9 @@ func runGroupAdd(cmd *cobra.Command, args []string) error {
 		if errors.Is(err, collection.ErrNotMember) {
 			output.Error("group add: %q is not a member of %s", username, name)
 			output.Suggestion(fmt.Sprintf("gitcollect member add %s %s", name, username))
-			return fmt.Errorf("group add: aborted")
+			return errors.New("not a member")
 		}
-		return fmt.Errorf("group add: %w", err)
+		return err
 	}
 
 	recordAudit(audit.AuditEntry{

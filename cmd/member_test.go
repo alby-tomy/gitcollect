@@ -1,11 +1,67 @@
 package cmd
 
 import (
+	"errors"
+	"sync"
 	"testing"
 
 	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 )
+
+// multiAddMock is a concurrency-safe, in-memory api.Client used to exercise
+// addOneMember/addOneToGroup/addOneRepo (the per-item helpers behind the
+// member add / group add / add commands' multi-value support) without any
+// network access. Unlike pendingInviteMock above, it actually tracks
+// collaborator state so SyncCollaborators' add/check logic has something
+// real to operate on, and lets a test force one specific username's
+// AddCollaborator call to fail — needed to verify that a batch continues
+// past one bad item instead of aborting the whole run.
+type multiAddMock struct {
+	mu         sync.Mutex
+	collabs    map[string]bool // "owner/repo/username" -> has access
+	failAddFor map[string]bool // username -> AddCollaborator fails for them
+}
+
+func newMultiAddMock() *multiAddMock {
+	return &multiAddMock{collabs: map[string]bool{}, failAddFor: map[string]bool{}}
+}
+
+func (m *multiAddMock) key(owner, repo, username string) string {
+	return owner + "/" + repo + "/" + username
+}
+
+func (m *multiAddMock) GetRepo(owner, repo string) (api.RepoInfo, error) {
+	return api.RepoInfo{Name: repo, CloneURL: "https://example.com/" + owner + "/" + repo + ".git"}, nil
+}
+func (m *multiAddMock) GetAuthenticatedUser() (string, error) { return "owner", nil }
+func (m *multiAddMock) AddCollaborator(owner, repo, username, permission string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failAddFor[username] {
+		return errors.New("mock add failure")
+	}
+	m.collabs[m.key(owner, repo, username)] = true
+	return nil
+}
+func (m *multiAddMock) RemoveCollaborator(owner, repo, username string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.collabs, m.key(owner, repo, username))
+	return nil
+}
+func (m *multiAddMock) CheckCollaborator(owner, repo, username string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.collabs[m.key(owner, repo, username)], nil
+}
+func (m *multiAddMock) GetPendingInvite(owner, repo, username string) (bool, error) {
+	return false, nil
+}
+func (m *multiAddMock) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
+	return nil, nil
+}
+func (m *multiAddMock) Host() string { return "github.com" }
 
 // pendingInviteMock is a minimal api.Client stub for exercising
 // hasPendingInvite without any network access — every method except
@@ -49,5 +105,42 @@ func TestHasPendingInvite(t *testing.T) {
 	}
 	if hasPendingInvite(col, "bob", nil, client) {
 		t.Error("expected no pending invite for an empty granted list")
+	}
+}
+
+// TestAddOneMember exercises the per-username helper behind member add's
+// multi-value support: a fresh add succeeds, re-adding an existing member is
+// a no-op (not an error), and a sync failure surfaces as an error without
+// leaving the username added — covering the same three outcomes runMemberAdd
+// loops over for a batch of usernames.
+func TestAddOneMember(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	col, err := collection.New("acme", "github.com", "owner", collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	client := newMultiAddMock()
+
+	if err := addOneMember(col, "acme", "owner", "alice", client); err != nil {
+		t.Fatalf("addOneMember(alice) = %v, want nil", err)
+	}
+	if !col.IsMember("alice") {
+		t.Error("expected alice to be a member after addOneMember")
+	}
+
+	if err := addOneMember(col, "acme", "owner", "alice", client); err != nil {
+		t.Errorf("addOneMember(alice again) = %v, want nil (already a member is a no-op)", err)
+	}
+
+	client.failAddFor["bob"] = true
+	col.Repos = []collection.RepoAccess{{Name: "r", Groups: []string{}, Users: []string{}}}
+	if err := addOneMember(col, "acme", "owner", "bob", client); err == nil {
+		t.Fatal("addOneMember(bob) = nil, want an error from the failing sync")
+	}
+	if col.IsMember("bob") {
+		t.Error("expected bob NOT to be added to Members after a failed sync (AddMember rolls back)")
 	}
 }

@@ -19,9 +19,9 @@ var memberCmd = &cobra.Command{
 }
 
 var memberAddCmd = &cobra.Command{
-	Use:   "add <collection> <username>",
-	Short: "Add a member to a collection",
-	Args:  cobra.ExactArgs(2),
+	Use:   "add <collection> <username> [username...]",
+	Short: "Add one or more members to a collection",
+	Args:  cobra.MinimumNArgs(2),
 	RunE:  runMemberAdd,
 }
 
@@ -52,7 +52,7 @@ func init() {
 
 func runMemberAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	username := args[1]
+	usernames := args[1:]
 
 	col, err := loadCollection(name)
 	if err != nil {
@@ -71,6 +71,30 @@ func runMemberAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("member add: only %s (the owner) can add members to %q", col.Owner, name)
 	}
 
+	var failed []string
+	for i, username := range usernames {
+		if len(usernames) > 1 {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("--- %s ---\n", username)
+		}
+		if err := addOneMember(col, name, caller, username, client); err != nil {
+			failed = append(failed, fmt.Sprintf("%s (%v)", username, err))
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("member add: %d of %d failed: %s", len(failed), len(usernames), strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+// addOneMember adds a single username to col, reporting and auditing the
+// result. Factored out of runMemberAdd so adding several members in one
+// invocation can continue past an individual failure instead of aborting
+// the whole batch.
+func addOneMember(col *collection.Collection, name, caller, username string, client api.Client) error {
 	if col.IsMember(username) {
 		recordAudit(audit.AuditEntry{
 			Collection: name,
@@ -93,7 +117,7 @@ func runMemberAdd(cmd *cobra.Command, args []string) error {
 			Detail:     "Failed to sync access for new member",
 			Result:     "error: " + err.Error(),
 		})
-		return fmt.Errorf("member add: %w", err)
+		return err
 	}
 
 	recordAudit(audit.AuditEntry{

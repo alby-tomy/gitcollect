@@ -2,18 +2,20 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/audit"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 	"github.com/alby-tomy/gitcollect/internal/output"
 )
 
 var addCmd = &cobra.Command{
-	Use:   "add <collection> <repo>",
-	Short: "Add a repo to a collection, open to all members by default",
-	Args:  cobra.ExactArgs(2),
+	Use:   "add <collection> <repo> [repo...]",
+	Short: "Add one or more repos to a collection, open to all members by default",
+	Args:  cobra.MinimumNArgs(2),
 	RunE:  runAdd,
 }
 
@@ -23,10 +25,12 @@ func init() {
 
 func runAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	repoName := args[1]
+	repoNames := args[1:]
 
-	if err := collection.ValidateRepoName(repoName); err != nil {
-		return NewUsageError(fmt.Errorf("add: %w", err))
+	for _, repoName := range repoNames {
+		if err := collection.ValidateRepoName(repoName); err != nil {
+			return NewUsageError(fmt.Errorf("add: %w", err))
+		}
 	}
 
 	col, err := loadCollection(name)
@@ -46,14 +50,31 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("add: only %s (the owner) can add repos to %q", col.Owner, name)
 	}
 
+	var failed []string
+	for _, repoName := range repoNames {
+		if err := addOneRepo(col, name, caller, repoName, client); err != nil {
+			failed = append(failed, fmt.Sprintf("%s (%v)", repoName, err))
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("add: %d of %d failed: %s", len(failed), len(repoNames), strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+// addOneRepo adds a single repo to col, reporting and auditing the result.
+// Factored out of runAdd so adding several repos in one invocation can
+// continue past an individual failure instead of aborting the whole batch.
+func addOneRepo(col *collection.Collection, name, caller, repoName string, client api.Client) error {
 	for _, r := range col.Repos {
 		if r.Name == repoName {
-			return fmt.Errorf("add: %q is already in collection %q", repoName, name)
+			return fmt.Errorf("already in collection %q", name)
 		}
 	}
 
 	if _, err := client.GetRepo(col.Owner, repoName); err != nil {
-		return fmt.Errorf("add: could not find %s/%s: %w", col.Owner, repoName, err)
+		return fmt.Errorf("could not find %s/%s: %w", col.Owner, repoName, err)
 	}
 
 	col.Repos = append(col.Repos, collection.RepoAccess{Name: repoName, Groups: []string{}, Users: []string{}})
@@ -69,11 +90,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			Detail:     "Failed to sync access for new repo",
 			Result:     "error: " + syncErr.Error(),
 		})
-		return fmt.Errorf("add: could not sync access for %s: %w", repoName, syncErr)
+		return fmt.Errorf("could not sync access for %s: %w", repoName, syncErr)
 	}
 
 	if err := col.Save(); err != nil {
-		return fmt.Errorf("add: %w", err)
+		return err
 	}
 
 	recordAudit(audit.AuditEntry{
