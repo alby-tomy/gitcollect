@@ -249,8 +249,8 @@ version: "1"
 name: cybersecurity
 description: "Penetration testing and security research tools"
 host: github.com
-owner: yourusername        # set on init, defaults to authenticated user
-visibility: private        # public | private
+owner: yourusername # set on init, defaults to authenticated user
+visibility: private # public | private
 created_at: "2025-01-15T10:00:00Z"
 updated_at: "2025-01-20T14:32:00Z"
 
@@ -286,23 +286,23 @@ groups:
 repos:
   - name: pen-test-tools
     groups: []
-    users: []               # open to all members
+    users: [] # open to all members
 
   - name: vuln-scanner
     groups: [red-team]
-    users: []               # only red-team (alice, bob)
+    users: [] # only red-team (alice, bob)
 
   - name: threat-reports
     groups: [analysts]
-    users: [diana]          # analysts group OR diana individually
+    users: [diana] # analysts group OR diana individually
 
   - name: ops-runbooks
     groups: [ops]
-    users: []               # only ops group (diana)
+    users: [] # only ops group (diana)
 
   - name: ctf-writeups
     groups: []
-    users: []               # open to all members
+    users: [] # open to all members
 ```
 
 ---
@@ -400,10 +400,11 @@ func (c *Collection) FixCmd(username, repoName string) string
 ## Mutation layer — internal/collection/mutation.go
 
 Every mutation follows this exact four-step pattern:
-  1. Validate inputs (regex + logic checks)
-  2. Call platform API
-  3. Only if API succeeds: update struct and save atomically
-  4. Append to audit log (always — even on failure)
+
+1. Validate inputs (regex + logic checks)
+2. Call platform API
+3. Only if API succeeds: update struct and save atomically
+4. Append to audit log (always — even on failure)
 
 ```go
 func (c *Collection) AddMember(username string, client api.Client, actor string) error
@@ -427,8 +428,9 @@ gitcollect must detect and explain this explicitly — never let it appear as
 a silent 403.
 
 When a clone attempt returns HTTP 403, gitcollect must:
-  1. Call GetPendingInvite to check if there is an unaccepted invite
-  2. If pending invite exists, print:
+
+1. Call GetPendingInvite to check if there is an unaccepted invite
+2. If pending invite exists, print:
 
 ```
 ✗ clone: GitHub returned 403 for pen-test-tools
@@ -437,9 +439,10 @@ When a clone attempt returns HTTP 403, gitcollect must:
   Then retry: gitcollect clone <collection>
 ```
 
-  3. If no pending invite, print the generic access denied error.
+3. If no pending invite, print the generic access denied error.
 
 Add this method to the API client interface:
+
 ```go
 // GetPendingInvite returns true if username has a pending (unaccepted)
 // collaborator invite on owner/repo.
@@ -447,6 +450,7 @@ GetPendingInvite(owner, repo, username string) (bool, error)
 ```
 
 Also print the invite warning immediately after member add:
+
 ```
 ⚠ <username> will receive a GitHub collaborator invite email.
   They must accept it before gitcollect clone will work.
@@ -493,6 +497,7 @@ Run: gitcollect inspect cybersecurity --user alice  for full detail
 ```
 
 For each denied repo, include the exact fix command on the next line:
+
 ```
 vuln-scanner   red-team   ✗ no access — group red-team required
                             Ask alby-tomy: gitcollect group add cybersecurity red-team alice
@@ -528,16 +533,19 @@ ops-runbooks      ops                   diana (1)
 ### show: stale YAML warning
 
 After loading the collection, check updated_at. If older than 30 days:
+
 ```
 ⚠ This collection was last updated 45 days ago.
   If you are not the owner, ask alby-tomy for the latest collection file.
 ```
+
 Print this warning at the top of show output, before the table.
 
 ### show: non-member sees nothing
 
 A non-member asking about a private collection gets the same error
 as "not found" — never confirm the collection exists:
+
 ```
 ✗ show: collection "cybersecurity" not found or access denied
 ```
@@ -706,7 +714,7 @@ func FullMatrix(col *collection.Collection) AccessMatrix
 ## Audit trail — internal/audit/audit.go
 
 Every mutation appended to:
-  filepath.Join(home, ".gitcollect", "audit", "<collection>.log")
+filepath.Join(home, ".gitcollect", "audit", "<collection>.log")
 as newline-delimited JSON. One object per line.
 
 ```go
@@ -739,8 +747,13 @@ func Filter(entries []AuditEntry, user string, since time.Duration) []AuditEntry
 ```
 
 Collection delete must write a final audit entry before removing the log:
+
 ```json
-{"action":"collection.delete","detail":"Collection deleted. Final audit entry.","result":"ok"}
+{
+  "action": "collection.delete",
+  "detail": "Collection deleted. Final audit entry.",
+  "result": "ok"
+}
 ```
 
 ---
@@ -849,7 +862,7 @@ func StaleWarning(collectionName string, daysSince int)        // stale YAML war
 - Validation regexes (compile once at package init, reuse):
   Collection name: ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$
   Repo name:       ^[a-zA-Z0-9._-]{1,100}$
-  Username:        ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$
+  Username: ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$
   Group name:      ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,30}$
   Reject all inputs containing ../ \ or null bytes.
 - HTTPS only: use clone_url from API. Reject SSH patterns.
@@ -963,16 +976,16 @@ Use stdlib testing only. No external assertion libraries.
 Use t.TempDir() for all file tests. Never touch real home directory paths.
 Use os.UserHomeDir() pattern in tests — never hardcode paths.
 
-| Package                    | What to test                                                         |
-|----------------------------|----------------------------------------------------------------------|
+| Package                    | What to test                                                                                          |
+| -------------------------- | ----------------------------------------------------------------------------------------------------- |
 | internal/collection        | Load, Save, Validate, all mutations, IsOwner, IsMember, CanAccessRepo, AllRepos, WhyCanAccess, FixCmd |
-| internal/collection/access | Full decision table — all rows including owner, public, union cases  |
-| internal/access            | CheckCollectionAccess, CheckRepoAccess with pending invite mock, FilterAccessible, SyncCollaborators |
-| internal/audit             | Append, Read, Filter by user and all --since values                  |
-| internal/api               | GitHub + GitLab against httptest.Server mocks + GetPendingInvite     |
-| internal/git               | Correct args to git subprocess for Clone, Pull, Status, Sync         |
-| internal/config            | File at 0600, directory at 0700, paths via os.UserHomeDir()          |
-| internal/output            | Table alignment, JSON, Confirm, InviteWarning, StaleWarning          |
+| internal/collection/access | Full decision table — all rows including owner, public, union cases                                   |
+| internal/access            | CheckCollectionAccess, CheckRepoAccess with pending invite mock, FilterAccessible, SyncCollaborators  |
+| internal/audit             | Append, Read, Filter by user and all --since values                                                   |
+| internal/api               | GitHub + GitLab against httptest.Server mocks + GetPendingInvite                                      |
+| internal/git               | Correct args to git subprocess for Clone, Pull, Status, Sync                                          |
+| internal/config            | File at 0600, directory at 0700, paths via os.UserHomeDir()                                           |
+| internal/output            | Table alignment, JSON, Confirm, InviteWarning, StaleWarning                                           |
 
 Minimum 80% coverage on all internal/ packages.
 
@@ -1123,3 +1136,5 @@ do not re-debate them. Add entries as: "DECISION: <what> — <why>"
 ```
 (none yet)
 ```
+
+<!-- v2 -->
