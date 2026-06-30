@@ -735,10 +735,10 @@ same `access.UserAccessMap`/`FilterAccessible` decision.
 ```
 $ gitcollect audit cybersecurity --since 7d
 
-2026-01-20 14:32  alice       member.add            bob             Added member
-2026-01-20 14:35  alice       member.add_to_group   bob → red-team  Added bob to red-team
-2026-01-19 09:10  alice       repo.access.set       vuln-scanner    open to all members → groups: red-team
-2026-01-15 10:00  alice       init                  cybersecurity   Collection created (private)
+2026-01-20 14:32  alice       member.add            bob                   Added member
+2026-01-20 14:35  alice       member.add_to_group   bob → red-team        Added bob to red-team
+2026-01-19 09:10  alice       repo.access.set       vuln-scanner          open to all members → groups: red-team
+2026-01-15 10:00  alice       init                  cybersecurity         Collection created (private)
 ```
 
 Real format string (`cmd/audit.go`): `"%s  %-10s  %-20s  %-20s  %s%s\n"` —

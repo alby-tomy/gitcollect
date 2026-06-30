@@ -1,385 +1,428 @@
 # gitcollect
 
-A standalone Go CLI that groups GitHub/GitLab repositories into named
-**collections** and controls who can access them — at both the collection
-level (membership) and the repo level (which groups or individuals can
-reach which repos).
+![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)
+![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos%20%7C%20windows-informational)
+![License](https://img.shields.io/badge/license-unspecified-lightgrey)
 
-gitcollect's local YAML manifest is a *declaration of intent*; the
-GitHub/GitLab platform is the *enforcement point*. Every access mutation
-drives the platform API to completion before the local YAML is written.
+Group your GitHub and GitLab repositories into named collections — with
+per-repo access control neither platform gives you natively.
 
-See [PROMPT.md](PROMPT.md) for the full design spec, or browse the
-**[full command reference and docs page](docs/index.html)** for every
-command and flag with descriptions, plus a [two-person
-walkthrough](docs/index.html#walkthrough) of sharing a collection with a
-teammate end to end.
-(It's a static HTML file — open `docs/index.html` directly in a browser,
-or enable GitHub Pages on this repo pointed at `/docs` to host it online;
-clicking the link on GitHub's own file viewer shows the raw source, not
-the rendered page.)
+## The problem
 
-## Prerequisites
+GitHub and GitLab give you a flat list of repos under an org or a user, and
+that's it. There's no native concept of "these eleven repos, across two
+orgs and my personal account, are one logical project" — let alone a way to
+say "this subset of my team can see these three, and that subset can see
+the other eight." Today that means either over-sharing (everyone on the
+team gets collaborator access to everything) or a spreadsheet someone
+maintains by hand and nobody trusts. GitHub's own team has said custom
+repo grouping isn't something they're building — which is reasonable, it's
+not really their problem to solve at the platform level. It's gitcollect's.
 
-- Go 1.26+ (see `go.mod`)
-- `git` on your `PATH` (required for `clone`/`pull`/`status`/`sync`)
-- A GitHub or GitLab personal access token (for `gitcollect auth`)
+## Quick demo
 
-All commands below are plain `go` commands — no Make, no shell scripts.
-They work identically once you're in the right shell for your OS; the only
-differences are path separators and the home-directory environment
-variable, called out per OS below.
+```
+$ gitcollect init cybersecurity
+✓ Created collection "cybersecurity" (private) on github.com
+Run: gitcollect add cybersecurity <repo>
 
-## Setup, build, and run
+$ gitcollect add cybersecurity pen-test-tools
+✓ Added pen-test-tools to "cybersecurity" (open to all 0 members)
+Run: gitcollect repo access cybersecurity pen-test-tools --groups <g1,g2>
 
-### Windows (PowerShell)
+$ gitcollect member add cybersecurity teammate-username
+✓ Added teammate-username to cybersecurity
 
-```powershell
-git clone <this-repo>
-cd gitcollect
-go mod download
+  Granted access: pen-test-tools
 
-go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect.exe .
-.\bin\gitcollect.exe --help
-
-# or run without building a binary first
-go run . --help
+$ gitcollect clone cybersecurity
+✓ Access verified (teammate-username · no groups)
+  1 of 1 repos accessible
+[1/1] Cloning pen-test-tools...               ✓ done  (1.2s)
+✓ Cloned 1 repo(s) in 1.2s
 ```
 
-Install onto `%GOBIN%` (or `%GOPATH%\bin`):
+That's the whole loop: declare a collection, add repos to it, add a
+teammate, and the moment they run `clone`, gitcollect has already made them
+a real collaborator on exactly the repos they're entitled to — nothing
+more.
 
-```powershell
-go install -ldflags="-s -w" .
+## How is this different from ghorg / gh repo list / etc?
+
+**[ghorg](https://github.com/gabrie30/ghorg)** and tools like
+[myrepos](https://myrepos.branchable.com/) already solve cloning an entire
+existing GitHub org or GitLab group efficiently — point them at an org and
+they clone everything in it, fast, with mature config and caching. If
+that's your need — "give me every repo in this org" — use one of them,
+they're well-tested for exactly that job. `gh repo list` / `glab repo
+list` cover the read-only "what's in this org" case well too, straight
+from the platform's own CLI.
+
+gitcollect solves a different problem: organizing repos that don't already
+live under one platform-level org or group — a mix of personal repos and
+repos across two or three different orgs, say — and then controlling who
+on your team can reach which of them, as one logical unit. Neither GitHub
+nor GitLab nor any of the tools above does that; there's no platform
+concept of "a group of repos that span multiple real orgs," so there's
+nothing for a bulk-clone tool to point at. gitcollect's `collection` is
+that concept, kept as a local YAML file you own.
+
+```
+Use ghorg / myrepos when:  you want everything already in one org/group, as-is
+Use gitcollect when:       you want your own custom groupings across personal
+                           repos or multiple orgs, with per-repo access control
 ```
 
-> **Home directory:** gitcollect's local state path resolves via Go's
-> `os.UserHomeDir()`, which on Windows reads `%USERPROFILE%`, **not**
-> `$HOME`. If you use Git Bash, `export HOME=...` will *not* affect the
-> compiled binary — set `$env:USERPROFILE` in PowerShell instead if you
-> need to point it at a custom directory.
+If your repos already live under one org and platform-native access is
+enough, gitcollect adds nothing you don't already have — use the simpler
+tool.
 
-### macOS
+## Installation
+
+Prebuilt binaries for linux/macos/windows (amd64/arm64) are produced by
+[goreleaser](https://goreleaser.com) per [.goreleaser.yaml](.goreleaser.yaml)
+when a release is cut (`make release`); check this repo's
+[Releases](../../releases) page for whether one has been published yet.
+Until then, build from source — it's one command and requires nothing but
+Go itself:
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/alby-tomy/gitcollect.git
 cd gitcollect
-go mod download
-
 go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect .
 ./bin/gitcollect --help
-
-# or run without building a binary first
-go run . --help
 ```
 
-Install onto `$GOBIN` (or `$GOPATH/bin`):
+Or install straight onto your `$GOBIN`/`%GOBIN%`:
 
 ```bash
-go install -ldflags="-s -w" .
+go install github.com/alby-tomy/gitcollect@latest
 ```
 
-> macOS ships Xcode's Clang, so `go test -race` (see below) works out of
-> the box with no extra setup.
+Requires Go 1.26+ (see [go.mod](go.mod)) and `git` on your `PATH` for
+`clone`/`pull`/`status`/`sync`. No Homebrew tap exists yet — `go install`
+or building from source are the supported paths today.
 
-### Linux
+> **Windows note:** gitcollect's state path resolves via Go's
+> `os.UserHomeDir()`, which reads `%USERPROFILE%`, not `$HOME` — if you're
+> in Git Bash, `export HOME=...` won't affect the compiled binary.
+
+## Quickstart
 
 ```bash
-git clone <this-repo>
-cd gitcollect
-go mod download
-
-go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect .
-./bin/gitcollect --help
-
-# or run without building a binary first
-go run . --help
-```
-
-Install onto `$GOBIN` (or `$GOPATH/bin`):
-
-```bash
-go install -ldflags="-s -w" .
-```
-
-> If `go test -race` complains about a missing C compiler, install one
-> (e.g. `sudo apt install build-essential` on Debian/Ubuntu, `sudo dnf
-> groupinstall "Development Tools"` on Fedora) — most desktop/CI Linux
-> images already have gcc preinstalled.
-
-### First-time use (all platforms)
-
-```bash
-gitcollect auth                       # store a GitHub token (hidden prompt)
-gitcollect auth --host gitlab.com     # or authenticate against GitLab
-gitcollect whoami                     # confirm it worked
-gitcollect whoami --json              # same, machine-readable
-
-gitcollect init my-collection          # create the collection first
-gitcollect add my-collection some-repo # then add repos to it
-gitcollect member add my-collection some-username
-gitcollect show my-collection
-```
-
-> `add`/`member add`/etc. all require the collection to already exist —
-> `gitcollect init <name>` first, or you'll get
-> `collection "..." not found. Run: gitcollect list`.
-
-`add`, `member add`, and `group add` all accept more than one value in a
-single command — useful for onboarding a whole team or wiring up several
-repos at once instead of running the command once per item:
-
-```bash
-gitcollect add my-collection repo-a repo-b repo-c
-gitcollect member add my-collection alice bob charlie
-gitcollect group add my-collection red-team alice bob
-```
-
-Each value is processed independently. One bad value (a typo'd username, a
-repo already in the collection) doesn't abort the rest — every value is
-still attempted, and the command reports all the failures together at the
-end, exiting non-zero only if at least one actually failed. An already-
-satisfied value (already a member, already in the group) is a no-op, not a
-failure, even inside an otherwise-failing batch. `member add` additionally
-prints a `--- username ---` header before each user's block when given more
-than one, since that block is several lines (a success line plus the
-granted/skipped access breakdown); `group add` and `add` skip the header
-since their per-item output is a single line each.
-
-`gitcollect auth` only needs to be run once per host. The token is saved
-to `~/.gitcollect/config` and reused by every later command — gitcollect
-never re-prompts just because time has passed. It only stops working once
-the token itself actually expires/is revoked on GitHub's or GitLab's side
-(whatever expiration you picked when generating it); the next command you
-run after that will fail with something like `invalid or missing token`
-plus a `Run: gitcollect auth` hint telling you to generate a fresh one.
-
-`gitcollect list` shows every collection you own or are a member of, public
-or private. Narrow it to one visibility with `--private` or `--public`:
-
-```bash
-gitcollect list             # everything you own or are a member of
-gitcollect list --private   # just the private ones
-gitcollect list --public    # just the public ones
-```
-
-All local state lives under `~/.gitcollect/` (`config` for tokens at file
-mode `0600`, `collections/*.yaml` for manifests, `audit/*.log` for the
-access-change audit trail, `activity/*.log` for the code-activity log — see
-below). Nothing is written there until you run `auth` or `init`.
-
-### Listing the repos inside a collection — and which ones you can reach
-
-```bash
-gitcollect show my-collection
-```
-
-Prints a summary including a `REPO | ACCESS RULE | YOU` table. `ACCESS
-RULE` is the configured rule (open to all members / restricted to groups
-or users); `YOU` is personal to whoever runs the command — `✓ yes`, or
-`✗ no — <reason>` if you're denied (e.g. `✗ no — no access — group
-red-team required`). If anything is denied, a line below the table lists
-every repo you can't reach, the exact command to fix each one (e.g. `gitcollect
-group add my-collection red-team alice`), and points you at `inspect --user`
-for more detail. `gitcollect clone` only ever clones the repos marked `✓`
-here — the two are backed by the same access decision, so `show` always
-tells you in advance what `clone` will actually fetch.
-
-If you run `show` as the collection's **owner**, the `YOU` column is
-replaced with `WHO HAS ACCESS` — a list of every member who can reach each
-repo — since `YOU` is trivially always `✓` for an owner and isn't useful
-information. And if the collection's YAML hasn't been updated in over 30
-days, both `show` and `list` print a warning that the file may be stale and
-suggest asking the owner for a fresh copy.
-
-For a per-member access breakdown (who can reach which repo, and why),
-use `inspect` instead:
-
-```bash
-gitcollect inspect my-collection
+gitcollect auth                        # store a token, hidden prompt, verified live
+gitcollect init cybersecurity          # you become the owner
+gitcollect add cybersecurity pen-test-tools vuln-scanner   # repos accept multiple names
+gitcollect member add cybersecurity teammate-username      # so do member add and group add
+gitcollect show cybersecurity          # see exactly who can reach what
+gitcollect clone cybersecurity         # clone everything you're entitled to
 ```
 
 ```
-Collection:  my-collection
+$ gitcollect show cybersecurity
+Collection:  cybersecurity
+Host:        github.com
+Owner:       your-username
 Visibility:  private
 Members:     1
+Groups:      0
+Repos:       2
 
-MEMBER         learning-hub
-sreekutty2728  ✓
+MEMBER
+teammate-username
+
+REPO            ACCESS RULE          YOU
+pen-test-tools  open to all members  ✓ yes
+vuln-scanner    open to all members  ✓ yes
 ```
 
-Each column after `MEMBER` is one repo in the collection (`learning-hub`
-above is a repo name, not a label) — `✓`/`✗` shows whether that row's
-member can access it. Use `gitcollect inspect my-collection --repo
-<repo-name>` to flip the view (one repo, every member), or `--user
-<username>` to see one member's full access map with the reason for each
-decision.
+`add`, `member add`, and `group add` all accept more than one value in a
+single command — `gitcollect member add cybersecurity alice bob charlie`
+adds all three, continuing past any one failure and reporting every
+failure together at the end rather than aborting the whole batch.
 
-### Granting or revoking one user's access to a specific repo
+The `YOU` column in `show` is the same access decision `clone` uses to pick
+what it fetches — they can never disagree. Run `gitcollect <command>
+--help` for the live version of anything below.
 
-`gitcollect repo access <collection> <repo> --users u1,u2` *replaces* a
-repo's entire individual-access list, so you need to already know everyone
-currently on it. For adding or removing just one person without touching
-anyone else's access, use `grant`/`revoke` instead:
+## Full command reference
 
-```bash
-gitcollect repo grant my-collection some-repo some-username   # add one user
-gitcollect repo revoke my-collection some-repo some-username  # remove one user
-```
+<details open>
+<summary><strong>Authentication</strong></summary>
 
-Both require the collection owner's token (same as every other access
-mutation) and leave the repo's group restrictions untouched. A couple of
-guardrails worth knowing:
+| Command | Description |
+|---|---|
+| `gitcollect auth [--host github.com]` | Store a personal access token (hidden prompt), verified against the platform API before saving to `~/.gitcollect/config` at mode `0600`. `--host` defaults to `github.com`. |
+| `gitcollect whoami [--json]` | Show the authenticated user for every host you've run `auth` on; a rejected token shows the error inline rather than hiding the rest. |
 
-- `repo grant` refuses if the repo is currently **open to all members**
-  (no group/user restriction at all) — adding one user to an empty list
-  would flip the rule from "everyone" to "only this one user," silently
-  locking everyone else out. Use `repo access --users <name>` if you
-  actually mean to restrict an open repo.
-- `repo revoke` refuses if removing that user would leave the repo with
-  **no restriction at all**, which would silently re-open it to every
-  member. Use `repo access --users <remaining-names>` if that's what you
-  actually want.
+</details>
 
-Both commands are no-ops (not errors) if the user already has, or already
-lacks, that individual grant.
+<details open>
+<summary><strong>Collection lifecycle</strong></summary>
 
-If `member add` grants access to a repo but GitHub leaves the user as a
-**pending, unaccepted collaborator invite** rather than an immediate
-collaborator (which is how GitHub's API behaves unless the invitee already
-has access), gitcollect warns about it and points you at
-https://github.com/notifications so they know to accept it. `clone` does the
-same check on any repo it had to skip — distinguishing "you're not entitled
-to this repo" from "you're entitled but haven't accepted the invite yet."
-This pending-invite state doesn't exist on GitLab — project membership added
-through GitLab's API takes effect immediately, so this warning never fires
-there.
+| Command | Description |
+|---|---|
+| `gitcollect init <name> [--host h] [--description d] [--public]` | Create a collection. Private by default — being the owner does not automatically make you a member. |
+| `gitcollect delete <collection>` | Delete a collection and revoke every member's access to every repo first. Requires typing the collection's name to confirm. |
+| `gitcollect list [--private\|--public] [--json]` | List collections you own or belong to, from local manifests only — no network calls. |
+| `gitcollect show <collection> [--json]` | Summary: members, groups, repos, and a per-repo access column (`YOU` for a regular caller, `WHO HAS ACCESS` if you're the owner). Warns if the local file is >30 days stale. |
+| `gitcollect visibility <collection> <public\|private>` | Change visibility. Switching to public asks for confirmation — it makes the collection's existence discoverable. |
 
-### Cloning and keeping repos up to date
+</details>
 
-```bash
-gitcollect clone my-collection              # clone every accessible repo
-gitcollect clone my-collection --pick "r1 r2"   # clone only these repos
-gitcollect pull my-collection               # git pull inside every repo already cloned
-gitcollect status my-collection             # git status inside every repo already cloned
-gitcollect sync my-collection               # clone what's missing, pull what's already there
-```
+<details open>
+<summary><strong>Repo management</strong></summary>
 
-`sync` is the one-shot version of running `clone` then `pull`: for every
-accessible repo, it clones it if it isn't present yet at `--dest`, or runs
-`git pull` if it already is, reporting `✓ done (1.4s)` for a fresh clone and
-either `✓ up to date` or `✓ N new commit(s)` for a pull — useful as the one
-command to run before starting work each day. All three of `clone`/`pull`/
-`sync` accept `--dest <dir>` (default `.`) and `--dry-run`; `clone` and
-`sync` also accept `--concurrency N` (default 4) to control how many repos
-run in parallel.
+| Command | Description |
+|---|---|
+| `gitcollect add <collection> <repo> [repo...]` | Add one or more repos, open to all members by default. Repo names are validated up front; per-repo failures (already added, sync error) don't abort the rest of the batch. |
+| `gitcollect remove <collection> <repo>` | Remove a repo and revoke everyone's collaborator access to it first. Requires typing the repo's name to confirm. |
+| `gitcollect repo access <collection> <repo> --groups g1,g2 \| --users u1,u2 \| --open` | Replace a repo's whole access rule. Groups and users are unioned — either satisfies access. |
+| `gitcollect repo show <collection> <repo>` | A repo's current rule plus a per-member access table. |
+| `gitcollect repo grant/revoke <collection> <repo> <user>` | Add or remove one user's individual grant without touching the rest of the rule. `grant` refuses on an open repo (would silently narrow access to just that user); `revoke` refuses if it would leave the repo with no restriction at all. |
 
-### Seeing code changes across a collection's repos
-
-`gitcollect audit` only tracks *access* changes — member/group/repo-access
-mutations made through gitcollect itself. It has no idea what's actually
-been committed to the repos. For that, use `activity`:
-
-```bash
-gitcollect activity my-collection
-```
-
-This fetches the most recent commits on each accessible repo's **default
-branch** directly from GitHub/GitLab (live — no daemon, no polling, just
-whatever's true right now), records any genuinely new ones to
-`~/.gitcollect/activity/<collection>.log`, and prints the combined history
-(everything previously recorded plus this run's fetch) as one table sorted
-newest-first, with the author and branch for every commit:
+</details>
 
 ```
-REPO          BRANCH  AUTHOR  SHA      MESSAGE         WHEN
-learning-hub  main    alice   a1b2c3d  Fix login bug   2026-06-28 14:02
-learning-hub  main    bob     9f8e7d6  Add tests        2026-06-27 09:11
+$ gitcollect repo access cybersecurity vuln-scanner --groups red-team
+
+✓ Updated access for vuln-scanner
+  Before: open to all members
+  After:  groups: red-team
+Run: gitcollect inspect cybersecurity --repo vuln-scanner
 ```
 
-Useful flags:
-- `--repo <name>` — only check one repo instead of every accessible one
-- `--since <duration>` — only show commits within this window; must be exactly one of `1h`, `24h`, `7d`, `30d`, or `90d` (strict allow-list, no other value accepted)
-- `--limit N` — how many commits to fetch per repo this run (default 10) — this only bounds the live fetch; previously recorded commits beyond that window are still shown from the log
-- `--json` — machine-readable output
+<details>
+<summary><strong>Member management</strong></summary>
 
-Like `clone`/`pull`/`status`/`sync`, this always needs a live, authenticated
-API call (to resolve the default branch and list commits), even for public
-collections — there's no local-only path for "what got committed."
+| Command | Description |
+|---|---|
+| `gitcollect member add <collection> <username> [username...]` | Add one or more members, syncing each one's access across every repo they're now entitled to. On GitHub, warns if a grant leaves someone with a pending, unaccepted collaborator invite (GitLab has no such state). |
+| `gitcollect member remove <collection> <username> [--confirm-self]` | Remove a member and revoke all their access. Removing yourself additionally requires `--confirm-self`. |
+| `gitcollect member list <collection>` | Members and which groups each belongs to. |
 
-> A [Makefile](Makefile) and [.goreleaser.yaml](.goreleaser.yaml) wrap these
-> same commands (`make build`, `make test`, `goreleaser release`, etc.) for
-> anyone who already has GNU Make / goreleaser on their `PATH` — they're
-> optional conveniences, not requirements. Everything in this README runs
-> with plain `go` commands on every OS.
+</details>
 
-## Running the tests
+<details>
+<summary><strong>Group management</strong></summary>
 
-Run everything:
+| Command | Description |
+|---|---|
+| `gitcollect group create/delete <collection> <group>` | Create or delete a group. Delete is blocked, with the list of blockers, if any repo still restricts access to it. |
+| `gitcollect group add <collection> <group> <username> [username...]` | Add one or more members to a group, syncing their repo access. Guides you to `member add` first for anyone who isn't a collection member yet. |
+| `gitcollect group remove <collection> <group> <username>` | Remove a member from a group and re-sync their access. |
+| `gitcollect group list/show <collection> [group]` | List every group, or show one group's members and the repos restricted to it. |
 
-```bash
-go test ./...
+</details>
+
+```
+$ gitcollect group list cybersecurity
+GROUP     MEMBERS  USERS
+red-team  2        alice, bob
 ```
 
-With coverage (the project targets 80%+ on every `internal/` package):
+<details>
+<summary><strong>Access inspection &amp; audit</strong></summary>
 
-```bash
-go test ./... -cover
+| Command | Description |
+|---|---|
+| `gitcollect inspect <collection> [--user u \| --repo r] [--json]` | No flags: the full member × repo matrix. `--user`: one person's full access map with the reason for each decision. `--repo`: who can reach one repo and why. Denied rows get a "To fix:" footer with the exact command to grant access. |
+| `gitcollect audit <collection> [--user u] [--since 1h\|24h\|7d\|30d\|90d] [--json]` | The access change log — every mutation gitcollect ever attempted, including failures, newest first. `--since` only accepts those five exact values. |
+| `gitcollect activity <collection> [--repo r] [--since ...] [--limit n] [--json]` | Code changes, not access changes: live commits per accessible repo's default branch, recorded to `~/.gitcollect/activity/<collection>.log`. |
+
+</details>
+
+```
+$ gitcollect audit cybersecurity --since 7d
+
+2026-01-20 14:32  alice       member.add            bob                   Added member
+2026-01-19 09:10  alice       repo.access.set       vuln-scanner          open to all members → groups: red-team
+2026-01-15 10:00  alice       init                  cybersecurity         Collection created (private)
 ```
 
-Per-package, with a function-level coverage breakdown:
+<details>
+<summary><strong>Git operations</strong></summary>
 
-```bash
-go test ./internal/collection/... -coverprofile=coverage.out
-go tool cover -func=coverage.out
+| Command | Description |
+|---|---|
+| `gitcollect clone <collection> [--pick "r1 r2"] [--dest d] [--concurrency n] [--dry-run]` | Clone every accessible repo (or just the ones in `--pick`). "Accessible" requires both the local rule and a live platform collaborator check. |
+| `gitcollect pull <collection> [--dest d]` | `git pull` inside every accessible repo already cloned. |
+| `gitcollect status <collection> [--dest d]` | `git status` inside every accessible repo already cloned, as a clean/changed table. |
+| `gitcollect sync <collection> [--dest d] [--concurrency n] [--dry-run]` | Clone what's missing, pull what's already there — `clone` + `pull` in one pass, one access check. |
+
+</details>
+
+<details>
+<summary><strong>System</strong></summary>
+
+| Command | Description |
+|---|---|
+| `gitcollect version` | Print the build version and `GOOS/GOARCH`. |
+| `gitcollect completion <bash\|zsh\|fish\|powershell>` | Shell autocompletion script, courtesy of Cobra. |
+
+</details>
+
+## How access control works
+
+gitcollect never invents its own permission system. Every access decision
+is enforced by the real GitHub/GitLab collaborator API — gitcollect's YAML
+is a *declaration of intent* that drives the real platform, never a
+parallel source of truth. A teammate can only actually clone a repo when
+**two independent things are both true**: the local manifest says they
+should have access, *and* the platform itself has already made them a real
+collaborator on that specific repo. Hand-editing the YAML changes the
+first; it can never fake the second.
+
+A worked example — owner creates a collection, teammate clones it:
+
+```
+(you, the owner)                          (your teammate)
+─────────────────                          ───────────────
+gitcollect init cybersecurity
+gitcollect add cybersecurity pen-test-tools
+gitcollect member add cybersecurity \
+  teammate-username
+  → calls the platform API right away,
+    adding teammate-username as a real
+    collaborator on pen-test-tools
+
+                                            gitcollect auth
+                                            gitcollect show cybersecurity
+                                              → YOU: ✓ yes
+                                            gitcollect clone cybersecurity
+                                              → succeeds: clone only ever
+                                                fetches what show already
+                                                said yes to
 ```
 
-Or view it in a browser:
+Per-repo access is a **union**, not an intersection, of groups and users —
+satisfying either is enough:
 
-```bash
-go tool cover -html=coverage.out
+```
+repo "vuln-scanner":
+  groups: [red-team]        ─┐
+  users:  [eve]              ├─ OR  →  access granted to anyone in
+                             ─┘        red-team, OR eve specifically
+
+alice (in red-team)     → ✓ access (via group)
+eve   (not in any group) → ✓ access (via individual grant)
+bob   (in neither)        → ✗ no access — group red-team or
+                                         individual grant required
 ```
 
-The full CI-equivalent command:
+An empty `groups: []` *and* empty `users: []` on a repo means "open to
+every collection member" — that's the explicit empty-list convention, not
+an oversight. `gitcollect repo grant`/`revoke` exist specifically so you
+can add or remove one person's individual access without retyping the
+whole `--users` list, with guardrails against the two ways that could
+silently change the rule: granting one user to an otherwise-open repo
+would narrow it to just them, and revoking someone's last individual grant
+on an otherwise-unrestricted repo would silently reopen it to everyone.
+Both are refused outright rather than allowed to happen by accident.
 
-```bash
-go test ./... -race -cover -coverprofile=coverage.out
+Every mutation follows the same shape — validate locally, call the
+platform API, only then write the YAML, then append to the audit log:
+
+![Access management flow](architecture-image/gitcollect_access_management_flow.png)
+
+## Security model
+
+- **Token storage**: `~/.gitcollect/config` is created at file mode
+  `0600`; the `~/.gitcollect/` directory itself is `0700`. Writes are
+  atomic (temp file + rename), so a crash mid-write can't corrupt the
+  token store or leave it world-readable even momentarily.
+- **HTTPS-only**: `internal/api`'s GitHub and GitLab clients only ever
+  build `https://` base URLs, and `internal/git`'s clone path explicitly
+  rejects any clone URL that isn't `https://` before invoking `git`.
+- **Input validation**: collection, repo, username, and group names are
+  all checked against explicit allowlist regexes before anything touches
+  disk or the network — e.g. repo names also reject `../`, `/`, `\`, and
+  NUL bytes outright, not just a format mismatch.
+- **Private collection non-disclosure**: a non-member hitting a private
+  collection gets the exact same generic error
+  (`collection not found or access denied`) whether the collection
+  doesn't exist at all or simply isn't theirs to see — there's no way to
+  fingerprint a private collection's existence by probing names.
+- **Dual enforcement on every clone/pull**: access requires both the local
+  manifest rule *and* a live `CheckCollaborator` call against the real
+  platform API — passing only one is not enough.
+- **Atomic YAML writes**: every collection manifest is written via
+  temp-file-then-rename at `0600`, the same pattern as the token store.
+- **No encryption of collection YAML**: membership lists are plaintext by
+  design — a collection's member/group/repo structure isn't a secret the
+  way a token is; only the token store gets restrictive permissions.
+
+## Architecture
+
+`cmd/` holds one file per command/command-group (21 non-test files, one
+cobra `Command` each); `internal/` holds the actual logic, kept
+deliberately separate from any CLI framework concern:
+
+```
+gitcollect/
+├── main.go
+├── cmd/               # 21 commands: auth, init, add, member, group, repo,
+│                      # inspect, audit, activity, clone, pull, status,
+│                      # sync, show, list, ...
+└── internal/
+    ├── collection/    # the YAML manifest itself — load/save/validate,
+    │                  # IsMember/CanAccessRepo (pure, no network)
+    ├── access/        # bridges collection + api: enforces, syncs
+    │                  # platform state, builds inspect's matrices
+    ├── api/           # GitHub + GitLab clients behind one interface
+    ├── git/           # thin wrappers around the git subprocess
+    ├── audit/         # access-change log (newline-delimited JSON)
+    ├── activity/      # commit-activity log (separate from audit —
+    │                  # code changes, not access changes)
+    ├── config/        # ~/.gitcollect/ paths, token storage
+    └── output/        # Success/Error/Table/JSON/Confirm helpers
 ```
 
-> **Note on `-race`:** the race detector requires CGO and a C toolchain.
-> macOS and most Linux setups have one already (see the OS sections
-> above); on Windows you'd need a C compiler such as
-> [mingw-w64](https://www.mingw-w64.org/) on `PATH` with
-> `CGO_ENABLED=1` set. If you don't have that configured, drop `-race`
-> and run the plain command above instead — CI runs the race-enabled
-> target on Linux regardless.
+![Architecture overview](architecture-image/gitcollect_architecture_overview.png)
 
-Run a single package or test by name:
+`internal/collection` never calls a network API — it only reasons about
+the local declaration of intent. `internal/access` is the only package
+that bridges the two: it's where "does the YAML say yes" and "does the
+platform actually agree" get checked together. See
+[PROMPT.md](PROMPT.md) for the full design rationale, every architectural
+decision made along the way, and the complete file-by-file build log.
 
-```bash
-go test ./internal/access/... -run TestAccessDecisionMatrix -v
-```
+## Roadmap
 
-### What the tests don't need
+Not committed, just being considered for a future version:
 
-All tests are self-contained: they use `t.TempDir()` and
-`t.Setenv("HOME"/"USERPROFILE", ...)` to isolate `~/.gitcollect`, in-memory
-mock `api.Client` implementations to avoid real network calls, and (for
-`internal/git`) a fake `git` executable placed on `PATH` to verify
-subprocess arguments without invoking real git commands. No tokens, network
-access, or real GitHub/GitLab accounts are needed to run the suite, on any
-OS.
+- **Bitbucket support** — GitHub and GitLab only today; the `api.Client`
+  interface was kept platform-agnostic on purpose so a third
+  implementation wouldn't require touching `cmd/` or `internal/access`.
+- **`gitcollect fetch`** — pulling a collection's YAML from somewhere
+  other than a manual file copy/commit; today sharing a collection means
+  literally sending the teammate the YAML file (see Installation/Security
+  above — there's no server, so there's nothing to fetch from yet).
+- **A dashboard or web UI** — a read-only view of `inspect`'s access
+  matrix, for teams who'd rather glance at a page than run a CLI command.
 
-## Linting
+Explicitly *not* planned, by design rather than by omission: a GUI/TUI, a
+daemon or web server, a database (YAML + newline-delimited JSON audit log
+is the whole storage layer), SSH clone support, or a `gitcollect admin`
+mode that bypasses each user's own platform token.
 
-```bash
-golangci-lint run ./...
-```
+## Contributing
 
-## Releasing
+Issues and pull requests welcome — open one [here](../../issues). Before
+sending a PR: `go build ./...`, `go vet ./...`, and `go test ./... -cover`
+should all be clean (`make test` runs the race-enabled, coverage-tracked
+version). In the interest of being upfront about how this project is
+built: gitcollect's implementation has been developed through an
+AI-assisted process driven by a structured specification,
+[PROMPT.md](PROMPT.md), which doubles as the project's design rationale
+and session-by-session build log — worth reading before a non-trivial
+change, since it records *why* a lot of non-obvious decisions were made,
+not just what the code does.
 
-Release builds are configured in [.goreleaser.yaml](.goreleaser.yaml) and
-cut via:
+## License
 
-```bash
-goreleaser release --clean
-```
+No `LICENSE` file currently exists in this repository, so no license
+terms have actually been granted yet — the badge above reflects that
+honestly rather than assuming one. If you're the maintainer, add a
+`LICENSE` file before treating this as open source in any legal sense;
+until then, all rights are reserved by default under copyright law.

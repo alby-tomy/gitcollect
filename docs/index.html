@@ -325,9 +325,9 @@ Repos:       2
 MEMBER
 teammate-username
 
-REPO            ACCESS RULE           YOU
-pen-test-tools  open to all members   ✓ yes
-vuln-scanner    open to all members   ✓ yes</pre>
+REPO            ACCESS RULE          YOU
+pen-test-tools  open to all members  ✓ yes
+vuln-scanner    open to all members  ✓ yes</pre>
     <p>The <code>YOU</code> column is always about whoever ran the command — it's
     not a generic property of the repo. If a repo were restricted to a group they
     aren't in, that row would read <code>✗ no — no access — group red-team
@@ -357,8 +357,8 @@ Run: gitcollect inspect cybersecurity --user teammate-username</pre>
     <pre class="codeblock dim">$ gitcollect clone cybersecurity --pick exploit-db
 ✗ clone: "exploit-db" is not an accessible repo in this collection</pre>
     <p>And the suggested <code>inspect</code> command spells out the exact reason:</p>
-    <pre class="codeblock dim">REPO        ACCESS   REASON
-exploit-db  ✗ no     no access — group red-team required</pre>
+    <pre class="codeblock dim">REPO        ACCESS  REASON
+exploit-db  ✗ no    no access — group red-team required</pre>
     <p>Even a raw <code>git clone</code> of that repo's URL fails for them — GitHub
     itself rejects it, because gitcollect's API call to add them as a collaborator
     on <em>that specific repo</em> never happened.</p>
@@ -433,7 +433,7 @@ exploit-db  ✗ no     no access — group red-team required</pre>
         <p class="sig"><span class="prog">gitcollect</span> show &lt;collection&gt;</p>
         <p class="desc">Show a summary of a collection: description, owner, visibility, and tables of its members, groups, and repos. The repo table's <code>YOU</code> column is personal to whoever runs the command — <code>✓ yes</code> or <code>✗ no — &lt;reason&gt;</code> — so you immediately see which repos you can and can't reach, before trying to clone. <code>clone</code> only ever clones the ones marked <code>✓</code> here. Any denied repo gets the exact fix command in a footer below the table (e.g. <code>gitcollect group add my-collection red-team alice</code>). If you're the collection's <strong>owner</strong>, the <code>YOU</code> column is replaced with <code>WHO HAS ACCESS</code> — every member who can reach each repo — since <code>YOU</code> is trivially always <code>✓</code> for an owner. Also prints the same &gt;30-day stale-file warning as <code>list</code>.</p>
         <div class="flags"><table>
-          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output (adds <code>you_can_access</code>/<code>you_reason</code> per repo)</td></tr>
+          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output — each repo also carries <code>you_can_access</code>/<code>you_reason</code>/<code>you_fix_cmd</code> (the same fix command the denied-repo footer shows, omitted when access is already granted) and <code>who_has_access</code> (every member who can reach that repo, populated regardless of which table view you'd see in the table output); the top level carries <code>stale_days</code> when the &gt;30-day warning would fire</td></tr>
         </table></div>
       </div>
 
