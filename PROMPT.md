@@ -1842,6 +1842,101 @@ add / group add / add (SESSION 12)".
 Next session should start with: cmd/list_test.go — unchanged pointer,
 now named by EIGHT consecutive sessions (5 through 12). Still the
 oldest, most consistently deferred test-coverage gap in the project.
+
+Session 13 — 2026-07-01 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Identity migration: replaced mutable login strings in Collection.Owner,
+Members, Groups, and RepoAccess.Users with immutable platform user IDs.
+GitHub/GitLab logins can be renamed by the account owner at any time —
+storing them as the identity token means a rename silently breaks every
+ownership and membership check. All design decisions were locked in via
+an explicit confirmation exchange before any code was written; see
+decisions log entry "SESSION 13, IDENTITY MIGRATION" for the full list.
+Completed:    internal/api — UserInfo{ID, Login string} struct; Client
+              interface changed GetAuthenticatedUser() to return UserInfo
+              and gained GetUser(username string) (UserInfo, error) for
+              resolving arbitrary logins to IDs; new ErrUserNotFound
+              sentinel distinct from ErrNotFound. github.go: GetUser hits
+              GET /users/{username}, maps 404→ErrUserNotFound. gitlab.go:
+              GetUser wraps existing lookupUserID. api_test.go: all tests
+              updated for UserInfo return type; new TestGitHubGetUser,
+              TestGitHubGetUser_NotFound, TestGitLabGetUser,
+              TestGitLabGetUser_NotFound.
+              internal/collection/collection.go — CurrentVersion "1"→"2";
+              new Logins map[string]string yaml field (ID→login cache,
+              single source of truth for display and API calls); New()
+              takes api.UserInfo instead of string for owner; Validate()
+              gates Logins-completeness check on Version == CurrentVersion.
+              internal/collection/access.go — new IsOwner(id bool);
+              all method parameters renamed to id; FixCmd changed from
+              2-param to 3-param (id, login, repo) — login passed
+              explicitly because the subject may not be in col.Logins
+              (non-member case).
+              internal/collection/mutation.go — new helpers: cloneLogins
+              (shallow map copy for rollback), resolveUsers (concurrent
+              batch GetUser, max 4 in flight), IDForLogin (reverse Logins
+              scan, used by remove operations), Migrate (resolves all
+              legacy logins to IDs, populates Logins, bumps Version, does
+              NOT save — caller decides). All add operations call GetUser
+              live; all remove operations use IDForLogin (no network).
+              SyncCollaborators uses col.Logins[id] for all API calls.
+              internal/collection/collection_test.go — mockClient gained
+              GetUser stub; New() calls → api.UserInfo{ID:x, Login:x};
+              newTestCollection pre-populates col.Logins for test
+              usernames; all ID-based method params updated.
+              internal/config/config.go — new Config.UserIDs
+              map[string]string (host→id); SaveUserID/LoadUserID; Load()
+              initialises UserIDs if nil for backward compat with old
+              config files.
+              internal/access/enforce.go — parameters renamed to callerID;
+              col.IsOwner(callerID) replaces direct string compare;
+              col.Logins[col.Owner]/col.Logins[callerID] for all API calls.
+              internal/access/inspect.go — UserAccessMap gains id and
+              login params (now 3-param: col, id, login); RepoAccessMap/
+              FullMatrix resolve IDs to logins via col.Logins for display;
+              FixCmd call sites updated for 3-param signature.
+              internal/access/access_test.go — GetUser stub added;
+              test fixtures updated for ID-based Members/Owner + Logins.
+              cmd/root.go — cachedUserID alongside cachedUser;
+              currentUserInfo(client) resolves and caches both Login and
+              ID, saves both to config; currentUser/currentUserID thin
+              wrappers; new loadForOwner(verb, name) returning (col,
+              caller, callerID, client, err) — consolidates load+resolve+
+              migrate for all 10+ owner-perspective commands; new
+              migrateIfNeeded(col, client) — calls Migrate then Save then
+              prints a one-time notice; loadForRead→4 return values;
+              loadForGit→5 return values; both call migrateIfNeeded;
+              new loginsFor(col, ids) display helper (shared across all
+              cmd/ files in the package).
+              cmd/auth.go — saves both Login and ID to config via
+              currentUserInfo. cmd/init.go — passes owner api.UserInfo to
+              collection.New. cmd/whoami.go — uses user.Login for display.
+              cmd/list.go's roleFor — now format-aware: Version "2" files
+              compare cached platform ID (config.LoadUserID); legacy "1"
+              files compare cached login (config.LoadUser). list never
+              migrates a collection (must stay network-free) so must
+              handle both formats indefinitely.
+              All remaining cmd/ files (add, delete, visibility, member,
+              group, repo, inspect, show, audit, clone, pull, status,
+              sync, activity) — updated for 4/5-value loader
+              destructuring, col.IsOwner(callerID), col.Logins[col.Owner]
+              for display and API calls, loginsFor for member/user ID
+              display. audit.go: ZERO changes — Actor/Target stay login
+              strings, populated by callers; the audit package itself is
+              unchanged.
+              cmd/member_test.go, cmd/group_test.go, cmd/add_test.go,
+              cmd/show_test.go — api.UserInfo constructors; col.Logins
+              population in fixtures; GetUser stubs where needed.
+              go build ./... && go test ./...: all 9 packages green,
+              no regressions.
+In progress:  (none)
+Blockers:     (none)
+Decisions:    See decisions log entry "SESSION 13, IDENTITY MIGRATION".
+Next session should start with: cmd/list_test.go — unchanged pointer,
+now named by NINE consecutive sessions (5 through 13). Identity
+migration also changed list.go's roleFor (now format-aware: ID
+comparison for Version "2", login comparison for "1") — its branching
+logic is now more important to cover than ever.
 ```
 
 ---
@@ -1862,27 +1957,40 @@ Makefile                                     done
 cmd/root.go                                  done         +ErrUnauthorized hint in Execute(), session 6;
                                                            +Levenshtein typo suggestion in loadCollection
                                                            (owner-required path only, NOT loadForRead's
-                                                           private-collection non-disclosure path), session 11
+                                                           private-collection non-disclosure path), session 11;
+                                                           +currentUserInfo (caches Login+ID, saves both);
+                                                           +loadForOwner (load+resolve+migrate for all owner
+                                                           commands); +migrateIfNeeded; +loginsFor; loadForRead
+                                                           →4-val, loadForGit→5-val; cachedUserID, session 13
 cmd/root_test.go                             done         new, session 11 — TestLevenshtein, TestSuggestCollectionName, TestStaleDays
-cmd/auth.go                                  done
-cmd/whoami.go                                done         +anyRejected hint, session 6; +--json flag, session 11
+cmd/auth.go                                  done         saves both Login and ID to config via
+                                                           currentUserInfo, session 13
+cmd/whoami.go                                done         +anyRejected hint, session 6; +--json flag, session 11;
+                                                           uses user.Login for display, session 13
 cmd/init.go                                  done         no --owner flag — considered and deliberately
-                                                           rejected in session 11, see decisions log
+                                                           rejected in session 11, see decisions log;
+                                                           passes api.UserInfo to collection.New, session 13
 cmd/delete.go                                done
 cmd/list.go                                  done         redesigned session 4 — see decisions log;
                                                            +stale-collection warning (>30 days since
-                                                           updated_at), session 11
+                                                           updated_at), session 11; roleFor now format-aware:
+                                                           Version "2" compares cached platform ID, legacy "1"
+                                                           compares cached login, session 13
 cmd/show.go                                  done         +per-caller YOU column, session 9; +owner-only
                                                            WHO HAS ACCESS view, +FixCmd-driven footer for
-                                                           denied repos, +stale warning, session 11
+                                                           denied repos, +stale warning, session 11;
+                                                           callerID-based owner check; loginsFor for
+                                                           Members/Users display, session 13
 cmd/show_test.go                             done         new, session 9; +TestBuildOwnerShowRepoRows,
-                                                           updated deniedRepo/FixCmd assertions, session 11
+                                                           updated deniedRepo/FixCmd assertions, session 11;
+                                                           api.UserInfo constructors; col.Logins, session 13
 cmd/visibility.go                            done
 cmd/add.go                                   done         ExactArgs(2) → MinimumNArgs(2): accepts multiple
                                                            repo names, session 12 — see decisions log; logic
                                                            split into addOneRepo so a batch continues past
                                                            one repo's failure
-cmd/add_test.go                              done         new, session 12 — TestAddOneRepo
+cmd/add_test.go                              done         new, session 12 — TestAddOneRepo; api.UserInfo
+                                                           constructor; col.Logins["bob"] fixture, session 13
 cmd/remove.go                                done         y/N → type-name-to-confirm, session 8
 cmd/repo.go                                  done         grant/revoke subcommands added session 3
 cmd/member.go                                done         +pending-invite warning after member add,
@@ -1893,12 +2001,15 @@ cmd/member.go                                done         +pending-invite warnin
                                                            username's failure
 cmd/member_test.go                           done         new, session 11 — TestHasPendingInvite; +multiAddMock
                                                            (shared with add_test.go/group_test.go) and
-                                                           TestAddOneMember, session 12
+                                                           TestAddOneMember, session 12; GetUser stub;
+                                                           api.UserInfo constructors, session 13
 cmd/group.go                                 done         ExactArgs(3) → MinimumNArgs(3) on group add: accepts
                                                            multiple usernames, session 12 — see decisions log;
                                                            logic split into addOneToGroup so a batch continues
                                                            past one username's failure
-cmd/group_test.go                            done         new, session 12 — TestAddOneToGroup
+cmd/group_test.go                            done         new, session 12 — TestAddOneToGroup;
+                                                           api.UserInfo constructor; col.Logins
+                                                           pre-populated in fixture, session 13
 cmd/inspect.go                               done         +"To fix:" footer via Collection.FixCmd, session 11
 cmd/audit.go                                 done         --since: flexible parsing → strict 1h/24h/7d/30d/90d
                                                            allow-list, session 11 — see decisions log
@@ -1922,27 +2033,45 @@ cmd/version.go                               done
 (shell completion: cobra's built-in `completion` subcommand covers this
  — no separate file needed; verified with `gitcollect completion --help`)
 
-internal/collection/collection.go            done
+internal/collection/collection.go            done         +Logins map[string]string yaml field (ID→login cache);
+                                                           CurrentVersion "1"→"2"; New() takes api.UserInfo
+                                                           (not string) for owner; Validate() gates
+                                                           Logins-completeness check on Version "2", session 13
 internal/collection/access.go                done         groupsContaining (dead code) removed; owner-bypass
                                                            moved INTO CanAccessRepo/WhyCanAccess directly
                                                            (was scattered across callers), session 11 — see
-                                                           decisions log; +FixCmd, session 11
-internal/collection/mutation.go              done         +GrantRepoUser/RevokeRepoUser, session 3
+                                                           decisions log; +FixCmd, session 11; +IsOwner(id);
+                                                           all params renamed to id; FixCmd 3-param
+                                                           (id, login, repo), session 13
+internal/collection/mutation.go              done         +GrantRepoUser/RevokeRepoUser, session 3;
+                                                           +Migrate, IDForLogin, resolveUsers, cloneLogins;
+                                                           add ops call GetUser live; remove ops use
+                                                           IDForLogin (no network); SyncCollaborators uses
+                                                           col.Logins[id] for all API calls, session 13
 internal/collection/collection_test.go       done         83.8% coverage; mock +ListCommits stub, session 7;
                                                            +GetPendingInvite stub, session 11; WhyCanAccess
-                                                           assertions updated for new reason strings, session 11
+                                                           assertions updated for new reason strings, session 11;
+                                                           +GetUser stub; New()→api.UserInfo{...};
+                                                           newTestCollection pre-populates col.Logins;
+                                                           all ID-based method params updated, session 13
 
 internal/access/enforce.go                   done         redundant owner checks in CheckRepoAccess/
                                                            FilterAccessible removed now that CanAccessRepo
-                                                           does the bypass itself, session 11
+                                                           does the bypass itself, session 11; callerID params;
+                                                           col.IsOwner(callerID)/col.Logins for comparisons
+                                                           and API calls, session 13
 internal/access/sync.go                      done
 internal/access/inspect.go                   done         +decide() owner-bypass fix, session 9 — see decisions
                                                            log; decide() helper REMOVED session 11 (redundant
                                                            after the CanAccessRepo refactor); +FixCmd field on
-                                                           RepoAccessDetail/MemberAccessDetail, session 11
+                                                           RepoAccessDetail/MemberAccessDetail, session 11;
+                                                           UserAccessMap→3-param (col, id, login); col.Logins
+                                                           for all display, session 13
 internal/access/access_test.go               done         93.9% coverage; +TestUserAccessMap_OwnerBypass,
                                                            session 9 (assertions updated for new owner reason
-                                                           string, session 11); +GetPendingInvite stub, session 11
+                                                           string, session 11); +GetPendingInvite stub,
+                                                           session 11; +GetUser stub; fixtures updated for
+                                                           ID-based Members/Owner + Logins maps, session 13
 
 internal/audit/audit.go                      done
 internal/audit/audit_test.go                 done         82.8% coverage
@@ -1957,17 +2086,27 @@ internal/git/git_test.go                     done         85.4% coverage; +TestP
 
 internal/api/client.go                       done         +ListCommits, +CommitInfo, +RepoInfo.DefaultBranch,
                                                            session 7; +GetPendingInvite, +GitHubNotificationsURL
-                                                           const, session 11
+                                                           const, session 11; +UserInfo{ID,Login} struct,
+                                                           GetUser(username) (UserInfo, error),
+                                                           ErrUserNotFound, session 13
 internal/api/github.go                       done         githubBaseURL: const → var (see decisions log);
                                                            +ListCommits, session 7; +GetPendingInvite
-                                                           (GET /repos/{owner}/{repo}/invitations), session 11
+                                                           (GET /repos/{owner}/{repo}/invitations), session 11;
+                                                           +GetUser (GET /users/{username}), GetAuthenticatedUser
+                                                           now returns UserInfo, session 13
 internal/api/gitlab.go                       done         +ListCommits, session 7; +GetPendingInvite stub
                                                            (always false — GitLab has no pending-invite state;
-                                                           membership added via API is immediate), session 11
+                                                           membership added via API is immediate), session 11;
+                                                           +GetUser (wraps existing lookupUserID), session 13
 internal/api/api_test.go                     done         85.5% coverage; +ListCommits/DefaultBranch tests,
-                                                           session 7; +TestGitHub/GitLabGetPendingInvite*, session 11
+                                                           session 7; +TestGitHub/GitLabGetPendingInvite*,
+                                                           session 11; all tests updated for UserInfo return
+                                                           type; +TestGitHub/GitLabGetUser(_NotFound), session 13
 
-internal/config/config.go                    done         +ActivityDir(), session 7
+internal/config/config.go                    done         +ActivityDir(), session 7; +UserIDs
+                                                           map[string]string (host→id), SaveUserID/LoadUserID;
+                                                           Load() inits UserIDs if nil for backward compat,
+                                                           session 13
 internal/config/config_test.go               done         82.5% coverage (was 82.8%; +ActivityDir assertion, session 7)
 
 internal/output/output.go                    done         Table/padRight: byte len → rune count (real bug fix);
@@ -2394,6 +2533,44 @@ sessions do not re-debate them.
   than typed from reading the source — this page has stated since it was
   written that its output blocks are real, not illustrations, and that
   claim needed to keep holding for the new content too.
+- SESSION 13, IDENTITY MIGRATION — immutable platform IDs replacing
+  mutable usernames: GitHub/GitLab logins can be renamed by the account
+  owner at any time. Storing them in Collection.Owner, Members, Groups,
+  and RepoAccess.Users means a rename silently breaks every ownership
+  and membership check. Fixed by storing the immutable numeric platform
+  user ID (formatted as a decimal string) in those fields and keeping a
+  separate Logins map[string]string (ID→login) as the single source of
+  truth for display and API path-building (REST paths use login strings).
+  Design decisions locked in before any code was written:
+    - ID used ONLY for comparisons: IsOwner, IsMember, IsInGroup,
+      CanAccessRepo. Login used for: all API calls, all user-facing
+      display, audit log Actor/Target, FixCmd suggestions.
+    - Version field bumped "1"→"2" in collection YAML to detect legacy
+      files. Validate() only checks Logins-completeness on Version "2"
+      files; legacy "1" files pass the old checks unchanged.
+    - Migration is OPPORTUNISTIC: Migrate() is called only from
+      loadForOwner, loadForGit, and loadForRead's private branch — never
+      from list (must stay network-free) or loadForRead's public fast-
+      path (must stay auth-free). A Version "2" file triggers no
+      migration call at all.
+    - Add operations (AddMember, AddToGroup, GrantRepoUser,
+      SetRepoAccess --users) always call client.GetUser() live — the
+      account must exist on the platform before access is granted.
+    - Remove operations (RemoveMember, RemoveFromGroup, RevokeRepoUser)
+      use IDForLogin() reverse-lookup from the cached Logins map — no
+      network call; works even for renamed or deleted platform accounts.
+    - FixCmd changed from 2-param to 3-param (id, login, repo): the
+      subject may not be in col.Logins (non-members have no entry), so
+      login is passed explicitly by callers rather than looked up.
+    - loadForOwner(verb, name) consolidates the repeated load+resolve+
+      migrate boilerplate from 10+ owner-perspective cmd/ files into one
+      helper returning (col, caller, callerID, client, err).
+    - cmd/list.go's roleFor is format-aware: Version "2" compares the
+      cached platform ID (config.LoadUserID); legacy "1" compares the
+      cached login (config.LoadUser). list never migrates a collection
+      (no client, no network) so must handle both formats indefinitely.
+    - audit.go: ZERO changes. Actor/Target stay login strings, populated
+      by callers. The audit package itself is unchanged.
 ```
 
 <!-- v1 -->
