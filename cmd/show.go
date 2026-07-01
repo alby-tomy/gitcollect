@@ -30,6 +30,7 @@ type showOutput struct {
 	Description string              `json:"description"`
 	Host        string              `json:"host"`
 	Owner       string              `json:"owner"`
+	Namespace   string              `json:"namespace,omitempty"`
 	Visibility  string              `json:"visibility"`
 	Members     []string            `json:"members"`
 	Groups      map[string][]string `json:"groups"`
@@ -75,6 +76,9 @@ func runShow(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Owner:       %s (you)\n", ownerLogin)
 	} else {
 		fmt.Printf("Owner:       %s\n", ownerLogin)
+	}
+	if col.Namespace != "" {
+		fmt.Printf("Namespace:   %s\n", col.Namespace)
 	}
 	fmt.Printf("Visibility:  %s\n", col.Visibility)
 	fmt.Printf("Members:     %d\n", len(col.Members))
@@ -222,6 +226,7 @@ func toShowOutput(col *collection.Collection, caller, callerID string) showOutpu
 		Description: col.Description,
 		Host:        col.Host,
 		Owner:       col.Logins[col.Owner],
+		Namespace:   col.Namespace,
 		Visibility:  string(col.Visibility),
 		Members:     loginsFor(col, col.Members),
 		Groups:      groupLogins,

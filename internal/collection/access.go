@@ -180,7 +180,7 @@ func (c *Collection) FixCmd(id, login, repoName string) string {
 	}
 	repo, ok := c.repoByName(repoName)
 	if !ok || len(repo.Groups) == 0 {
-		return fmt.Sprintf("gitcollect repo grant %s %s %s", c.Name, repoName, login)
+		return fmt.Sprintf("gitcollect repo access %s %s --users %s", c.Name, repoName, login)
 	}
 	return fmt.Sprintf("gitcollect group add %s %s %s", c.Name, repo.Groups[0], login)
 }

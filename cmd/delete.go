@@ -76,7 +76,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 // time), before the manifest itself is deleted.
 func revokeCollectionAccess(col *collection.Collection, client api.Client) error {
 	type pair struct{ memberLogin, repo string }
-	ownerLogin := col.Logins[col.Owner]
+	ownerLogin := col.RepoNamespace()
 	var pairs []pair
 	for _, m := range col.Members {
 		for _, r := range col.Repos {

@@ -1937,6 +1937,90 @@ now named by NINE consecutive sessions (5 through 13). Identity
 migration also changed list.go's roleFor (now format-aware: ID
 comparison for Version "2", login comparison for "1") — its branching
 logic is now more important to cover than ever.
+
+Session 14 — 2026-07-01 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Documentation and state-audit session. No new functional code written.
+Completed:    State verification on session resume: go build ./... and
+              go test ./... both clean; confirmed api_test.go and
+              collection_test.go were complete (not mid-edit) when the
+              prior context window ended.
+              PROMPT.md — wrote the missing Session 13 session log entry,
+              architecture decisions entry "SESSION 13, IDENTITY
+              MIGRATION", and updated 20+ file entries in the file
+              completion table; also updated the "next session" pointer
+              from "EIGHT" to "NINE consecutive sessions".
+              PROGRESS.md — new file (was listed in project structure but
+              never created); complete feature inventory from sessions 1-13:
+              command groups, session-by-session summary, architecture
+              highlights, what was deliberately not built, test coverage.
+              README.md — replaced placeholder Installation section with
+              five subsections (go install, Download binary, Homebrew,
+              Verify the install, Upgrading). Download binary section uses
+              exact GoReleaser v2 default archive naming sourced from
+              .goreleaser.yaml (gitcollect_<version>_<os>_<arch>[.tar.gz|
+              .zip]) and covers Linux/macOS/Windows with curl and
+              PowerShell examples. Homebrew marked "coming soon". Added
+              separate Shell completion section (cobra's built-in
+              completion subcommand; bash/zsh/fish/PowerShell one-liners).
+              All facts sourced from go.mod, .goreleaser.yaml,
+              cmd/version.go — no invented paths or names.
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: cmd/list_test.go — unchanged pointer,
+now named by TEN consecutive sessions (5 through 14). list.go's roleFor
+is now format-aware (ID comparison for Version "2", login comparison
+for "1") — its branching logic is more important to cover than ever.
+```
+
+Session 15 — 2026-07-01 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+PRE_SHIP_IMPROVEMENTS.md Priority 2: removed `repo grant` and
+`repo revoke` commands.
+Completed:    PRE_SHIP_IMPROVEMENTS Priority 1 (tests from prior
+              session context) + Priority 2 in this session.
+              Priority 2 changes:
+              cmd/repo.go — removed repoGrantCmd, repoRevokeCmd
+              var declarations; removed their AddCommand registrations
+              from init(); removed runRepoGrant and runRepoRevoke
+              functions; removed containsExact helper (was only used
+              by those two); removed `errors` import (only used by
+              those two); added Long description to repoAccessCmd
+              explaining --users as the way to grant/revoke individual
+              user access.
+              internal/collection/mutation.go — removed ErrRepoOpen
+              and ErrRepoWouldOpen sentinel errors; removed
+              GrantRepoUser and RevokeRepoUser methods.
+              internal/collection/collection_test.go — removed 6 test
+              functions: TestGrantRepoUser, TestGrantRepoUser_Refuses
+              OnOpenRepo, TestGrantRepoUser_SyncFailureRollsBack,
+              TestRevokeRepoUser, TestRevokeRepoUser_RefusesIfIt
+              WouldOpenRepo, TestRevokeRepoUser_SyncFailureRollsBack.
+              internal/collection/access.go — FixCmd: changed
+              "gitcollect repo grant %s %s %s" →
+              "gitcollect repo access %s %s --users %s".
+              docs/index.html — removed repo grant and repo revoke
+              <div class="cmd"> entries.
+              README.md — removed repo grant/revoke row from command
+              reference table; replaced the paragraph explaining
+              grant/revoke guardrails with a note pointing to
+              `repo access --users`.
+              go build ./... and go test ./... both clean.
+              Coverage: 23.3% (up from 22.4%; removed dead code
+              outweighed the line count reduction).
+Decision:     Removed grant/revoke because they expose a footgun
+              (narrowing open repos, reopening restricted ones) as
+              a dedicated command pair, creating two user-visible
+              failure modes that the --users flag on repo access
+              handles more naturally without special-case errors.
+              The "guardrails" were essentially compensating for the
+              existence of the commands themselves.
+In progress:  PRE_SHIP_IMPROVEMENTS Priority 3 — --namespace flag
+Blockers:     (none)
+Next session should start with: Priority 3 — add Namespace field
+to Collection, RepoNamespace() helper, Validate() check, replace
+col.Logins[col.Owner] in API calls, --namespace flag in cmd/init.go,
+display in cmd/show.go, 4 tests.
 ```
 
 ---
@@ -2112,6 +2196,13 @@ internal/config/config_test.go               done         82.5% coverage (was 82
 internal/output/output.go                    done         Table/padRight: byte len → rune count (real bug fix);
                                                            +StaleWarning, +InviteWarning, session 11
 internal/output/output_test.go               done         98.1% coverage; +TestStaleWarning, +TestInviteWarning, session 11
+
+README.md                                    done         +Installation (go install, Download binary, Homebrew,
+                                                           Verify, Upgrading) and Shell completion sections,
+                                                           session 14; prior updates: activity section s7,
+                                                           list/show/sync sections s9-s12
+PROGRESS.md                                  done         new file, session 14 — full feature inventory
+                                                           sessions 1-13
 ```
 
 ---

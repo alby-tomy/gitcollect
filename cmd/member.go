@@ -175,7 +175,7 @@ func printAccessBreakdown(col *collection.Collection, username string, client ap
 // creates these for every repo in the same AddCollaborator burst, so one
 // hit is enough to tell the caller they need to accept an invite.
 func hasPendingInvite(col *collection.Collection, username string, granted []string, client api.Client) bool {
-	ownerLogin := col.Logins[col.Owner]
+	ownerLogin := col.RepoNamespace()
 	for _, repoName := range granted {
 		has, err := client.GetPendingInvite(ownerLogin, repoName, username)
 		if err == nil && has {

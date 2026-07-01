@@ -603,167 +603,6 @@ func TestDelete_UnresolvedPath(t *testing.T) {
 	}
 }
 
-func TestGrantRepoUser(t *testing.T) {
-	useTempHome(t)
-	col := newTestCollection(t, VisibilityPrivate)
-	col.Members = []string{"alice", "bob"}
-	col.Groups = map[string][]string{"red-team": {"alice"}}
-	col.Repos = []RepoAccess{{Name: "r", Groups: []string{"red-team"}, Users: []string{}}}
-	if err := col.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	client := newMockClient()
-
-	if err := col.GrantRepoUser("no-such-repo", "bob", client); !errors.Is(err, ErrRepoNotFound) {
-		t.Fatalf("expected ErrRepoNotFound, got %v", err)
-	}
-	if err := col.GrantRepoUser("r", "ghost", client); !errors.Is(err, ErrNotMember) {
-		t.Fatalf("expected ErrNotMember, got %v", err)
-	}
-
-	if err := col.GrantRepoUser("r", "bob", client); err != nil {
-		t.Fatalf("GrantRepoUser: %v", err)
-	}
-	if !col.CanAccessRepo("bob", "r") {
-		t.Error("expected bob to gain access after GrantRepoUser")
-	}
-	if !col.IsInGroup("alice", "red-team") || !col.CanAccessRepo("alice", "r") {
-		t.Error("expected GrantRepoUser to leave the existing group restriction untouched")
-	}
-
-	// Idempotent: granting again is a no-op, not an error.
-	if err := col.GrantRepoUser("r", "bob", client); err != nil {
-		t.Fatalf("GrantRepoUser (idempotent): %v", err)
-	}
-	count := 0
-	for _, u := range col.Repos[0].Users {
-		if u == "bob" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("expected bob to appear exactly once in Users, got %v", col.Repos[0].Users)
-	}
-}
-
-func TestGrantRepoUser_RefusesOnOpenRepo(t *testing.T) {
-	useTempHome(t)
-	col := newTestCollection(t, VisibilityPrivate)
-	col.Members = []string{"alice", "bob"}
-	col.Repos = []RepoAccess{{Name: "r", Groups: []string{}, Users: []string{}}}
-	if err := col.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	client := newMockClient()
-	if err := col.GrantRepoUser("r", "bob", client); !errors.Is(err, ErrRepoOpen) {
-		t.Fatalf("expected ErrRepoOpen, got %v", err)
-	}
-	// Must not have mutated the repo on refusal.
-	if len(col.Repos[0].Users) != 0 || len(col.Repos[0].Groups) != 0 {
-		t.Fatalf("expected repo to be left untouched, got %+v", col.Repos[0])
-	}
-}
-
-func TestGrantRepoUser_SyncFailureRollsBack(t *testing.T) {
-	useTempHome(t)
-	col := newTestCollection(t, VisibilityPrivate)
-	col.Members = []string{"alice", "bob"}
-	col.Groups = map[string][]string{"red-team": {"alice"}}
-	col.Repos = []RepoAccess{{Name: "r", Groups: []string{"red-team"}, Users: []string{}}}
-	if err := col.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	client := newMockClient()
-	client.failAdd = true
-
-	if err := col.GrantRepoUser("r", "bob", client); err == nil {
-		t.Fatal("expected GrantRepoUser to fail when sync fails")
-	}
-	if containsString(col.Repos[0].Users, "bob") {
-		t.Fatal("expected Users to be rolled back on sync failure")
-	}
-}
-
-func TestRevokeRepoUser(t *testing.T) {
-	useTempHome(t)
-	col := newTestCollection(t, VisibilityPrivate)
-	col.Members = []string{"alice", "bob"}
-	col.Groups = map[string][]string{"red-team": {"alice"}}
-	col.Repos = []RepoAccess{{Name: "r", Groups: []string{"red-team"}, Users: []string{"bob"}}}
-	if err := col.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	client := newMockClient()
-	client.collaborators[key("owner", "r", "bob")] = true
-
-	if err := col.RevokeRepoUser("no-such-repo", "bob", client); !errors.Is(err, ErrRepoNotFound) {
-		t.Fatalf("expected ErrRepoNotFound, got %v", err)
-	}
-
-	if err := col.RevokeRepoUser("r", "bob", client); err != nil {
-		t.Fatalf("RevokeRepoUser: %v", err)
-	}
-	if col.CanAccessRepo("bob", "r") {
-		t.Error("expected bob to lose access after RevokeRepoUser")
-	}
-	if has := client.collaborators[key("owner", "r", "bob")]; has {
-		t.Error("expected RevokeRepoUser to revoke bob's platform collaborator access")
-	}
-	if !col.CanAccessRepo("alice", "r") {
-		t.Error("expected RevokeRepoUser to leave the group restriction untouched")
-	}
-
-	// Idempotent: revoking again (no individual grant left) is a no-op.
-	if err := col.RevokeRepoUser("r", "bob", client); err != nil {
-		t.Fatalf("RevokeRepoUser (no-op): %v", err)
-	}
-}
-
-func TestRevokeRepoUser_RefusesIfItWouldOpenRepo(t *testing.T) {
-	useTempHome(t)
-	col := newTestCollection(t, VisibilityPrivate)
-	col.Members = []string{"alice"}
-	col.Repos = []RepoAccess{{Name: "r", Groups: []string{}, Users: []string{"alice"}}}
-	if err := col.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	client := newMockClient()
-	if err := col.RevokeRepoUser("r", "alice", client); !errors.Is(err, ErrRepoWouldOpen) {
-		t.Fatalf("expected ErrRepoWouldOpen, got %v", err)
-	}
-	// Must not have mutated the repo on refusal.
-	if !containsString(col.Repos[0].Users, "alice") {
-		t.Fatal("expected repo to be left untouched on refusal")
-	}
-}
-
-func TestRevokeRepoUser_SyncFailureRollsBack(t *testing.T) {
-	useTempHome(t)
-	col := newTestCollection(t, VisibilityPrivate)
-	col.Members = []string{"alice", "bob"}
-	col.Groups = map[string][]string{"red-team": {"alice"}}
-	col.Repos = []RepoAccess{{Name: "r", Groups: []string{"red-team"}, Users: []string{"bob"}}}
-	if err := col.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	client := newMockClient()
-	client.failRemove = true
-	client.collaborators[key("owner", "r", "bob")] = true
-
-	if err := col.RevokeRepoUser("r", "bob", client); err == nil {
-		t.Fatal("expected RevokeRepoUser to fail when sync fails")
-	}
-	if !containsString(col.Repos[0].Users, "bob") {
-		t.Fatal("expected Users to be rolled back on sync failure")
-	}
-}
-
 func TestCreateAndDeleteGroup(t *testing.T) {
 	useTempHome(t)
 	col := newTestCollection(t, VisibilityPrivate)
@@ -790,5 +629,26 @@ func TestCreateAndDeleteGroup(t *testing.T) {
 	}
 	if _, ok := col.Groups["red-team"]; ok {
 		t.Error("expected red-team to be removed")
+	}
+}
+
+func TestRepoNamespace_DefaultsToOwnerLogin(t *testing.T) {
+	col := &Collection{
+		Owner:  "owner-id",
+		Logins: map[string]string{"owner-id": "alice"},
+	}
+	if got := col.RepoNamespace(); got != "alice" {
+		t.Errorf("RepoNamespace() = %q, want alice (owner login fallback)", got)
+	}
+}
+
+func TestRepoNamespace_UsesExplicitNamespace(t *testing.T) {
+	col := &Collection{
+		Owner:     "owner-id",
+		Logins:    map[string]string{"owner-id": "alice"},
+		Namespace: "acme-corp",
+	}
+	if got := col.RepoNamespace(); got != "acme-corp" {
+		t.Errorf("RepoNamespace() = %q, want acme-corp (explicit namespace)", got)
 	}
 }

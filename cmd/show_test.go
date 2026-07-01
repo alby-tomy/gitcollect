@@ -8,6 +8,35 @@ import (
 	"github.com/alby-tomy/gitcollect/internal/collection"
 )
 
+// TestToShowOutput_OwnerVsMemberAccess verifies that the owner's callerID
+// gives full access to every repo while a non-owner member's access is
+// evaluated against the collection's rules — confirming the view-selection
+// split driven by col.IsOwner(callerID).
+func TestToShowOutput_OwnerVsMemberAccess(t *testing.T) {
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice-id"}
+	col.Logins["alice-id"] = "alice"
+	col.Repos = []collection.RepoAccess{
+		{Name: "restricted", Groups: []string{"red-team"}},
+	}
+
+	ownerOut := toShowOutput(col, "owner", "owner-id")
+	if !ownerOut.Repos[0].YouCanAccess {
+		t.Errorf("owner should always have access; YouCanAccess = false")
+	}
+
+	aliceOut := toShowOutput(col, "alice", "alice-id")
+	if aliceOut.Repos[0].YouCanAccess {
+		t.Errorf("alice should not access a red-team-restricted repo she has no group for; YouCanAccess = true")
+	}
+	if aliceOut.Repos[0].YouReason == "" {
+		t.Errorf("YouReason should explain why alice is denied, got empty string")
+	}
+}
+
 func TestBuildShowRepoRows(t *testing.T) {
 	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
 	if err != nil {

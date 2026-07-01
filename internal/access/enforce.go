@@ -60,7 +60,7 @@ func CheckRepoAccess(col *collection.Collection, repoName, callerID string, clie
 		return fmt.Errorf("%w: %s", ErrGroupDenied, col.WhyCanAccess(callerID, repoName))
 	}
 
-	ownerLogin := col.Logins[col.Owner]
+	ownerLogin := col.RepoNamespace()
 	has, err := client.CheckCollaborator(ownerLogin, repoName, col.Logins[callerID])
 	if err != nil {
 		return fmt.Errorf("could not verify platform access to %s: %w", repoName, err)
@@ -82,7 +82,7 @@ func FilterAccessible(col *collection.Collection, callerID string, client api.Cl
 
 	candidates := col.AccessibleRepos(callerID)
 
-	ownerLogin := col.Logins[col.Owner]
+	ownerLogin := col.RepoNamespace()
 	callerLogin := col.Logins[callerID]
 
 	accessible := make([]collection.RepoAccess, 0, len(candidates))

@@ -14,6 +14,7 @@ import (
 var (
 	initHost        string
 	initDescription string
+	initNamespace   string
 	initPublic      bool
 )
 
@@ -27,6 +28,7 @@ var initCmd = &cobra.Command{
 func init() {
 	initCmd.Flags().StringVar(&initHost, "host", config.DefaultHost, "platform host the collection's repos live on")
 	initCmd.Flags().StringVar(&initDescription, "description", "", "human-readable description of the collection")
+	initCmd.Flags().StringVar(&initNamespace, "namespace", "", "org or username under which the repos live (defaults to your own login)")
 	initCmd.Flags().BoolVar(&initPublic, "public", false, "create the collection as public instead of the default, private")
 	rootCmd.AddCommand(initCmd)
 }
@@ -64,6 +66,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("init: %w", err)
 	}
 	col.Description = initDescription
+	col.Namespace = initNamespace
 
 	if err := col.Save(); err != nil {
 		recordAudit(audit.AuditEntry{

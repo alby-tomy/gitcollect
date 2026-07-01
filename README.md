@@ -83,33 +83,128 @@ tool.
 
 ## Installation
 
-Prebuilt binaries for linux/macos/windows (amd64/arm64) are produced by
-[goreleaser](https://goreleaser.com) per [.goreleaser.yaml](.goreleaser.yaml)
-when a release is cut (`make release`); check this repo's
-[Releases](../../releases) page for whether one has been published yet.
-Until then, build from source — it's one command and requires nothing but
-Go itself:
+### go install
 
-```bash
-git clone https://github.com/alby-tomy/gitcollect.git
-cd gitcollect
-go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect .
-./bin/gitcollect --help
-```
-
-Or install straight onto your `$GOBIN`/`%GOBIN%`:
+If you have Go 1.26 or later installed, this is the fastest path:
 
 ```bash
 go install github.com/alby-tomy/gitcollect@latest
 ```
 
-Requires Go 1.26+ (see [go.mod](go.mod)) and `git` on your `PATH` for
-`clone`/`pull`/`status`/`sync`. No Homebrew tap exists yet — `go install`
-or building from source are the supported paths today.
+The binary lands in `$GOBIN` (defaults to `$GOPATH/bin`, typically `~/go/bin`
+on Linux/macOS and `%USERPROFILE%\go\bin` on Windows). Make sure that directory
+is on your `PATH`.
+
+Requires `git` on your `PATH` for the `clone`, `pull`, `status`, and `sync`
+commands.
+
+### Download binary
+
+GoReleaser publishes pre-built, statically linked binaries for Linux, macOS,
+and Windows (amd64 and arm64) on every release. Download the archive for your
+platform from the [Releases](https://github.com/alby-tomy/gitcollect/releases)
+page, verify the checksum, extract the binary, and place it on your `PATH`.
+
+Archives follow the naming pattern
+`gitcollect_<version>_<os>_<arch>[.tar.gz|.zip]` — for example
+`gitcollect_1.2.3_linux_amd64.tar.gz`. Set `VERSION` to the release number
+(no `v` prefix in the filename):
+
+**Linux (amd64)**
+```bash
+VERSION=1.2.3
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/v${VERSION}/gitcollect_${VERSION}_linux_amd64.tar.gz" | tar xz
+sudo mv gitcollect /usr/local/bin/
+```
+
+**macOS (Apple Silicon / arm64)**
+```bash
+VERSION=1.2.3
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/v${VERSION}/gitcollect_${VERSION}_darwin_arm64.tar.gz" | tar xz
+sudo mv gitcollect /usr/local/bin/
+```
+
+**Windows (PowerShell, amd64)**
+```powershell
+$VERSION = "1.2.3"
+Invoke-WebRequest "https://github.com/alby-tomy/gitcollect/releases/download/v$VERSION/gitcollect_${VERSION}_windows_amd64.zip" -OutFile gitcollect.zip
+Expand-Archive gitcollect.zip -DestinationPath .
+# Move gitcollect.exe to a directory on your PATH
+```
+
+Every release includes a `checksums.txt` with SHA-256 digests for all
+archives. Verify with `sha256sum -c checksums.txt` (Linux/macOS) or
+`Get-FileHash gitcollect.exe` (Windows) before running the binary.
 
 > **Windows note:** gitcollect's state path resolves via Go's
-> `os.UserHomeDir()`, which reads `%USERPROFILE%`, not `$HOME` — if you're
-> in Git Bash, `export HOME=...` won't affect the compiled binary.
+> `os.UserHomeDir()`, which reads `%USERPROFILE%`, not `$HOME` — if you're in
+> Git Bash, `export HOME=...` won't affect the compiled binary.
+
+### Homebrew
+
+```bash
+brew install alby-tomy/tap/gitcollect
+```
+
+> **Coming soon.** The Homebrew tap is not published yet. Use `go install` or
+> download a binary from the Releases page in the meantime.
+
+### Verify the install
+
+```
+$ gitcollect version
+gitcollect v1.0.0 linux/amd64
+```
+
+The OS and architecture come from the binary itself. If `version` prints
+correctly, gitcollect is on your `PATH` and ready to use.
+
+### Upgrading
+
+**go install:** re-run `go install github.com/alby-tomy/gitcollect@latest` —
+it replaces the previous binary in-place.
+
+**Binary download:** download the new archive from the
+[Releases](https://github.com/alby-tomy/gitcollect/releases) page and replace
+the binary on your `PATH`.
+
+**Homebrew:** `brew upgrade alby-tomy/tap/gitcollect` (once the tap is
+published).
+
+## Shell completion
+
+gitcollect's `completion` subcommand is provided automatically by
+[Cobra](https://github.com/spf13/cobra) and supports bash, zsh, fish, and
+PowerShell. No separate install step is needed.
+
+```
+gitcollect completion bash       # Bourne-again shell
+gitcollect completion zsh        # Z shell
+gitcollect completion fish       # fish shell
+gitcollect completion powershell # PowerShell
+```
+
+Each command prints a completion script to stdout. To activate completions:
+
+**bash** — add to `~/.bashrc`:
+```bash
+source <(gitcollect completion bash)
+```
+
+**zsh** — add to `~/.zshrc`:
+```bash
+source <(gitcollect completion zsh)
+```
+
+**fish** — write to fish's completions directory (permanent):
+```bash
+gitcollect completion fish > ~/.config/fish/completions/gitcollect.fish
+```
+
+**PowerShell** — add to `$PROFILE`:
+```powershell
+gitcollect completion powershell | Out-String | Invoke-Expression
+```
 
 ## Quickstart
 
@@ -186,7 +281,6 @@ The same reference below, browsable, is at
 | `gitcollect remove <collection> <repo>` | Remove a repo and revoke everyone's collaborator access to it first. Requires typing the repo's name to confirm. |
 | `gitcollect repo access <collection> <repo> --groups g1,g2 \| --users u1,u2 \| --open` | Replace a repo's whole access rule. Groups and users are unioned — either satisfies access. |
 | `gitcollect repo show <collection> <repo>` | A repo's current rule plus a per-member access table. |
-| `gitcollect repo grant/revoke <collection> <repo> <user>` | Add or remove one user's individual grant without touching the rest of the rule. `grant` refuses on an open repo (would silently narrow access to just that user); `revoke` refuses if it would leave the repo with no restriction at all. |
 
 </details>
 
@@ -319,13 +413,9 @@ bob   (in neither)        → ✗ no access — group red-team or
 
 An empty `groups: []` *and* empty `users: []` on a repo means "open to
 every collection member" — that's the explicit empty-list convention, not
-an oversight. `gitcollect repo grant`/`revoke` exist specifically so you
-can add or remove one person's individual access without retyping the
-whole `--users` list, with guardrails against the two ways that could
-silently change the rule: granting one user to an otherwise-open repo
-would narrow it to just them, and revoking someone's last individual grant
-on an otherwise-unrestricted repo would silently reopen it to everyone.
-Both are refused outright rather than allowed to happen by accident.
+an oversight. To update individual users without changing group restrictions,
+use `gitcollect repo access <collection> <repo> --users alice bob` to set
+the complete users list.
 
 Every mutation follows the same shape — validate locally, call the
 platform API, only then write the YAML, then append to the audit log:

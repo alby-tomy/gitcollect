@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -27,8 +26,13 @@ var (
 var repoAccessCmd = &cobra.Command{
 	Use:   "access <collection> <repo>",
 	Short: "Restrict or open up who can access a repo",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runRepoAccess,
+	Long: `Restrict or open up who can access a repo within a collection.
+
+To grant or revoke access for individual users, use --users to set the complete list:
+  gitcollect repo access cybersecurity vuln-scanner --users alice bob
+  gitcollect repo access cybersecurity vuln-scanner --open`,
+	Args: cobra.ExactArgs(2),
+	RunE: runRepoAccess,
 }
 
 var repoShowCmd = &cobra.Command{
@@ -38,20 +42,6 @@ var repoShowCmd = &cobra.Command{
 	RunE:  runRepoShow,
 }
 
-var repoGrantCmd = &cobra.Command{
-	Use:   "grant <collection> <repo> <username>",
-	Short: "Grant one user individual access to a repo, without changing its other restrictions",
-	Args:  cobra.ExactArgs(3),
-	RunE:  runRepoGrant,
-}
-
-var repoRevokeCmd = &cobra.Command{
-	Use:   "revoke <collection> <repo> <username>",
-	Short: "Revoke one user's individually granted access to a repo",
-	Args:  cobra.ExactArgs(3),
-	RunE:  runRepoRevoke,
-}
-
 func init() {
 	repoAccessCmd.Flags().StringSliceVar(&repoAccessGroups, "groups", nil, "restrict access to these groups (comma-separated)")
 	repoAccessCmd.Flags().StringSliceVar(&repoAccessUsers, "users", nil, "restrict access to these individual users (comma-separated)")
@@ -59,8 +49,6 @@ func init() {
 
 	repoCmd.AddCommand(repoAccessCmd)
 	repoCmd.AddCommand(repoShowCmd)
-	repoCmd.AddCommand(repoGrantCmd)
-	repoCmd.AddCommand(repoRevokeCmd)
 	rootCmd.AddCommand(repoCmd)
 }
 
@@ -128,140 +116,6 @@ func runRepoAccess(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  After:  %s\n", afterDesc)
 	output.Suggestion(fmt.Sprintf("gitcollect inspect %s --repo %s", name, repoName))
 	return nil
-}
-
-func runRepoGrant(cmd *cobra.Command, args []string) error {
-	name := args[0]
-	repoName := args[1]
-	username := args[2]
-
-	col, caller, callerID, client, err := loadForOwner("repo grant", name)
-	if err != nil {
-		return err
-	}
-
-	before, found := repoAccessOf(col, repoName)
-	if !found {
-		return fmt.Errorf("repo grant: %q is not in collection %q", repoName, name)
-	}
-	if !col.IsOwner(callerID) {
-		return fmt.Errorf("repo grant: only %s (the owner) can change access for %s", col.Logins[col.Owner], repoName)
-	}
-
-	// No-network pre-check, same reasoning as IDForLogin's doc comment:
-	// "already granted" only needs to match something already recorded
-	// locally, not a live platform lookup.
-	if id := col.IDForLogin(username); id != "" && containsExact(before.Users, id) {
-		output.Info("%s already has individual access to %s", username, repoName)
-		return nil
-	}
-
-	if err := col.GrantRepoUser(repoName, username, client); err != nil {
-		recordAudit(audit.AuditEntry{
-			Collection: name,
-			Actor:      caller,
-			Action:     "repo.user.grant",
-			Target:     fmt.Sprintf("%s → %s", username, repoName),
-			Detail:     "Failed to grant individual access",
-			Result:     "error: " + err.Error(),
-		})
-		switch {
-		case errors.Is(err, collection.ErrRepoOpen):
-			output.Error("repo grant: %s", err.Error())
-			output.Suggestion(fmt.Sprintf("gitcollect repo access %s %s --users %s", name, repoName, username))
-			return fmt.Errorf("repo grant: aborted")
-		case errors.Is(err, collection.ErrNotMember):
-			output.Error("repo grant: %q is not a member of %s", username, name)
-			output.Suggestion(fmt.Sprintf("gitcollect member add %s %s", name, username))
-			return fmt.Errorf("repo grant: aborted")
-		default:
-			return fmt.Errorf("repo grant: %w", err)
-		}
-	}
-
-	after, _ := repoAccessOf(col, repoName)
-	recordAudit(audit.AuditEntry{
-		Collection: name,
-		Actor:      caller,
-		Action:     "repo.user.grant",
-		Target:     fmt.Sprintf("%s → %s", username, repoName),
-		Detail:     fmt.Sprintf("%s → %s", describeAccess(col, before), describeAccess(col, after)),
-		Result:     "ok",
-	})
-
-	output.Success("Granted %s individual access to %s", username, repoName)
-	fmt.Printf("  Before: %s\n", describeAccess(col, before))
-	fmt.Printf("  After:  %s\n", describeAccess(col, after))
-	output.Suggestion(fmt.Sprintf("gitcollect inspect %s --repo %s", name, repoName))
-	return nil
-}
-
-func runRepoRevoke(cmd *cobra.Command, args []string) error {
-	name := args[0]
-	repoName := args[1]
-	username := args[2]
-
-	col, caller, callerID, client, err := loadForOwner("repo revoke", name)
-	if err != nil {
-		return err
-	}
-
-	before, found := repoAccessOf(col, repoName)
-	if !found {
-		return fmt.Errorf("repo revoke: %q is not in collection %q", repoName, name)
-	}
-	if !col.IsOwner(callerID) {
-		return fmt.Errorf("repo revoke: only %s (the owner) can change access for %s", col.Logins[col.Owner], repoName)
-	}
-
-	// Same no-network pre-check pattern as runRepoGrant.
-	id := col.IDForLogin(username)
-	if id == "" || !containsExact(before.Users, id) {
-		output.Info("%s does not have individually granted access to %s", username, repoName)
-		return nil
-	}
-
-	if err := col.RevokeRepoUser(repoName, username, client); err != nil {
-		recordAudit(audit.AuditEntry{
-			Collection: name,
-			Actor:      caller,
-			Action:     "repo.user.revoke",
-			Target:     fmt.Sprintf("%s → %s", username, repoName),
-			Detail:     "Failed to revoke individual access",
-			Result:     "error: " + err.Error(),
-		})
-		if errors.Is(err, collection.ErrRepoWouldOpen) {
-			output.Error("repo revoke: %s", err.Error())
-			output.Suggestion(fmt.Sprintf("gitcollect repo access %s %s --users <remaining-users>", name, repoName))
-			return fmt.Errorf("repo revoke: aborted")
-		}
-		return fmt.Errorf("repo revoke: %w", err)
-	}
-
-	after, _ := repoAccessOf(col, repoName)
-	recordAudit(audit.AuditEntry{
-		Collection: name,
-		Actor:      caller,
-		Action:     "repo.user.revoke",
-		Target:     fmt.Sprintf("%s → %s", username, repoName),
-		Detail:     fmt.Sprintf("%s → %s", describeAccess(col, before), describeAccess(col, after)),
-		Result:     "ok",
-	})
-
-	output.Success("Revoked %s's individual access to %s", username, repoName)
-	fmt.Printf("  Before: %s\n", describeAccess(col, before))
-	fmt.Printf("  After:  %s\n", describeAccess(col, after))
-	output.Suggestion(fmt.Sprintf("gitcollect inspect %s --repo %s", name, repoName))
-	return nil
-}
-
-func containsExact(list []string, target string) bool {
-	for _, s := range list {
-		if s == target {
-			return true
-		}
-	}
-	return false
 }
 
 func repoAccessOf(col *collection.Collection, repoName string) (collection.RepoAccess, bool) {

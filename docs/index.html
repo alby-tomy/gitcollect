@@ -471,15 +471,6 @@ exploit-db  ✗ no    no access — group red-team required</pre>
         <p class="desc">Show a repo's current access rule and a per-member table of who can reach it and why.</p>
       </div>
 
-      <div class="cmd">
-        <p class="sig"><span class="prog">gitcollect</span> repo grant &lt;collection&gt; &lt;repo&gt; &lt;username&gt;</p>
-        <p class="desc">Grant one user individual access to a repo without rewriting its whole <code>--users</code> list or touching its group restriction. Refuses if the repo is currently open to all members — adding one user to an empty list would narrow access down to just that user, silently revoking everyone else. No-op if the user already has individual access.</p>
-      </div>
-
-      <div class="cmd">
-        <p class="sig"><span class="prog">gitcollect</span> repo revoke &lt;collection&gt; &lt;repo&gt; &lt;username&gt;</p>
-        <p class="desc">Revoke one user's individually granted access to a repo, leaving group restrictions and other users untouched. Refuses if removing this user would leave the repo with no restriction at all — that would silently re-open it to every member. No-op if the user doesn't have individual access.</p>
-      </div>
     </div>
 
     <div class="group" id="member-cmds">

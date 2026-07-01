@@ -20,17 +20,6 @@ var (
 	ErrGroupExists   = errors.New("group already exists")
 	ErrGroupInUse    = errors.New("group is referenced by one or more repos")
 	ErrRepoNotFound  = errors.New("repo not found")
-	// ErrRepoOpen is returned by GrantRepoUser when the target repo has no
-	// group or user restriction at all: every member already has access, so
-	// adding one user to its Users list wouldn't grant anything — it would
-	// instead *narrow* CanAccessRepo's "open to all members" rule down to
-	// that one user, silently revoking everyone else.
-	ErrRepoOpen = errors.New("repo is open to all members; granting one user individually would revoke everyone else")
-	// ErrRepoWouldOpen is returned by RevokeRepoUser when removing the
-	// target user would leave the repo with empty Groups and empty Users —
-	// the exact state CanAccessRepo treats as "open to all members." Revoking
-	// the last individual grant must never silently re-open a repo.
-	ErrRepoWouldOpen = errors.New("revoking this user would leave the repo with no restriction, opening it to all members")
 )
 
 func removeString(list []string, target string) []string {
@@ -229,7 +218,7 @@ func (c *Collection) SyncCollaborators(client api.Client) (added, removed int, e
 		shouldHave bool
 	}
 
-	ownerLogin := c.Logins[c.Owner]
+	ownerLogin := c.RepoNamespace()
 
 	var jobs []job
 	for _, member := range c.Members {
@@ -309,7 +298,7 @@ func (c *Collection) SyncCollaborators(client api.Client) (added, removed int, e
 // precondition as SyncCollaborators.
 func (c *Collection) revokeAllAccess(id string, client api.Client) error {
 	login := c.Logins[id]
-	ownerLogin := c.Logins[c.Owner]
+	ownerLogin := c.RepoNamespace()
 
 	var (
 		mu   sync.Mutex
@@ -518,105 +507,6 @@ func (c *Collection) SetRepoAccess(repoName string, groups, users []string, clie
 	if _, _, err := c.SyncCollaborators(client); err != nil {
 		c.Repos[idx] = original
 		return fmt.Errorf("could not sync access for repo %s: %w", repoName, err)
-	}
-	return c.Save()
-}
-
-// GrantRepoUser adds username to repoName's individual Users list, leaving
-// the repo's existing Groups and other Users untouched — unlike
-// SetRepoAccess, which replaces the whole list. No-op if username already
-// has individual access. Refuses with ErrRepoOpen if the repo currently has
-// no restriction at all (Groups and Users both empty): every member already
-// has access in that state, so adding one user to Users would narrow
-// CanAccessRepo's "open to all members" rule down to just that user,
-// silently revoking everyone else — callers should use SetRepoAccess
-// (--users) when they deliberately want to restrict an open repo. A grant,
-// so username is always resolved live, same as AddMember/AddToGroup.
-func (c *Collection) GrantRepoUser(repoName, username string, client api.Client) error {
-	if err := ValidateUsername(username); err != nil {
-		return err
-	}
-
-	idx := -1
-	for i, r := range c.Repos {
-		if r.Name == repoName {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		return fmt.Errorf("%w: %s", ErrRepoNotFound, repoName)
-	}
-
-	repo := c.Repos[idx]
-	if len(repo.Groups) == 0 && len(repo.Users) == 0 {
-		return fmt.Errorf("%w: %s", ErrRepoOpen, repoName)
-	}
-
-	user, err := client.GetUser(username)
-	if err != nil {
-		return fmt.Errorf("could not resolve %s on the platform: %w", username, err)
-	}
-	if !c.IsMember(user.ID) {
-		return fmt.Errorf("%w: %s", ErrNotMember, username)
-	}
-	if containsString(repo.Users, user.ID) {
-		return nil
-	}
-
-	original := append([]string{}, repo.Users...)
-	c.Repos[idx].Users = append(append([]string{}, repo.Users...), user.ID)
-
-	if _, _, err := c.SyncCollaborators(client); err != nil {
-		c.Repos[idx].Users = original
-		return fmt.Errorf("could not sync access for %s: %w", username, err)
-	}
-	return c.Save()
-}
-
-// RevokeRepoUser removes username from repoName's individual Users list,
-// leaving Groups and other Users untouched. No-op if username doesn't have
-// individual access on this repo (they may still have access via a group,
-// which this does not touch). Refuses with ErrRepoWouldOpen if removing
-// username would leave the repo with empty Groups and empty Users — that
-// combination means "open to all members" per CanAccessRepo's decision
-// table, so revoking the last individual grant must never silently
-// re-open the repo to everyone; use SetRepoAccess if that's truly intended.
-// A revoke, so the ID comes from IDForLogin, never a live client.GetUser
-// call — same reasoning as RemoveMember/RemoveFromGroup.
-func (c *Collection) RevokeRepoUser(repoName, username string, client api.Client) error {
-	if err := ValidateUsername(username); err != nil {
-		return err
-	}
-
-	idx := -1
-	for i, r := range c.Repos {
-		if r.Name == repoName {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		return fmt.Errorf("%w: %s", ErrRepoNotFound, repoName)
-	}
-
-	id := c.IDForLogin(username)
-	repo := c.Repos[idx]
-	if id == "" || !containsString(repo.Users, id) {
-		return nil
-	}
-
-	newUsers := removeString(repo.Users, id)
-	if len(repo.Groups) == 0 && len(newUsers) == 0 {
-		return fmt.Errorf("%w: %s", ErrRepoWouldOpen, repoName)
-	}
-
-	original := append([]string{}, repo.Users...)
-	c.Repos[idx].Users = newUsers
-
-	if _, _, err := c.SyncCollaborators(client); err != nil {
-		c.Repos[idx].Users = original
-		return fmt.Errorf("could not sync access for %s: %w", username, err)
 	}
 	return c.Save()
 }

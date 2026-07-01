@@ -136,7 +136,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 // firstPendingInvite returns the first repo in skipped where caller (a
 // login) has an unaccepted GitHub collaborator invite, or "" if none do.
 func firstPendingInvite(col *collection.Collection, caller string, skipped []string, client api.Client) string {
-	ownerLogin := col.Logins[col.Owner]
+	ownerLogin := col.RepoNamespace()
 	for _, repoName := range skipped {
 		has, err := client.GetPendingInvite(ownerLogin, repoName, caller)
 		if err == nil && has {
@@ -249,7 +249,7 @@ func cloneAll(col *collection.Collection, client api.Client, targets []collectio
 // cloneOne resolves repoName's HTTPS clone URL via the platform API and
 // clones it into <dest>/<repoName>.
 func cloneOne(col *collection.Collection, client api.Client, repoName, dest string, dryRun bool) error {
-	ownerLogin := col.Logins[col.Owner]
+	ownerLogin := col.RepoNamespace()
 	info, err := client.GetRepo(ownerLogin, repoName)
 	if err != nil {
 		return fmt.Errorf("could not look up %s/%s: %w", ownerLogin, repoName, err)

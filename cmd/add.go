@@ -64,7 +64,7 @@ func addOneRepo(col *collection.Collection, name, caller, repoName string, clien
 		}
 	}
 
-	ownerLogin := col.Logins[col.Owner]
+	ownerLogin := col.RepoNamespace()
 	if _, err := client.GetRepo(ownerLogin, repoName); err != nil {
 		return fmt.Errorf("could not find %s/%s: %w", ownerLogin, repoName, err)
 	}

@@ -179,7 +179,7 @@ func fetchActivity(col *collection.Collection, client api.Client, targets []coll
 		err     error
 	}
 	results := make([]result, len(targets))
-	ownerLogin := col.Logins[col.Owner]
+	ownerLogin := col.RepoNamespace()
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, defaultActivityConcurrency)

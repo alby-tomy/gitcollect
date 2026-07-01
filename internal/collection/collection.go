@@ -44,10 +44,11 @@ var (
 	ErrAlreadyExists = errors.New("collection already exists")
 	ErrInvalidName   = errors.New("invalid name")
 
-	nameRe     = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$`)
-	repoNameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
-	usernameRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
-	groupNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,30}$`)
+	nameRe        = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$`)
+	repoNameRe    = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
+	usernameRe    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
+	groupNameRe   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,30}$`)
+	namespaceRe   = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
 )
 
 // ValidateCollectionName reports whether name is a safe, well-formed
@@ -133,8 +134,13 @@ type Collection struct {
 	// login to get the ID in the first place) and when an old-format file
 	// is migrated. Empty/nil on a "1" file that hasn't been migrated yet.
 	Logins    map[string]string `yaml:"logins"`
-	CreatedAt time.Time         `yaml:"created_at"`
-	UpdatedAt time.Time         `yaml:"updated_at"`
+	// Namespace is the GitHub/GitLab username or org name under which the
+	// repos in this collection live. Used for API path building only —
+	// defaults to the owner's cached login if empty. Set via
+	// "gitcollect init --namespace <org>" when repos live under an org.
+	Namespace string    `yaml:"namespace,omitempty"`
+	CreatedAt time.Time `yaml:"created_at"`
+	UpdatedAt time.Time `yaml:"updated_at"`
 
 	path string // absolute path on disk; not serialised
 }
@@ -264,6 +270,9 @@ func (c *Collection) Validate() error {
 	if c.Visibility != VisibilityPublic && c.Visibility != VisibilityPrivate {
 		return fmt.Errorf("invalid visibility %q", c.Visibility)
 	}
+	if c.Namespace != "" && !namespaceRe.MatchString(c.Namespace) {
+		return fmt.Errorf("invalid namespace %q: must match %s", c.Namespace, namespaceRe.String())
+	}
 
 	members := make(map[string]bool, len(c.Members))
 	for _, m := range c.Members {
@@ -308,6 +317,17 @@ func (c *Collection) Validate() error {
 		}
 	}
 	return nil
+}
+
+// RepoNamespace returns the namespace used for API path building
+// (e.g. GET /repos/{namespace}/{repo}). Falls back to the owner's
+// cached login when no explicit namespace is set — the common case
+// where the collection owner also owns all the repos.
+func (c *Collection) RepoNamespace() string {
+	if c.Namespace != "" {
+		return c.Namespace
+	}
+	return c.Logins[c.Owner]
 }
 
 // Save validates the manifest and writes it atomically (temp file +

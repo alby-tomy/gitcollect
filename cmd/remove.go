@@ -88,7 +88,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 // access from repoName, concurrently, before the repo is dropped from the
 // manifest.
 func revokeRepoAccess(col *collection.Collection, repoName string, client api.Client) error {
-	ownerLogin := col.Logins[col.Owner]
+	ownerLogin := col.RepoNamespace()
 	var (
 		mu   sync.Mutex
 		errs []error

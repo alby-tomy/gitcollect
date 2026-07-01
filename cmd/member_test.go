@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"sort"
 	"sync"
 	"testing"
 
@@ -152,5 +153,77 @@ func TestAddOneMember(t *testing.T) {
 	}
 	if col.IsMember("bob") {
 		t.Error("expected bob NOT to be added to Members after a failed sync (AddMember rolls back)")
+	}
+}
+
+// TestGroupsForMember exercises the groupsForMember helper (used by member
+// list and printAccessSummary) with a member in multiple groups, one group,
+// and no groups at all.
+func TestGroupsForMember(t *testing.T) {
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice-id", "bob-id"}
+	col.Logins["alice-id"] = "alice"
+	col.Logins["bob-id"] = "bob"
+	col.Groups = map[string][]string{
+		"red-team":  {"alice-id"},
+		"blue-team": {"alice-id", "bob-id"},
+	}
+
+	aliceGroups := groupsForMember(col, "alice-id")
+	sort.Strings(aliceGroups)
+	if len(aliceGroups) != 2 || aliceGroups[0] != "blue-team" || aliceGroups[1] != "red-team" {
+		t.Errorf("groupsForMember(alice-id) = %v, want [blue-team red-team]", aliceGroups)
+	}
+
+	bobGroups := groupsForMember(col, "bob-id")
+	if len(bobGroups) != 1 || bobGroups[0] != "blue-team" {
+		t.Errorf("groupsForMember(bob-id) = %v, want [blue-team]", bobGroups)
+	}
+
+	charlieGroups := groupsForMember(col, "charlie-id")
+	if len(charlieGroups) != 0 {
+		t.Errorf("groupsForMember(charlie-id) = %v, want [] (not in any group)", charlieGroups)
+	}
+}
+
+// TestAddOneMember_BatchContinuesPastFailure verifies that a batch of
+// usernames continues processing after one fails — the per-item helper
+// returns the error instead of panicking or short-circuiting the loop
+// that runMemberAdd drives.
+func TestAddOneMember_BatchContinuesPastFailure(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Repos = []collection.RepoAccess{{Name: "r", Groups: []string{}, Users: []string{}}}
+
+	client := newMultiAddMock()
+	client.failAddFor["charlie"] = true
+
+	var failed []string
+	for _, username := range []string{"alice", "charlie", "bob"} {
+		if err := addOneMember(col, "acme", "owner", username, client); err != nil {
+			failed = append(failed, username)
+		}
+	}
+
+	if len(failed) != 1 || failed[0] != "charlie" {
+		t.Errorf("failed = %v, want [charlie]", failed)
+	}
+	if !col.IsMember("alice") {
+		t.Error("alice should be a member (added before the failure)")
+	}
+	if col.IsMember("charlie") {
+		t.Error("charlie should NOT be a member (sync failed)")
+	}
+	if !col.IsMember("bob") {
+		t.Error("bob should be a member (processing continued past charlie's failure)")
 	}
 }
