@@ -78,7 +78,17 @@ func (m *mockClient) GetPendingInvite(owner, repo, username string) (bool, error
 func (m *mockClient) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: name, CloneURL: "https://example.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
-func (m *mockClient) Host() string { return m.host }
+func (m *mockClient) Host() string                    { return m.host }
+func (m *mockClient) GetTokenScopes() ([]string, error) { return []string{}, nil }
+func (m *mockClient) ListOrgTeams(org string) ([]api.TeamInfo, error) {
+	return nil, nil
+}
+func (m *mockClient) ListTeamMembers(org, teamSlug, role string) ([]api.UserInfo, error) {
+	return nil, nil
+}
+func (m *mockClient) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
+	return nil, nil
+}
 
 func newTestCollection(t *testing.T, visibility Visibility) *Collection {
 	t.Helper()

@@ -335,6 +335,17 @@ func (c *Collection) Validate() error {
 	return nil
 }
 
+// SetPath sets the internal file path for this collection.
+// Called during import to specify where the YAML should be written.
+// name is the base name only (without directory or extension),
+// e.g. "acme-corp-payments-team". manifestPath resolves it to the
+// full absolute path so Save() works correctly without further resolution.
+func (c *Collection) SetPath(name string) {
+	if p, err := manifestPath(name); err == nil {
+		c.path = p
+	}
+}
+
 // RepoNamespace returns the namespace used for API path building
 // (e.g. GET /repos/{namespace}/{repo}). Falls back to the owner's
 // cached login when no explicit namespace is set — the common case

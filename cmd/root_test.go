@@ -101,7 +101,17 @@ func (m *rootMock) ListCommits(owner, repo, branch string, limit int) ([]api.Com
 func (m *rootMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
-func (m *rootMock) Host() string { return "github.com" }
+func (m *rootMock) Host() string                    { return "github.com" }
+func (m *rootMock) GetTokenScopes() ([]string, error) { return []string{}, nil }
+func (m *rootMock) ListOrgTeams(org string) ([]api.TeamInfo, error) {
+	return nil, nil
+}
+func (m *rootMock) ListTeamMembers(org, teamSlug, role string) ([]api.UserInfo, error) {
+	return nil, nil
+}
+func (m *rootMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
+	return nil, nil
+}
 
 // resetCallerCache clears the package-level identity cache before a test and
 // restores it to empty afterward, so each test starts from a clean slate.

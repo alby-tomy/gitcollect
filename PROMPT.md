@@ -2250,6 +2250,114 @@ Next session should start with: git commit all changes from this
 session (FEATURE_AUTO_CREATE_REPO + FEATURE_SCALABILITY + docs).
 ```
 
+Session 19 — 2026-07-03 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Began FEATURE_IMPORT.md Phase 1. Implemented Steps 1–5 (interface
+extension, GitHub/GitLab API methods, SetPath helper, all mock stubs).
+Completed:    Step 1 — internal/api/client.go: added TeamInfo struct
+                (ID, Name, Slug, Description, Privacy, ParentSlug);
+                added 4 new methods to Client interface:
+                ListOrgTeams, ListTeamMembers, ListTeamRepos,
+                GetTokenScopes.
+              Step 2 — internal/api/github.go: retryDo thin wrapper
+                (c.httpClient.Do — no retry logic, matches codebase
+                pattern); paginate helper (Link-header pagination,
+                ctx/cancel per iteration); nextPageURL; ListOrgTeams
+                (GET /orgs/{org}/teams); ListTeamMembers (GET
+                /orgs/{org}/teams/{slug}/members?role=...);
+                ListTeamRepos (GET /orgs/{org}/teams/{slug}/repos);
+                GetTokenScopes (GET /user, read X-OAuth-Scopes header).
+              Step 3 — internal/api/gitlab.go: retryDo thin wrapper;
+                paginateGitLab (Link header + X-Next-Page fallback with
+                URL rebuild); ListOrgTeams (/groups/{org}/subgroups);
+                ListTeamMembers (/groups/{org%2FteamSlug}/members);
+                ListTeamRepos (/groups/{org%2FteamSlug}/projects);
+                GetTokenScopes (/personal_access_tokens/self with
+                fallback to /oauth/token/info for GitLab <15).
+              Step 4 — mock stubs: all 6 mock types across 5 test files
+                (internal/collection/collection_test.go,
+                internal/access/access_test.go, cmd/member_test.go ×2,
+                cmd/root_test.go, cmd/transfer_test.go) updated with
+                no-op stubs for all 4 new interface methods.
+              Step 5 — internal/collection/collection.go: SetPath method
+                added; approved deviation from spec — uses manifestPath
+                to resolve to full absolute path instead of c.path=name
+                (see architecture decisions log for rationale).
+              go build ./... clean; go test ./... all green (9 packages).
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: Step 6 — cmd/import.go (full import
+command: checkImportScopes, buildCollectionFromTeam, concurrent fetch,
+conflict handling, flags --from/--org/--team/--dry-run/--flatten/
+--owner-from-maintainer/--namespace).
+```
+
+Session 20 — 2026-07-03 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Completed FEATURE_IMPORT.md Phase 1 in full (Steps 6–15). All Phase 1
+commands implemented and tested.
+Completed:    Step 6 — cmd/import.go: full import command;
+                checkImportScopes (GitHub only — GitLab has no scope
+                header); collectionNameForTeam (flatten/parent prefix
+                logic); buildCollectionFromTeam (with host from
+                client.Host() not hardcoded, name as a parameter not
+                team.Slug, so --flatten=false works); importResult
+                type; resolveConflict (overwrite/skip/merge flags +
+                interactive o/s/m prompt); mergeCollections; runImport
+                with pre-flight output, concurrent semaphore fetch
+                (max 4), conflict handling, dry-run, summary.
+              Step 7 — cmd/import_test.go: all 13 tests passing:
+                DryRun_NoFilesWritten, CreatesCollectionFiles,
+                SetsOwnerFromMaintainer, FallsBackToCallerOwner,
+                SingleTeam, MissingScope_ReturnsError, ConflictMerge,
+                ConflictOverwrite, ConflictSkip, FlattenNestedTeams,
+                BuildCollectionFromTeam_Valid,
+                BuildCollectionFromTeam_OwnerNotInMembers,
+                LoginsMapComplete. importMock type added.
+              Step 8 — cmd/publish.go: publish command using subprocess
+                git (ShallowClone, Checkout, Add, Commit, Push);
+                copyFile helper; repoCloneURL helper. Added 5 new
+                unexported helpers to internal/git/git.go:
+                ShallowClone (--depth=1), Checkout, Add, Commit
+                (no-op on "nothing to commit"), Push.
+              Step 9 — cmd/publish_test.go: RequiresRepo,
+                MissingCollection, NoCollections, RepoCloneURL,
+                CopyFile, CopyFile_MissingSrc, CollectionFilter.
+              Step 10 — cmd/pull_config.go: pull-config command;
+                copies collection YAMLs from cloned repo to
+                ~/.gitcollect/collections/; --overwrite; --collection
+                filter; reuses copyFile from publish.go.
+              Step 11 — cmd/pull_config_test.go: RequiresRepo,
+                CopiesFiles, SkipsExistingWithoutOverwrite,
+                OverwriteReplacesFile.
+              Step 12 — cmd/join.go: join command; --repo path (fetch
+                from shared config repo) and direct API import path
+                (delegates to runImport); optional --clone (uses
+                access.FilterAccessible + git.Clone); makeTempDir
+                helper.
+              Step 13 — cmd/join_test.go: RequiresOrg, RequiresTeam,
+                ViaAPI, ViaRepo (verifies git error, not panic),
+                MakeTempDir, CollectionNameFormat.
+              Step 14 — cmd/sync_config.go: sync-config command;
+                syncOneCollection (compute member/repo diff without
+                writing); applySync (update col in-place); runSyncConfig
+                (single or all collections; namespace check; dry-run;
+                --org/--from overrides; team-slug derivation from name);
+                humanDuration helper.
+              Step 15 — cmd/sync_config_test.go: all 6 tests from spec:
+                NoChanges, NewMember, RemovedMember, NewRepo, DryRun,
+                NoNamespace. Plus TestHumanDuration unit test.
+              FINAL CHECKS:
+                go build ./... clean; go test ./... all green (9 pkgs);
+                go vet ./... clean; cmd coverage 42.5%.
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: Phase 2 — README.md rewrite and
+docs/index.html update to reflect all features through Session 20.
+Read current README.md and docs/index.html before writing anything.
+Run ./bin/gitcollect --help to get real binary output for command ref.
+```
+
 ---
 
 ### File completion table
@@ -2928,6 +3036,25 @@ sessions do not re-debate them.
       (no client, no network) so must handle both formats indefinitely.
     - audit.go: ZERO changes. Actor/Target stay login strings, populated
       by callers. The audit package itself is unchanged.
+- SESSION 19, SetPath USES manifestPath NOT BARE NAME: FEATURE_IMPORT.md
+  spec defines Collection.SetPath(name string) with body `c.path = name`.
+  The spec's intent is that callers pass a base collection name (e.g.
+  "acme-corp-payments-team") and SetPath stores it for Save(). However,
+  c.path is used directly as a filesystem path in Save():
+    os.Rename(tmpPath, c.path)
+  and Save()'s `if c.path == ""` guard only fires for an empty string,
+  not for a bare relative name. Storing a bare name like
+  "acme-corp-payments-team" would cause Save() to write the YAML to the
+  current working directory instead of ~/.gitcollect/collections/, which
+  is wrong in every plausible execution context. The fix: use
+  manifestPath(name) (the same unexported helper every other path
+  assignment in collection.go uses) to resolve the name to a full
+  absolute path before storing it. If manifestPath fails (e.g. $HOME is
+  unset), SetPath is a silent no-op — Save() will then fall through to
+  its own `if c.path == ""` guard and self-resolve, which is the same
+  fallback behavior as any other collection. Approved by user with:
+  "The spec body c.path = name was wrong. Your analysis is correct and
+  the deviation is approved."
 ```
 
 <!-- v1 -->
