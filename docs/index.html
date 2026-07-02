@@ -119,6 +119,13 @@
   footer a{color:var(--text);}
   footer .links{display:flex; gap:18px; flex-wrap:wrap; margin-bottom:16px;}
 
+  .note{color:var(--muted); font-size:0.88rem; padding:6px 0 6px 12px; border-left:2px solid var(--accent); margin:10px 0;}
+  .warn{color:var(--yellow); font-size:0.88rem; padding:6px 0 6px 12px; border-left:2px solid var(--yellow); margin:10px 0;}
+  .install-method{margin-bottom:32px;}
+  .install-method h3{font-size:1.1rem; color:var(--text); font-weight:600; margin:0 0 12px;}
+  .platform-block{margin:16px 0 24px;}
+  .platform-block h4{font-size:0.95rem; color:var(--text); font-weight:600; margin:0 0 10px;}
+
   ::selection{background:var(--accent-soft);}
 </style>
 </head>
@@ -142,7 +149,7 @@
     <div class="hero-actions">
       <a class="btn primary" href="#commands">Browse commands</a>
       <a class="btn secondary" href="https://github.com/alby-tomy/gitcollect" target="_blank" rel="noopener">View on GitHub</a>
-      <a class="btn secondary" href="../README.md">README</a>
+      <a class="btn secondary" href="https://github.com/alby-tomy/gitcollect/blob/main/README.md" target="_blank" rel="noopener">README</a>
     </div>
   </div>
 </header>
@@ -176,34 +183,153 @@
       API to completion <em>before</em> the local YAML is written. If the API call
       fails, the YAML does not change. There is no in-between state, and no
       shadow permission system.</p>
+      <p>Identity is based on immutable platform user IDs, not usernames.
+      Renaming a GitHub or GitLab account never breaks collection
+      ownership or membership — gitcollect resolves and caches the
+      platform's permanent numeric ID alongside the login string, and all
+      access decisions compare by ID. The cached login is used only for
+      display, API path-building, and audit log entries — never for
+      security decisions. Collections automatically update a stale cached
+      login the next time a write command is run.</p>
     </div>
     <table class="refmatrix">
       <tr><th>Concept</th><th>What it means</th></tr>
       <tr><td><strong>Collection</strong></td><td>A named group of repos with shared membership/visibility rules. Stored as one YAML file under <code>~/.gitcollect/collections/</code>.</td></tr>
+      <tr><td><strong>Namespace</strong></td><td>The GitHub/GitLab username or org under which the collection's repos actually live — used for all API path-building (<code>GET /repos/{namespace}/{repo}</code>). Defaults to the collection owner's login. Set <code>--namespace acme-corp</code> on init for org repos. Distinct from the collection owner, who is always the authenticated user.</td></tr>
       <tr><td><strong>Member</strong></td><td>A person who belongs to a collection. On a private collection, non-members can't even discover it exists.</td></tr>
       <tr><td><strong>Group</strong></td><td>A named subset of members, used to restrict which repos a collection's members can reach.</td></tr>
       <tr><td><strong>Repo access</strong></td><td>Per-repo rule: open to all members, restricted to one or more groups, restricted to specific users, or a union of both.</td></tr>
       <tr><td><strong>Audit log</strong></td><td>Every mutation — success or failure — is appended to <code>~/.gitcollect/audit/&lt;collection&gt;.log</code> as newline-delimited JSON.</td></tr>
     </table>
+    <p class="note"><strong>Windows:</strong> <code>~/.gitcollect/</code> maps to <code>%USERPROFILE%\.gitcollect\</code></p>
   </div>
 </section>
 
 <section id="install">
   <div class="wrap">
-    <h2>Install &amp; first run</h2>
-    <p class="lead">Plain <code>go</code> commands — no Make required. See the <a href="../README.md">README</a> for full per-OS instructions.</p>
-    <pre class="codeblock"><span class="c"># build</span>
+    <h2>Installation</h2>
+    <p class="lead">Four methods — pick the one that fits your setup. No daemon, no database: the binary is the whole tool.</p>
+
+    <div class="install-method">
+      <h3>Method 1 — go install</h3>
+      <p>Recommended for Go developers. Requires Go 1.26.4+</p>
+      <pre class="codeblock">go install github.com/alby-tomy/gitcollect@latest</pre>
+      <p>This compiles gitcollect on your machine and places the binary in <code>~/go/bin/</code> (Linux/Mac) or <code>%USERPROFILE%\go\bin\</code> (Windows). If that directory is already on your PATH — which it is by default after a standard Go installation — gitcollect is immediately available. To upgrade, run the same command again with <code>@latest</code>.</p>
+    </div>
+
+    <div class="install-method">
+      <h3>Method 2 — Pre-built binary</h3>
+      <p>No Go required. Download from the <a href="https://github.com/alby-tomy/gitcollect/releases" target="_blank" rel="noopener">GitHub Releases page</a>.</p>
+
+      <div class="platform-block">
+        <h4>Linux</h4>
+        <pre class="codeblock"><span class="c"># Get the latest version tag</span>
+VERSION=$(curl -sL https://api.github.com/repos/alby-tomy/gitcollect/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+
+<span class="c"># Intel/AMD (amd64)</span>
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${VERSION}/gitcollect_${VERSION}_linux_amd64.tar.gz" | tar xz
+sudo mv gitcollect /usr/local/bin/
+
+<span class="c"># ARM64 (e.g. Raspberry Pi, AWS Graviton)</span>
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${VERSION}/gitcollect_${VERSION}_linux_arm64.tar.gz" | tar xz
+sudo mv gitcollect /usr/local/bin/
+
+<span class="c"># Verify</span>
+gitcollect version</pre>
+      </div>
+
+      <div class="platform-block">
+        <h4>macOS</h4>
+        <pre class="codeblock"><span class="c"># Get the latest version tag</span>
+VERSION=$(curl -sL https://api.github.com/repos/alby-tomy/gitcollect/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+
+<span class="c"># Apple Silicon (M1/M2/M3 — arm64)</span>
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${VERSION}/gitcollect_${VERSION}_darwin_arm64.tar.gz" | tar xz
+sudo mv gitcollect /usr/local/bin/
+
+<span class="c"># Intel Mac (amd64)</span>
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${VERSION}/gitcollect_${VERSION}_darwin_amd64.tar.gz" | tar xz
+sudo mv gitcollect /usr/local/bin/
+
+<span class="c"># Verify</span>
+gitcollect version</pre>
+        <p class="note">If macOS blocks the binary with "cannot be opened because the developer cannot be verified", run: <code>xattr -d com.apple.quarantine /usr/local/bin/gitcollect</code></p>
+      </div>
+
+      <div class="platform-block">
+        <h4>Windows</h4>
+        <ol>
+          <li>Download <code>gitcollect_&lt;version&gt;_windows_amd64.zip</code> from <a href="https://github.com/alby-tomy/gitcollect/releases/latest" target="_blank" rel="noopener">github.com/alby-tomy/gitcollect/releases/latest</a></li>
+          <li>Extract the zip — you get <code>gitcollect.exe</code></li>
+          <li>Move <code>gitcollect.exe</code> to a permanent location, e.g. <code>C:\Users\YourName\bin\gitcollect.exe</code></li>
+          <li>Add that folder to your PATH:
+            <ol type="a">
+              <li>Open Start → search "Edit the system environment variables"</li>
+              <li>Click "Environment Variables..."</li>
+              <li>Under "User variables", select "Path" → Edit → New</li>
+              <li>Add: <code>C:\Users\YourName\bin</code></li>
+              <li>Click OK on all dialogs</li>
+            </ol>
+          </li>
+          <li>Open a new terminal (the old one won't see the updated PATH) and run: <code>gitcollect version</code></li>
+        </ol>
+        <p class="note">Windows support is provided as a best-effort build. If you encounter any Windows-specific issues, please <a href="https://github.com/alby-tomy/gitcollect/issues" target="_blank" rel="noopener">open an issue</a>.</p>
+      </div>
+    </div>
+
+    <div class="install-method">
+      <h3>Method 3 — Build from source</h3>
+      <pre class="codeblock"><span class="c"># Requires Go 1.26.4+ and git</span>
+git clone https://github.com/alby-tomy/gitcollect.git
+cd gitcollect
 go build -ldflags="-s -w -X main.version=dev" -o bin/gitcollect .
+<span class="c"># Move to somewhere on your PATH:</span>
+sudo mv bin/gitcollect /usr/local/bin/   <span class="c"># Linux/Mac</span>
+<span class="c"># or add bin/ to your PATH on Windows</span></pre>
+    </div>
 
-<span class="c"># authenticate once per host — token persists until it's revoked/expires</span>
-gitcollect auth
-gitcollect whoami
+    <div class="install-method">
+      <h3>Method 4 — Homebrew</h3>
+      <pre class="codeblock">brew install alby-tomy/tap/gitcollect</pre>
+      <p class="note">The Homebrew tap is not yet published. This will be available in a future release. Use one of the methods above in the meantime.</p>
+    </div>
 
-<span class="c"># create a collection, add a repo, add a member</span>
-gitcollect init my-collection
-gitcollect add my-collection some-repo
-gitcollect member add my-collection some-username
-gitcollect show my-collection</pre>
+    <div class="install-method">
+      <h3>Verify the installation</h3>
+      <pre class="codeblock">gitcollect version
+<span class="c"># Expected output format:</span>
+gitcollect v1.0.0 linux/amd64</pre>
+      <p>The version and platform strings are embedded at build time. <code>dev</code> appears instead of a version number when built from source without tags.</p>
+    </div>
+
+    <div class="install-method">
+      <h3>Shell completion</h3>
+      <p>The <code>completion</code> subcommand is built in (provided by the Cobra framework). Every command and flag is completion-aware out of the box.</p>
+
+      <div class="platform-block">
+        <h4>Bash (Linux/Mac)</h4>
+        <pre class="codeblock">gitcollect completion bash >> ~/.bashrc
+source ~/.bashrc</pre>
+      </div>
+
+      <div class="platform-block">
+        <h4>Zsh (Mac default shell)</h4>
+        <pre class="codeblock">gitcollect completion zsh >> ~/.zshrc
+source ~/.zshrc</pre>
+        <p class="note">Or for Oh My Zsh: <code>gitcollect completion zsh > ~/.oh-my-zsh/completions/_gitcollect</code></p>
+      </div>
+
+      <div class="platform-block">
+        <h4>Fish</h4>
+        <pre class="codeblock">gitcollect completion fish > ~/.config/fish/completions/gitcollect.fish</pre>
+      </div>
+
+      <div class="platform-block">
+        <h4>PowerShell (Windows)</h4>
+        <pre class="codeblock">gitcollect completion powershell >> $PROFILE
+. $PROFILE</pre>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -214,7 +340,9 @@ gitcollect show my-collection</pre>
     actual output gitcollect prints, not an illustration.</p>
 
     <h3>1. Create the collection and add repos (you)</h3>
-    <pre class="codeblock"><span class="c"># the owner is always whoever ran "gitcollect auth" — there's no --owner flag</span>
+    <pre class="codeblock"><span class="c"># the owner is always whoever ran "gitcollect auth"</span>
+<span class="c"># for repos under an org, pass --namespace to set the repo namespace:</span>
+<span class="c">#   gitcollect init cybersecurity --namespace acme-corp</span>
 gitcollect init cybersecurity
 gitcollect add cybersecurity pen-test-tools
 gitcollect add cybersecurity vuln-scanner</pre>
@@ -304,6 +432,7 @@ cp cybersecurity.yaml ~/.gitcollect/collections/
 
 <span class="c"># Option B — just send them the file (chat, email, anything)</span>
 <span class="c"># teammate places it at ~/.gitcollect/collections/cybersecurity.yaml</span></pre>
+    <p class="note">A <code>gitcollect fetch</code> command for sharing collections directly by URL is planned for a future release — this will eliminate the manual file-copy step.</p>
     <p class="dim">Hand-editing that file to add yourself as a member doesn't grant
     you anything — see the guarantee below.</p>
 
@@ -406,11 +535,12 @@ exploit-db  ✗ no    no access — group red-team required</pre>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> init &lt;name&gt;</p>
-        <p class="desc">Create a new collection. Private by default — being the owner does not automatically make you a "member"; add yourself explicitly if you want <code>member</code>-only views to include you.</p>
+        <p class="desc">Create a new collection. Private by default — being the owner does not automatically make you a "member"; add yourself explicitly if you want <code>member</code>-only views to include you. When repos live under an organisation rather than your personal account, pass <code>--namespace &lt;org-name&gt;</code> so gitcollect builds API paths correctly. The collection owner (who administers it) is always the authenticated user regardless of namespace.</p>
         <div class="flags"><table>
           <tr><td class="flagname">--host</td><td class="flagdesc">platform host the collection's repos live on (default <code>github.com</code>)</td></tr>
           <tr><td class="flagname">--description</td><td class="flagdesc">human-readable description</td></tr>
           <tr><td class="flagname">--public</td><td class="flagdesc">create as public instead of the default, private</td></tr>
+          <tr><td class="flagname">--namespace</td><td class="flagdesc">GitHub/GitLab username or org whose repos this collection contains. Defaults to the authenticated user's login. Set this when the repos live under an org (e.g. <code>--namespace acme-corp</code>) rather than your personal account.</td></tr>
         </table></div>
       </div>
 
@@ -553,7 +683,8 @@ exploit-db  ✗ no    no access — group red-team required</pre>
       </div>
 
       <div class="cmd">
-        <p class="sig"><span class="prog">gitcollect</span> activity &lt;collection&gt;</p>
+        <p class="sig"><span class="prog">gitcollect</span> activity &lt;collection&gt; <span style="font-size:0.75rem;font-weight:400;color:var(--yellow);border:1px solid var(--yellow);border-radius:4px;padding:1px 6px;vertical-align:middle;">experimental</span></p>
+        <p style="color:var(--yellow);font-size:0.85rem;margin:0 0 8px;font-style:italic;">[experimental] — output format and flag names may change in a future release. Functionality is stable but the interface is not yet frozen.</p>
         <p class="desc">Show code changes, not access changes: fetches the most recent commits on each accessible repo's default branch live from GitHub/GitLab, records any genuinely new ones to <code>~/.gitcollect/activity/&lt;collection&gt;.log</code>, and prints the combined history (this run's fetch plus everything previously recorded) — repo, branch, author, SHA, message, and timestamp for every commit, newest first.</p>
         <div class="flags"><table>
           <tr><td class="flagname">--repo &lt;name&gt;</td><td class="flagdesc">only check this one repo instead of every accessible one</td></tr>
@@ -625,8 +756,8 @@ exploit-db  ✗ no    no access — group red-team required</pre>
 <footer>
   <div class="wrap">
     <div class="links">
-      <a href="../README.md">README</a>
-      <a href="../PROMPT.md">Design spec (PROMPT.md)</a>
+      <a href="https://github.com/alby-tomy/gitcollect/blob/main/README.md" target="_blank" rel="noopener">README</a>
+      <a href="https://github.com/alby-tomy/gitcollect/blob/main/PROMPT.md" target="_blank" rel="noopener">Design spec (PROMPT.md)</a>
       <a href="https://github.com/alby-tomy/gitcollect" target="_blank" rel="noopener">GitHub repository</a>
     </div>
     <p>gitcollect wraps Git and the GitHub/GitLab APIs — it never replaces either. Local YAML is intent; the platform is enforcement.</p>

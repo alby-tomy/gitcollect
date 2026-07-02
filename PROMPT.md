@@ -2075,6 +2075,65 @@ PRE_SHIP_IMPROVEMENTS checklist item against the actual repo state,
 run go vet ./..., confirm docs render correctly, and commit.
 ```
 
+Session 17 — 2026-07-02 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+DOCS_AUDIT_AND_INSTALL.md — all Parts 1, 2, and 3 completed.
+Completed:    Part 1 — 8 fixes to existing docs/index.html:
+                Fix 1: Added --namespace flag row to gitcollect init
+                        command table; added namespace note to init
+                        description paragraph.
+                Fix 2: Added Namespace row to Philosophy concepts
+                        table (after Collection row).
+                Fix 3: Added identity model paragraph to Philosophy
+                        section (immutable platform user IDs, cached
+                        login, security vs. display split).
+                Fix 4: Added [experimental] badge (yellow bordered
+                        inline span) and italic warning paragraph to
+                        gitcollect activity command entry.
+                Fix 5: Updated walkthrough step 1 comment to show
+                        --namespace usage for org repos.
+                Fix 6: Added "fetch coming soon" note after Options
+                        A/B in walkthrough step 3.
+                Fix 7: Added Windows %USERPROFILE% note below the
+                        Philosophy concepts table.
+                Fix 8: Fixed all stale relative links (../README.md,
+                        ../PROMPT.md) — hero button + footer — to
+                        absolute github.com/alby-tomy/gitcollect
+                        blob/main/... URLs.
+              Part 2 — Replaced thin install section with full
+                        Installation section (id="install" kept):
+                        Method 1: go install github.com/alby-tomy/
+                                  gitcollect@latest (Go 1.26.4+)
+                        Method 2: Pre-built binaries — Linux (amd64,
+                                  arm64), macOS (arm64, amd64 +
+                                  quarantine note), Windows (full
+                                  PATH setup steps); all archive
+                                  names from .goreleaser.yaml:
+                                  gitcollect_${VERSION}_<os>_<arch>
+                                  [.tar.gz|.zip].
+                        Method 3: Build from source.
+                        Method 4: Homebrew (coming soon, marked).
+                        Verify: gitcollect version → format from
+                                cmd/version.go.
+                        Shell completion: bash, zsh (+ oh-my-zsh),
+                                fish, powershell — Cobra built-in
+                                completion subcommand.
+              Part 3 — All 6 accuracy pass checks green:
+                        no grant/revoke in HTML ✓
+                        no placeholder text ✓
+                        namespace in init section ✓
+                        identity model paragraph present ✓
+                        experimental label on activity ✓
+                        footer links fixed ✓
+go build ./... not re-run (HTML edits cannot break Go); all green
+from Session 16 baseline.
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: commit all changes, push if desired,
+and optionally open docs/index.html in a browser to visually verify
+the new Installation section and philosophy updates render correctly.
+```
+
 ---
 
 ### File completion table
