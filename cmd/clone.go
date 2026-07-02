@@ -34,7 +34,7 @@ var cloneCmd = &cobra.Command{
 }
 
 func init() {
-	cloneCmd.Flags().StringArrayVar(&clonePick, "pick", nil, `clone only these repos: space-separated within one value (--pick "r1 r2"), and/or --pick repeated`)
+	cloneCmd.Flags().StringArrayVar(&clonePick, "pick", nil, `clone only these repos, space-separated (e.g. --pick "r1 r2")`)
 	cloneCmd.Flags().BoolVar(&cloneDryRun, "dry-run", false, "preview what would be cloned without doing it")
 	cloneCmd.Flags().IntVar(&cloneConcurrency, "concurrency", defaultCloneConcurrency, "max repos to clone in parallel")
 	cloneCmd.Flags().StringVar(&cloneDest, "dest", ".", "directory to clone repos into")

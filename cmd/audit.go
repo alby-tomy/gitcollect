@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -47,6 +46,10 @@ var sinceDurations = map[string]time.Duration{
 	"90d": 90 * 24 * time.Hour,
 }
 
+// sinceDurationsOrdered is sinceDurations' keys in logical duration order,
+// used to produce a deterministic, human-readable error message.
+var sinceDurationsOrdered = []string{"1h", "24h", "7d", "30d", "90d"}
+
 // parseSince accepts only the values in sinceDurations.
 func parseSince(s string) (time.Duration, error) {
 	if s == "" {
@@ -55,12 +58,7 @@ func parseSince(s string) (time.Duration, error) {
 	if d, ok := sinceDurations[s]; ok {
 		return d, nil
 	}
-	valid := make([]string, 0, len(sinceDurations))
-	for k := range sinceDurations {
-		valid = append(valid, k)
-	}
-	sort.Strings(valid)
-	return 0, fmt.Errorf("invalid --since %q: must be one of %s", s, strings.Join(valid, ", "))
+	return 0, fmt.Errorf("invalid --since value %q\n  Valid values: %s", s, strings.Join(sinceDurationsOrdered, ", "))
 }
 
 func runAudit(cmd *cobra.Command, args []string) error {

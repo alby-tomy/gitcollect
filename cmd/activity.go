@@ -31,11 +31,9 @@ var (
 var activityCmd = &cobra.Command{
 	Use:   "activity <collection>",
 	Short: "Show commits across a collection's repos, fetched live from the platform",
-	Long: `Fetches the most recent commits on each accessible repo's default branch
-directly from GitHub/GitLab, records any genuinely new ones to
-~/.gitcollect/activity/<collection>.log, and prints the combined history
-(this run's fetch plus everything previously recorded) filtered by --repo
-and --since.
+	Long: `[EXPERIMENTAL] Show recent git commit activity across all accessible
+repos in a collection. This command fetches recent commits from the platform
+API and caches results locally at ~/.gitcollect/activity/<collection>.log.
 
 Unlike "gitcollect audit", which tracks access changes gitcollect itself
 made, "activity" tracks git commits gitcollect observed in the repos —

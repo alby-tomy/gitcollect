@@ -285,11 +285,12 @@ test assertion libraries, ORMs. Use stdlib for all of these.
 
 ```yaml
 # ~/.gitcollect/collections/cybersecurity.yaml
-version: "1"
+version: "2"
 name: cybersecurity
 description: "Penetration testing and security research tools"
 host: github.com
-owner: yourusername
+owner: <platform-user-id>          # immutable platform ID (Version "2")
+namespace: acme-corp                # optional; defaults to owner's cached login
 visibility: private # public | private
 created_at: "2025-01-15T10:00:00Z"
 updated_at: "2025-01-20T14:32:00Z"
@@ -374,11 +375,13 @@ type Collection struct {
     Name        string              `yaml:"name"`
     Description string              `yaml:"description"`
     Host        string              `yaml:"host"`
-    Owner       string              `yaml:"owner"`
+    Owner       string              `yaml:"owner"`     // immutable platform ID (Version "2")
     Visibility  Visibility          `yaml:"visibility"`
     Members     []string            `yaml:"members"`
-    Groups      map[string][]string `yaml:"groups"`  // group name → []username
+    Groups      map[string][]string `yaml:"groups"`    // group name → []platform-ID
     Repos       []RepoAccess        `yaml:"repos"`
+    Logins      map[string]string   `yaml:"logins"`    // ID → cached login
+    Namespace   string              `yaml:"namespace,omitempty"` // org/user for API paths; defaults to Logins[Owner]
     CreatedAt   time.Time           `yaml:"created_at"`
     UpdatedAt   time.Time           `yaml:"updated_at"`
 
@@ -2023,6 +2026,55 @@ col.Logins[col.Owner] in API calls, --namespace flag in cmd/init.go,
 display in cmd/show.go, 4 tests.
 ```
 
+Session 16 — 2026-07-02 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+PRE_SHIP_IMPROVEMENTS Priorities 3–8 completed. All pure-logic
+changes; no new commands added.
+Completed:    Priority 3 (namespace fix) — already done at session
+              start, completed the one open item (PROMPT.md YAML
+              example updated with namespace field and Go struct
+              updated to include Logins + Namespace fields).
+              Priority 4 — Added "Sharing collections with teammates"
+              section to README.md between Shell completion and
+              Quickstart: manual cp flow (Option A/B), why YAML
+              editing doesn't grant access, coming-soon fetch command.
+              Priority 5 — parseSince error message now lists all five
+              valid values in duration order ("1h, 24h, 7d, 30d, 90d")
+              instead of lexicographic sort; removed `sort` import from
+              audit.go; --pick flag usage updated to show quoted form
+              (e.g. --pick "r1 r2"); added cmd/audit_test.go with
+              TestParseSince_ValidValues and TestParseSince_InvalidValue
+              _ListsAllFive; --pick two-value test already covered by
+              TestSplitPick (cmd/clone_test.go line 22).
+              Priority 6 — Added "### Windows" subsection to README.md
+              Installation section with PATH setup steps (7 numbered
+              steps) and best-effort support note linking to issues.
+              Priority 7 — Added "### Upgrading from an earlier version"
+              to README.md Installation section explaining opportunistic
+              v1→v2 migration; added gitcollect member list as a
+              migration trigger to PROMPT.md architecture note.
+              Priority 8 — Added [EXPERIMENTAL] prefix to
+              cmd/activity.go's Long description; added [experimental]
+              badge + Note to README.md activity command reference row;
+              added "Stabilise gitcollect activity" roadmap item to
+              README.md.
+Decision:     Coverage target (50%) was not reached: final is 23.7%.
+              All pure-logic helpers that don't require real auth were
+              covered in Priority 1. The remaining ~76% of cmd/ code
+              requires live network auth (currentClient, RunE paths for
+              all 15+ commands) which cannot be unit-tested without a
+              real token. The spec acknowledged this constraint ("Focus
+              on pure-logic helpers that don't require real config or
+              a running platform API"). 23.7% is the realistic ceiling
+              without a testable auth stub or integration test harness.
+go build ./... clean; go test ./... all green; go vet ./... clean.
+In progress:  (none — all 8 PRE_SHIP priorities complete)
+Blockers:     (none)
+Next session should start with: Final review pass — verify every
+PRE_SHIP_IMPROVEMENTS checklist item against the actual repo state,
+run go vet ./..., confirm docs render correctly, and commit.
+```
+
 ---
 
 ### File completion table
@@ -2643,7 +2695,9 @@ sessions do not re-debate them.
       loadForOwner, loadForGit, and loadForRead's private branch — never
       from list (must stay network-free) or loadForRead's public fast-
       path (must stay auth-free). A Version "2" file triggers no
-      migration call at all.
+      migration call at all. `gitcollect member list` also triggers
+      migration (it uses loadForOwner when the caller is the owner),
+      making it a useful manual upgrade path for owners.
     - Add operations (AddMember, AddToGroup, GrantRepoUser,
       SetRepoAccess --users) always call client.GetUser() live — the
       account must exist on the platform before access is granted.

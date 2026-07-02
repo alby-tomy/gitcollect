@@ -171,6 +171,43 @@ the binary on your `PATH`.
 **Homebrew:** `brew upgrade alby-tomy/tap/gitcollect` (once the tap is
 published).
 
+### Windows
+
+> **Note:** Windows support is provided as a best-effort build. If you
+> encounter any Windows-specific issues, please open an issue at
+> https://github.com/alby-tomy/gitcollect/issues
+
+Download `gitcollect_windows_amd64.zip` from the
+[Releases](https://github.com/alby-tomy/gitcollect/releases) page.
+Extract it to get `gitcollect.exe`.
+
+To use it from any terminal, add it to a folder that's on your PATH:
+
+1. Create `C:\Users\YourName\bin\` if it doesn't exist
+2. Move `gitcollect.exe` there
+3. Open Start → search "Environment Variables"
+4. Click "Edit the system environment variables"
+5. Under "System variables", find "Path" → Edit → New
+6. Add: `C:\Users\YourName\bin`
+7. Click OK, restart your terminal
+8. Run: `gitcollect version`
+
+### Upgrading from an earlier version
+
+Collections created with gitcollect before July 2026 use an older format
+that stores usernames instead of immutable platform user IDs. These files
+are automatically upgraded the next time you run any command that modifies
+the collection (`member add`, `group add`, `repo access`, etc.).
+
+To force-upgrade a specific collection immediately:
+```
+gitcollect member list <collection>    # triggers upgrade if you are the owner
+```
+
+You do not need to do anything if the tool is working correctly — upgrades
+happen transparently. This notice exists so you know what to expect if you
+see a one-line "Migrated collection to v2" message in the output.
+
 ## Shell completion
 
 gitcollect's `completion` subcommand is provided automatically by
@@ -205,6 +242,51 @@ gitcollect completion fish > ~/.config/fish/completions/gitcollect.fish
 ```powershell
 gitcollect completion powershell | Out-String | Invoke-Expression
 ```
+
+## Sharing collections with teammates
+
+There is no `gitcollect fetch` command yet — sharing a collection today means
+copying the YAML file manually. This is the biggest UX gap in the current
+release; a fetch command is planned for a future version.
+
+### Current manual flow
+
+**Option A — commit your collections folder to a repo:**
+```bash
+# You:
+cp -r ~/.gitcollect/collections/ ./my-collections/
+git add . && git commit -m "share collections" && git push
+
+# Teammate:
+git clone https://github.com/you/my-collections
+mkdir -p ~/.gitcollect/collections
+cp my-collections/*.yaml ~/.gitcollect/collections/
+```
+
+**Option B — just send the file (chat, email, anything):**
+```
+# Teammate places it at:
+~/.gitcollect/collections/<collection-name>.yaml
+```
+
+### Why editing the YAML by hand doesn't grant access
+
+A teammate who receives a YAML file can only clone repos where **both of the
+following are true**: the local manifest says they should have access, *and*
+the platform has already made them a real collaborator on that repo via the
+API. Hand-editing the YAML changes the first thing but not the second — the
+platform never received an API call to add them. The collection owner must
+run `gitcollect member add <collection> <teammate>` to make the access real.
+
+### What is coming
+
+```bash
+# Coming in a future release — not available yet:
+gitcollect fetch github.com/you/cybersecurity
+```
+
+This command will download the collection manifest and let the owner grant
+access in one step. Until then, the manual copy flow above is the only option.
 
 ## Quickstart
 
@@ -329,7 +411,7 @@ red-team  2        alice, bob
 |---|---|
 | `gitcollect inspect <collection> [--user u \| --repo r] [--json]` | No flags: the full member × repo matrix. `--user`: one person's full access map with the reason for each decision. `--repo`: who can reach one repo and why. Denied rows get a "To fix:" footer with the exact command to grant access. |
 | `gitcollect audit <collection> [--user u] [--since 1h\|24h\|7d\|30d\|90d] [--json]` | The access change log — every mutation gitcollect ever attempted, including failures, newest first. `--since` only accepts those five exact values. |
-| `gitcollect activity <collection> [--repo r] [--since ...] [--limit n] [--json]` | Code changes, not access changes: live commits per accessible repo's default branch, recorded to `~/.gitcollect/activity/<collection>.log`. |
+| `gitcollect activity <collection> [--repo r] [--since ...] [--limit n] [--json]` | **[experimental]** Code changes, not access changes: live commits per accessible repo's default branch, recorded to `~/.gitcollect/activity/<collection>.log`. > **Note:** This command is marked experimental. The output format and flag names may change in future versions. |
 
 </details>
 
@@ -497,6 +579,9 @@ Not committed, just being considered for a future version:
   above — there's no server, so there's nothing to fetch from yet).
 - **A dashboard or web UI** — a read-only view of `inspect`'s access
   matrix, for teams who'd rather glance at a page than run a CLI command.
+- **Stabilise `gitcollect activity`** — remove the experimental flag in
+  v1.1 after real-world usage confirms the design (output format, flag
+  names, cache behaviour).
 
 Explicitly *not* planned, by design rather than by omission: a GUI/TUI, a
 daemon or web server, a database (YAML + newline-delimited JSON audit log
