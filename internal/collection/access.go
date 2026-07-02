@@ -1,6 +1,24 @@
 package collection
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+var (
+	// ErrGroupAdminsDisabled is returned when a group-admin-only operation is
+	// attempted but GroupAdminsEnabled is false on the collection.
+	ErrGroupAdminsDisabled = errors.New(
+		"group admin support is not enabled — run: gitcollect scale <collection> organisation")
+	// ErrWrongGroup is returned when a group admin tries to manage a group
+	// they are not an admin of.
+	ErrWrongGroup = errors.New("you are a group admin but not of this group")
+	// ErrSelfTransfer is returned when a transfer target is the current owner.
+	ErrSelfTransfer = errors.New("cannot transfer ownership to yourself")
+	// ErrAdminPrivilegeEscalation is returned when a group admin tries to
+	// assign another group admin — only the owner can do that.
+	ErrAdminPrivilegeEscalation = errors.New("group admins cannot assign other group admins")
+)
 
 // IsOwner returns true if id is the collection's owner. id is a platform
 // ID once the collection is on CurrentVersion (still a legacy username on
@@ -158,6 +176,47 @@ func (c *Collection) WhyCanAccess(id, repoName string) string {
 	default:
 		return "no access — individual grant required"
 	}
+}
+
+// IsGroupAdmin returns true if callerID is a group admin of the named group
+// AND GroupAdminsEnabled is true on the collection. Returns false in all
+// other cases, including when the collection is in TEAM mode.
+func (c *Collection) IsGroupAdmin(callerID, group string) bool {
+	if !c.GroupAdminsEnabled {
+		return false
+	}
+	for _, id := range c.GroupAdmins[group] {
+		if id == callerID {
+			return true
+		}
+	}
+	return false
+}
+
+// CanManageGroup returns true if callerID can add/remove members of the named
+// group: the collection owner, or a group admin of that specific group when
+// GroupAdminsEnabled is true.
+func (c *Collection) CanManageGroup(callerID, group string) bool {
+	return c.IsOwner(callerID) || c.IsGroupAdmin(callerID, group)
+}
+
+// GroupAdminOf returns the list of group names callerID is an admin of.
+// Returns an empty slice if GroupAdminsEnabled is false or caller is not an
+// admin of any group.
+func (c *Collection) GroupAdminOf(callerID string) []string {
+	if !c.GroupAdminsEnabled {
+		return []string{}
+	}
+	var groups []string
+	for group, admins := range c.GroupAdmins {
+		for _, id := range admins {
+			if id == callerID {
+				groups = append(groups, group)
+				break
+			}
+		}
+	}
+	return groups
 }
 
 // FixCmd returns the exact gitcollect command the collection owner must

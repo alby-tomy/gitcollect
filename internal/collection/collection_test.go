@@ -75,6 +75,9 @@ func (m *mockClient) ListCommits(owner, repo, branch string, limit int) ([]api.C
 func (m *mockClient) GetPendingInvite(owner, repo, username string) (bool, error) {
 	return false, nil
 }
+func (m *mockClient) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
+	return api.RepoInfo{Name: name, CloneURL: "https://example.com/" + owner + "/" + name + ".git", Private: private}, nil
+}
 func (m *mockClient) Host() string { return m.host }
 
 func newTestCollection(t *testing.T, visibility Visibility) *Collection {

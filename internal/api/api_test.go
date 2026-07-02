@@ -650,6 +650,134 @@ func TestGitLabListCommits_Error(t *testing.T) {
 	}
 }
 
+func TestGitHubCreateRepo_Personal(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/user":
+			json.NewEncoder(w).Encode(map[string]any{"id": 1, "login": "alice"})
+		case r.Method == http.MethodPost && r.URL.Path == "/user/repos":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["name"] != "myrepo" {
+				t.Errorf("expected name=myrepo in body, got %v", body["name"])
+			}
+			if body["private"] != true {
+				t.Errorf("expected private=true in body, got %v", body["private"])
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]any{
+				"name":      "myrepo",
+				"clone_url": "https://github.com/alice/myrepo.git",
+				"private":   true,
+			})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	info, err := client.CreateRepo("alice", "myrepo", true, "desc")
+	if err != nil {
+		t.Fatalf("CreateRepo: %v", err)
+	}
+	if info.Name != "myrepo" || info.CloneURL != "https://github.com/alice/myrepo.git" || !info.Private {
+		t.Errorf("unexpected RepoInfo: %+v", info)
+	}
+}
+
+func TestGitHubCreateRepo_Org(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/user":
+			json.NewEncoder(w).Encode(map[string]any{"id": 1, "login": "alice"})
+		case r.Method == http.MethodPost && r.URL.Path == "/orgs/acme/repos":
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]any{
+				"name":      "widgets",
+				"clone_url": "https://github.com/acme/widgets.git",
+				"private":   false,
+			})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	info, err := client.CreateRepo("acme", "widgets", false, "")
+	if err != nil {
+		t.Fatalf("CreateRepo: %v", err)
+	}
+	if info.Name != "widgets" || info.Private {
+		t.Errorf("unexpected RepoInfo: %+v", info)
+	}
+}
+
+func TestGitHubCreateRepo_Conflict(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/user" {
+			json.NewEncoder(w).Encode(map[string]any{"id": 1, "login": "alice"})
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	})
+
+	if _, err := client.CreateRepo("alice", "dup", true, ""); !errors.Is(err, ErrNameConflict) {
+		t.Fatalf("expected ErrNameConflict, got %v", err)
+	}
+}
+
+func TestGitHubCreateRepo_Forbidden(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/user" {
+			json.NewEncoder(w).Encode(map[string]any{"id": 1, "login": "alice"})
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	})
+
+	if _, err := client.CreateRepo("other-org", "repo", true, ""); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestGitLabCreateRepo_OK(t *testing.T) {
+	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/projects" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["namespace_path"] != "acme" {
+			t.Errorf("expected namespace_path=acme, got %v", body["namespace_path"])
+		}
+		if body["visibility"] != "private" {
+			t.Errorf("expected visibility=private, got %v", body["visibility"])
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{
+			"name":             "widgets",
+			"http_url_to_repo": "https://gitlab.com/acme/widgets.git",
+			"visibility":       "private",
+		})
+	})
+
+	info, err := client.CreateRepo("acme", "widgets", true, "")
+	if err != nil {
+		t.Fatalf("CreateRepo: %v", err)
+	}
+	if info.Name != "widgets" || !info.Private || info.CloneURL != "https://gitlab.com/acme/widgets.git" {
+		t.Errorf("unexpected RepoInfo: %+v", info)
+	}
+}
+
+func TestGitLabCreateRepo_Conflict(t *testing.T) {
+	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	})
+
+	if _, err := client.CreateRepo("acme", "dup", true, ""); !errors.Is(err, ErrNameConflict) {
+		t.Fatalf("expected ErrNameConflict, got %v", err)
+	}
+}
+
 func TestClassifyStatus(t *testing.T) {
 	cases := map[int]error{
 		http.StatusUnauthorized:    ErrUnauthorized,

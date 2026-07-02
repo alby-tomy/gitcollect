@@ -40,6 +40,14 @@ type Client interface {
 	// — distinct from the collaborator methods above, which gitcollect's
 	// access-control mutations drive.
 	ListCommits(owner, repo, branch string, limit int) ([]CommitInfo, error)
+	// CreateRepo creates a new repository under the given owner/org.
+	// name must be a valid repo name (validated before calling).
+	// private controls visibility. description may be empty.
+	// Returns the created repo's info (including its clone URL) on success.
+	// Returns ErrNameConflict if the repo already exists (race condition guard).
+	// Returns ErrForbidden if the authenticated user cannot create repos
+	// under the given owner (e.g. not a member of the org).
+	CreateRepo(owner, name string, private bool, description string) (RepoInfo, error)
 	Host() string
 }
 
@@ -95,6 +103,12 @@ var (
 	// which means "repository not found", so callers can tell the two
 	// apart in error messages.
 	ErrUserNotFound = errors.New("platform user not found")
+	// ErrNameConflict is returned by CreateRepo when the repository already
+	// exists — either because of a race condition between the existence
+	// check and the create call, or because the repo was created on the
+	// platform by another means between the two. Callers treat this as
+	// success: the repo exists, which is what we wanted.
+	ErrNameConflict = errors.New("repository already exists")
 )
 
 // NewClient returns the Client implementation for host: GitHub for

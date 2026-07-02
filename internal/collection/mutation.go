@@ -387,6 +387,14 @@ func (c *Collection) RemoveMember(username string, client api.Client) error {
 	}
 	c.Groups = newGroups
 
+	if len(c.GroupAdmins) > 0 {
+		newGroupAdmins := make(map[string][]string, len(c.GroupAdmins))
+		for g, admins := range c.GroupAdmins {
+			newGroupAdmins[g] = removeString(admins, id)
+		}
+		c.GroupAdmins = newGroupAdmins
+	}
+
 	return c.Save()
 }
 
@@ -547,5 +555,6 @@ func (c *Collection) DeleteGroup(group string) error {
 	}
 
 	delete(c.Groups, group)
+	delete(c.GroupAdmins, group)
 	return c.Save()
 }

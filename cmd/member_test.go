@@ -67,6 +67,9 @@ func (m *multiAddMock) GetPendingInvite(owner, repo, username string) (bool, err
 func (m *multiAddMock) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
 	return nil, nil
 }
+func (m *multiAddMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
+	return api.RepoInfo{Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git", Private: private}, nil
+}
 func (m *multiAddMock) Host() string { return "github.com" }
 
 // pendingInviteMock is a minimal api.Client stub for exercising
@@ -97,6 +100,9 @@ func (m *pendingInviteMock) GetPendingInvite(owner, repo, username string) (bool
 }
 func (m *pendingInviteMock) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
 	return nil, nil
+}
+func (m *pendingInviteMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
+	return api.RepoInfo{Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
 func (m *pendingInviteMock) Host() string { return "github.com" }
 
