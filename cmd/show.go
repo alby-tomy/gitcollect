@@ -95,12 +95,25 @@ func runShow(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(col.Groups) > 0 {
+		headers := []string{"GROUP", "MEMBERS"}
+		if col.GroupAdminsEnabled {
+			headers = append(headers, "ADMINS")
+		}
 		rows := make([][]string, 0, len(col.Groups))
 		for group, users := range col.Groups {
-			rows = append(rows, []string{group, fmt.Sprintf("%d", len(users))})
+			row := []string{group, fmt.Sprintf("%d", len(users))}
+			if col.GroupAdminsEnabled {
+				adminLogins := loginsFor(col, col.GroupAdmins[group])
+				adminStr := "—"
+				if len(adminLogins) > 0 {
+					adminStr = strings.Join(adminLogins, ", ")
+				}
+				row = append(row, adminStr)
+			}
+			rows = append(rows, row)
 		}
 		fmt.Println()
-		output.Table([]string{"GROUP", "MEMBERS"}, rows)
+		output.Table(headers, rows)
 	}
 
 	if len(col.Repos) == 0 {

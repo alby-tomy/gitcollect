@@ -82,6 +82,18 @@ gitcollect show <collection>                 Summary: repos, members, groups, pl
                                               Also gets the same >30-day stale warning
                                               as list, printed above the tables.
 gitcollect visibility <collection> public|private   Change visibility
+gitcollect transfer <collection> <new-owner>  Transfer ownership to another member
+                                              (member must already be in the collection;
+                                               typed ConfirmWord confirmation; previous
+                                               owner becomes a regular member; new owner
+                                               must not hold a group admin role)
+gitcollect scale <collection> organisation|team   Switch tier:
+                                              organisation = enable group admin support
+                                               (allows owner to delegate per-group
+                                               management via group admin add/remove);
+                                              team = disable it (revokes all group admin
+                                               assignments after confirmation if any exist);
+                                              idempotent: switching to current tier is no-op
 
 ── Repo management ─────────────────────────────────────────────────────────
 gitcollect add <collection> <repo> [repo...]  Add one or more repos (default: all
@@ -91,6 +103,11 @@ gitcollect add <collection> <repo> [repo...]  Add one or more repos (default: al
                                               malformed repo name anywhere in the
                                               batch is checked up front, before
                                               anything is added.
+gitcollect add <collection> <repo> --new-repo-visibility private|public
+                                              On TTY: if repo doesn't exist on the
+                                              platform, prompts to create it.
+                                              Default visibility: private.
+                                              Non-TTY: skips silently.
 gitcollect remove <collection> <repo>        Remove repo + revoke access on platform
                                               (requires typing the repo name to confirm,
                                                same as `delete` — changed session 8, was
@@ -131,10 +148,21 @@ gitcollect group add <collection> <group> <user> [user...]   Add one or more
                                                     members to a group. Multi-user
                                                     support added session 12 — see
                                                     decisions log; one failing doesn't
-                                                    abort the rest.
-gitcollect group remove <collection> <group> <user> Remove member from group
+                                                    abort the rest. When organisation
+                                                    tier enabled, group admin of that
+                                                    specific group may also run this.
+gitcollect group remove <collection> <group> <user> Remove member from group.
+                                                    When organisation tier enabled,
+                                                    group admin of that specific group
+                                                    may also run this.
 gitcollect group list <collection>                List groups + members
 gitcollect group show <collection> <group>        Show group members + accessible repos
+
+gitcollect group admin add <collection> <group> <user>    Grant group admin rights
+                                                    (owner-only; requires org tier)
+gitcollect group admin remove <collection> <group> <user> Revoke group admin rights
+                                                    (owner-only, or self-removal)
+gitcollect group admin list <collection>          List all group admin assignments
 
 ── Access inspection ───────────────────────────────────────────────────────
 gitcollect inspect <collection> --user <username>  Show full access map for a user.
@@ -2134,6 +2162,94 @@ and optionally open docs/index.html in a browser to visually verify
 the new Installation section and philosophy updates render correctly.
 ```
 
+Session 18 — 2026-07-02 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Implemented FEATURE_AUTO_CREATE_REPO.md and FEATURE_SCALABILITY.md
+in full, then updated docs/index.html per DOCS_STYLE_GUIDE.md.
+Completed:    FEATURE_AUTO_CREATE_REPO:
+                internal/api/client.go — CreateRepo(owner, name string,
+                  private bool, description string) (RepoInfo, error)
+                  added to Client interface; ErrNameConflict sentinel.
+                internal/api/github.go — CreateRepo: GET /user to
+                  resolve owner login; POST /user/repos for personal
+                  or POST /orgs/{owner}/repos for org repos; 422 →
+                  ErrNameConflict, 403/404 → ErrForbidden.
+                internal/api/gitlab.go — CreateRepo: POST /projects
+                  with namespace_path; 409 → ErrNameConflict.
+                internal/api/api_test.go — 6 new tests covering
+                  GitHub personal/org/conflict/forbidden and GitLab
+                  ok/conflict paths.
+                cmd/add.go — ensureRepoExists helper: on TTY, prompts
+                  to create a missing repo (non-TTY skips silently);
+                  uses ErrNameConflict as idempotent success;
+                  --new-repo-visibility flag (default "private");
+                  addOneRepo signature updated with callerID + private
+                  params.
+                cmd/add_test.go — 10 new tests: non-TTY skip, conflict
+                  treated as success, create fails propagates error,
+                  private/public flag variants, audit entry on create.
+                All mock clients updated to implement CreateRepo stub.
+              FEATURE_SCALABILITY:
+                internal/collection/collection.go — GroupAdminsEnabled
+                  bool field (after Visibility) + GroupAdmins
+                  map[string][]string (after Groups); Validate() checks
+                  every group admin ID is in Members.
+                internal/collection/access.go — sentinel errors
+                  ErrGroupAdminsDisabled, ErrWrongGroup, ErrSelfTransfer,
+                  ErrAdminPrivilegeEscalation; IsGroupAdmin(callerID,
+                  group), CanManageGroup(callerID, group),
+                  GroupAdminOf(callerID) methods.
+                internal/collection/mutation.go — RemoveMember also
+                  removes from GroupAdmins; DeleteGroup also removes
+                  from GroupAdmins.
+                cmd/transfer.go (new) — full transfer command with
+                  ErrSelfTransfer guard, member-only check, GroupAdminOf
+                  check, typed ConfirmWord, previousOwner→Members,
+                  newOwner removed from Members, Save, audit.
+                cmd/transfer_test.go (new) — 8 tests covering requires-
+                  owner, self-transfer, requires-member, confirm-abort,
+                  typed-confirm, previous-owner-in-members, audit,
+                  removeStringSlice unit test.
+                cmd/scale.go (new) — scale organisation|team with
+                  idempotent tier switching, admin-list confirmation
+                  on downgrade, audit.
+                cmd/scale_test.go (new) — 7 tests covering invalid
+                  tier, requires-owner, enable, already-enabled,
+                  disable-no-admins, disable-with-admins-aborts,
+                  already-disabled, audit field constants.
+                cmd/group.go — runGroupAdd/runGroupRemove switched
+                  from requireOwner to loadForOwner + CanManageGroup
+                  check (group admins of the specific group can now
+                  run these); group admin add/remove/list subcommands
+                  added under new groupAdminCmd.
+                cmd/group_test.go — 19 new auth matrix tests covering
+                  non-owner/disabled, group-admin-correct-group (✓),
+                  group-admin-wrong-group (✗), regular-member (✗), and
+                  all group admin add/remove/list paths.
+                cmd/show.go — GROUPS table gains ADMINS column when
+                  GroupAdminsEnabled=true.
+                cmd/init.go — opt-in org tier prompt on TTY (uses
+                  output.Confirm; no-op on non-TTY).
+              STEP 3 — docs/index.html:
+                init: note about opt-in org prompt.
+                add: description updated for auto-create; flags table
+                  added with --new-repo-visibility row.
+                transfer: new cmd-block in collection lifecycle group.
+                scale: new cmd-block in collection lifecycle group.
+                group add/remove: descriptions updated for group admin
+                  delegation.
+                group admin add/remove/list: three new cmd-blocks in
+                  group management group.
+              STEP 4 — Final checks:
+                go build ./... clean; go test ./... all green;
+                go vet ./... clean.
+                cmd coverage: 33.1%.
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: git commit all changes from this
+session (FEATURE_AUTO_CREATE_REPO + FEATURE_SCALABILITY + docs).
+```
+
 ---
 
 ### File completion table
@@ -2164,7 +2280,9 @@ cmd/whoami.go                                done         +anyRejected hint, ses
                                                            uses user.Login for display, session 13
 cmd/init.go                                  done         no --owner flag — considered and deliberately
                                                            rejected in session 11, see decisions log;
-                                                           passes api.UserInfo to collection.New, session 13
+                                                           passes api.UserInfo to collection.New, session 13;
+                                                           +opt-in org tier prompt on TTY (output.Confirm;
+                                                           no-op on non-TTY), session 18
 cmd/delete.go                                done
 cmd/list.go                                  done         redesigned session 4 — see decisions log;
                                                            +stale-collection warning (>30 days since
@@ -2175,17 +2293,31 @@ cmd/show.go                                  done         +per-caller YOU column
                                                            WHO HAS ACCESS view, +FixCmd-driven footer for
                                                            denied repos, +stale warning, session 11;
                                                            callerID-based owner check; loginsFor for
-                                                           Members/Users display, session 13
+                                                           Members/Users display, session 13;
+                                                           +ADMINS column in GROUPS table when
+                                                           GroupAdminsEnabled=true, session 18
 cmd/show_test.go                             done         new, session 9; +TestBuildOwnerShowRepoRows,
                                                            updated deniedRepo/FixCmd assertions, session 11;
                                                            api.UserInfo constructors; col.Logins, session 13
 cmd/visibility.go                            done
+cmd/transfer.go                              done         new, session 18 — transfer command with ErrSelfTransfer
+                                                           guard, member-only check, GroupAdminOf check,
+                                                           typed ConfirmWord, previousOwner→Members,
+                                                           newOwner removed from Members; removeStringSlice helper
+cmd/transfer_test.go                         done         new, session 18 — 8 tests
+cmd/scale.go                                 done         new, session 18 — scale organisation|team with
+                                                           idempotent tier switching + admin-list confirmation
+                                                           on downgrade
+cmd/scale_test.go                            done         new, session 18 — 7 tests
 cmd/add.go                                   done         ExactArgs(2) → MinimumNArgs(2): accepts multiple
                                                            repo names, session 12 — see decisions log; logic
                                                            split into addOneRepo so a batch continues past
-                                                           one repo's failure
+                                                           one repo's failure; +ensureRepoExists (TTY prompt
+                                                           to create missing repo), +--new-repo-visibility
+                                                           flag, session 18
 cmd/add_test.go                              done         new, session 12 — TestAddOneRepo; api.UserInfo
-                                                           constructor; col.Logins["bob"] fixture, session 13
+                                                           constructor; col.Logins["bob"] fixture, session 13;
+                                                           +10 auto-create tests, session 18
 cmd/remove.go                                done         y/N → type-name-to-confirm, session 8
 cmd/repo.go                                  done         grant/revoke subcommands added session 3
 cmd/member.go                                done         +pending-invite warning after member add,
@@ -2201,10 +2333,16 @@ cmd/member_test.go                           done         new, session 11 — Te
 cmd/group.go                                 done         ExactArgs(3) → MinimumNArgs(3) on group add: accepts
                                                            multiple usernames, session 12 — see decisions log;
                                                            logic split into addOneToGroup so a batch continues
-                                                           past one username's failure
+                                                           past one username's failure; runGroupAdd/runGroupRemove
+                                                           auth changed from requireOwner to loadForOwner +
+                                                           CanManageGroup (group admins of that specific group
+                                                           can now also run these); group admin add/remove/list
+                                                           subcommands added under groupAdminCmd, session 18
 cmd/group_test.go                            done         new, session 12 — TestAddOneToGroup;
                                                            api.UserInfo constructor; col.Logins
-                                                           pre-populated in fixture, session 13
+                                                           pre-populated in fixture, session 13;
+                                                           +19 auth matrix tests (group add/remove auth,
+                                                           group admin add/remove/list), session 18
 cmd/inspect.go                               done         +"To fix:" footer via Collection.FixCmd, session 11
 cmd/audit.go                                 done         --since: flexible parsing → strict 1h/24h/7d/30d/90d
                                                            allow-list, session 11 — see decisions log
@@ -2231,18 +2369,26 @@ cmd/version.go                               done
 internal/collection/collection.go            done         +Logins map[string]string yaml field (ID→login cache);
                                                            CurrentVersion "1"→"2"; New() takes api.UserInfo
                                                            (not string) for owner; Validate() gates
-                                                           Logins-completeness check on Version "2", session 13
+                                                           Logins-completeness check on Version "2", session 13;
+                                                           +GroupAdminsEnabled bool + GroupAdmins
+                                                           map[string][]string; Validate() checks group admin
+                                                           IDs are in Members, session 18
 internal/collection/access.go                done         groupsContaining (dead code) removed; owner-bypass
                                                            moved INTO CanAccessRepo/WhyCanAccess directly
                                                            (was scattered across callers), session 11 — see
                                                            decisions log; +FixCmd, session 11; +IsOwner(id);
                                                            all params renamed to id; FixCmd 3-param
-                                                           (id, login, repo), session 13
+                                                           (id, login, repo), session 13;
+                                                           +ErrGroupAdminsDisabled, ErrWrongGroup,
+                                                           ErrSelfTransfer, ErrAdminPrivilegeEscalation;
+                                                           +IsGroupAdmin, CanManageGroup, GroupAdminOf, session 18
 internal/collection/mutation.go              done         +GrantRepoUser/RevokeRepoUser, session 3;
                                                            +Migrate, IDForLogin, resolveUsers, cloneLogins;
                                                            add ops call GetUser live; remove ops use
                                                            IDForLogin (no network); SyncCollaborators uses
-                                                           col.Logins[id] for all API calls, session 13
+                                                           col.Logins[id] for all API calls, session 13;
+                                                           RemoveMember also removes from GroupAdmins;
+                                                           DeleteGroup also removes from GroupAdmins, session 18
 internal/collection/collection_test.go       done         83.8% coverage; mock +ListCommits stub, session 7;
                                                            +GetPendingInvite stub, session 11; WhyCanAccess
                                                            assertions updated for new reason strings, session 11;
@@ -2283,20 +2429,27 @@ internal/api/client.go                       done         +ListCommits, +CommitI
                                                            session 7; +GetPendingInvite, +GitHubNotificationsURL
                                                            const, session 11; +UserInfo{ID,Login} struct,
                                                            GetUser(username) (UserInfo, error),
-                                                           ErrUserNotFound, session 13
+                                                           ErrUserNotFound, session 13;
+                                                           +CreateRepo(owner, name, private, description)
+                                                           (RepoInfo, error); +ErrNameConflict, session 18
 internal/api/github.go                       done         githubBaseURL: const → var (see decisions log);
                                                            +ListCommits, session 7; +GetPendingInvite
                                                            (GET /repos/{owner}/{repo}/invitations), session 11;
                                                            +GetUser (GET /users/{username}), GetAuthenticatedUser
-                                                           now returns UserInfo, session 13
+                                                           now returns UserInfo, session 13;
+                                                           +CreateRepo (GET /user for login, then POST
+                                                           /user/repos or /orgs/{owner}/repos), session 18
 internal/api/gitlab.go                       done         +ListCommits, session 7; +GetPendingInvite stub
                                                            (always false — GitLab has no pending-invite state;
                                                            membership added via API is immediate), session 11;
-                                                           +GetUser (wraps existing lookupUserID), session 13
+                                                           +GetUser (wraps existing lookupUserID), session 13;
+                                                           +CreateRepo (POST /projects), session 18
 internal/api/api_test.go                     done         85.5% coverage; +ListCommits/DefaultBranch tests,
                                                            session 7; +TestGitHub/GitLabGetPendingInvite*,
                                                            session 11; all tests updated for UserInfo return
-                                                           type; +TestGitHub/GitLabGetUser(_NotFound), session 13
+                                                           type; +TestGitHub/GitLabGetUser(_NotFound), session 13;
+                                                           +6 CreateRepo tests (GitHub personal/org/conflict/
+                                                           forbidden + GitLab ok/conflict), session 18
 
 internal/config/config.go                    done         +ActivityDir(), session 7; +UserIDs
                                                            map[string]string (host→id), SaveUserID/LoadUserID;

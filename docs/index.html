@@ -536,6 +536,7 @@ exploit-db  ✗ no    no access — group red-team required</pre>
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> init &lt;name&gt;</p>
         <p class="desc">Create a new collection. Private by default — being the owner does not automatically make you a "member"; add yourself explicitly if you want <code>member</code>-only views to include you. When repos live under an organisation rather than your personal account, pass <code>--namespace &lt;org-name&gt;</code> so gitcollect builds API paths correctly. The collection owner (who administers it) is always the authenticated user regardless of namespace.</p>
+        <p class="note">On an interactive terminal, <code>init</code> also offers to enable group admin (organisation-tier) support — say yes to start with group admin wiring already applied, or run <code>gitcollect scale &lt;name&gt; organisation</code> later.</p>
         <div class="flags"><table>
           <tr><td class="flagname">--host</td><td class="flagdesc">platform host the collection's repos live on (default <code>github.com</code>)</td></tr>
           <tr><td class="flagname">--description</td><td class="flagdesc">human-readable description</td></tr>
@@ -571,6 +572,16 @@ exploit-db  ✗ no    no access — group red-team required</pre>
         <p class="sig"><span class="prog">gitcollect</span> visibility &lt;collection&gt; &lt;public|private&gt;</p>
         <p class="desc">Change a collection's visibility. Switching to public prompts for confirmation, since it makes the collection's existence discoverable to non-members.</p>
       </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> transfer &lt;collection&gt; &lt;new-owner&gt;</p>
+        <p class="desc">Transfer ownership of a collection to another member. The previous owner becomes a regular member and retains access. Requires typing the new owner's username to confirm — this action cannot be undone by the previous owner. If the new owner holds a group admin role in the collection, remove it first with <code>group admin remove</code>.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> scale &lt;collection&gt; organisation|team</p>
+        <p class="desc">Switch a collection between TEAM and ORGANISATION tiers. <strong>organisation</strong> enables group admin support, allowing the owner to delegate per-group membership management to specific members via <code>group admin add</code>. <strong>team</strong> disables it — if group admins are assigned, lists them and requires confirmation before revoking their rights. Idempotent: switching to the current tier is a no-op.</p>
+      </div>
     </div>
 
     <div class="group" id="repo-cmds">
@@ -578,7 +589,10 @@ exploit-db  ✗ no    no access — group red-team required</pre>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> add &lt;collection&gt; &lt;repo&gt; [repo...]</p>
-        <p class="desc">Add one or more repos to a collection, each open to all members by default. Syncs collaborator access on the platform and saves the manifest after each repo, so if a later repo in the batch fails, every repo before it is still kept. Repos are validated up front (a malformed name anywhere in the batch fails the whole command before anything is added); each remaining failure (already in the collection, not found, sync error) is reported per-repo and the command exits non-zero listing exactly which repos failed and why, without rolling back the ones that succeeded.</p>
+        <p class="desc">Add one or more repos to a collection, each open to all members by default. Syncs collaborator access on the platform and saves the manifest after each repo, so if a later repo in the batch fails, every repo before it is still kept. Repos are validated up front (a malformed name anywhere in the batch fails the whole command before anything is added); each remaining failure (already in the collection, not found, sync error) is reported per-repo and the command exits non-zero listing exactly which repos failed and why, without rolling back the ones that succeeded. On an interactive terminal, if a repo doesn't exist on the platform yet, <code>add</code> offers to create it — the new repo's visibility is set by <code>--new-repo-visibility</code>.</p>
+        <div class="flags"><table>
+          <tr><td class="flagname">--new-repo-visibility</td><td class="flagdesc">visibility for any repo created by this command — <code>private</code> (default) or <code>public</code></td></tr>
+        </table></div>
       </div>
 
       <div class="cmd">
@@ -640,12 +654,12 @@ exploit-db  ✗ no    no access — group red-team required</pre>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> group add &lt;collection&gt; &lt;group&gt; &lt;username&gt; [username...]</p>
-        <p class="desc">Add one or more members to a group, syncing each one's repo access afterward. Guides you to <code>member add</code> first for any username that isn't a collection member yet. One username failing doesn't stop the rest — every failure is reported together at the end and the command exits non-zero only if at least one failed.</p>
+        <p class="desc">Add one or more members to a group, syncing each one's repo access afterward. Guides you to <code>member add</code> first for any username that isn't a collection member yet. One username failing doesn't stop the rest — every failure is reported together at the end and the command exits non-zero only if at least one failed. When organisation tier is enabled, a group admin of that specific group may also run this command.</p>
       </div>
 
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> group remove &lt;collection&gt; &lt;group&gt; &lt;username&gt;</p>
-        <p class="desc">Remove a member from a group and re-sync their repo access to match.</p>
+        <p class="desc">Remove a member from a group and re-sync their repo access to match. When organisation tier is enabled, a group admin of that specific group may also run this command.</p>
       </div>
 
       <div class="cmd">
@@ -656,6 +670,21 @@ exploit-db  ✗ no    no access — group red-team required</pre>
       <div class="cmd">
         <p class="sig"><span class="prog">gitcollect</span> group show &lt;collection&gt; &lt;group&gt;</p>
         <p class="desc">Show a group's members and which repos are restricted to it.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> group admin add &lt;collection&gt; &lt;group&gt; &lt;username&gt;</p>
+        <p class="desc">Grant a collection member group admin rights for a specific group. Owner-only. Requires organisation tier to be enabled (<code>gitcollect scale &lt;collection&gt; organisation</code>). The target must already be a collection member. Group admins can run <code>group add</code> and <code>group remove</code> for their assigned group only.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> group admin remove &lt;collection&gt; &lt;group&gt; &lt;username&gt;</p>
+        <p class="desc">Revoke a member's group admin rights for a specific group. Owner-only, except a group admin may remove themselves.</p>
+      </div>
+
+      <div class="cmd">
+        <p class="sig"><span class="prog">gitcollect</span> group admin list &lt;collection&gt;</p>
+        <p class="desc">List all group admin assignments in a collection. Shows a GROUP / ADMIN table. If organisation tier is not enabled, shows an info message instead.</p>
       </div>
     </div>
 
