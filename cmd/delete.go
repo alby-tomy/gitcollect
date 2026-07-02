@@ -29,21 +29,12 @@ func init() {
 func runDelete(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	col, err := loadCollection(name)
+	col, caller, callerID, client, err := loadForOwner("delete", name)
 	if err != nil {
-		return fmt.Errorf("delete: %w", err)
+		return err
 	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return fmt.Errorf("delete: %w", err)
-	}
-	caller, err := currentUser(client)
-	if err != nil {
-		return fmt.Errorf("delete: %w", err)
-	}
-	if caller != col.Owner {
-		return fmt.Errorf("delete: only %s (the owner) can delete %q", col.Owner, name)
+	if !col.IsOwner(callerID) {
+		return fmt.Errorf("delete: only %s (the owner) can delete %q", col.Logins[col.Owner], name)
 	}
 
 	prompt := fmt.Sprintf("This will delete %q and revoke access for %d member(s) across %d repo(s)", name, len(col.Members), len(col.Repos))
@@ -84,11 +75,12 @@ func runDelete(cmd *cobra.Command, args []string) error {
 // collaborator access from every repo in col, concurrently (max 4 at a
 // time), before the manifest itself is deleted.
 func revokeCollectionAccess(col *collection.Collection, client api.Client) error {
-	type pair struct{ member, repo string }
+	type pair struct{ memberLogin, repo string }
+	ownerLogin := col.RepoNamespace()
 	var pairs []pair
 	for _, m := range col.Members {
 		for _, r := range col.Repos {
-			pairs = append(pairs, pair{member: m, repo: r.Name})
+			pairs = append(pairs, pair{memberLogin: col.Logins[m], repo: r.Name})
 		}
 	}
 
@@ -104,9 +96,9 @@ func revokeCollectionAccess(col *collection.Collection, client api.Client) error
 		go func(p pair) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := client.RemoveCollaborator(col.Owner, p.repo, p.member); err != nil {
+			if err := client.RemoveCollaborator(ownerLogin, p.repo, p.memberLogin); err != nil {
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s/%s: revoke %s: %w", col.Owner, p.repo, p.member, err))
+				errs = append(errs, fmt.Errorf("%s/%s: revoke %s: %w", ownerLogin, p.repo, p.memberLogin, err))
 				mu.Unlock()
 			}
 		}(p)

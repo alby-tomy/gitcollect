@@ -34,11 +34,23 @@ var cloneCmd = &cobra.Command{
 }
 
 func init() {
-	cloneCmd.Flags().StringSliceVar(&clonePick, "pick", nil, "clone only these repos (comma-separated)")
+	cloneCmd.Flags().StringArrayVar(&clonePick, "pick", nil, `clone only these repos, space-separated (e.g. --pick "r1 r2")`)
 	cloneCmd.Flags().BoolVar(&cloneDryRun, "dry-run", false, "preview what would be cloned without doing it")
 	cloneCmd.Flags().IntVar(&cloneConcurrency, "concurrency", defaultCloneConcurrency, "max repos to clone in parallel")
 	cloneCmd.Flags().StringVar(&cloneDest, "dest", ".", "directory to clone repos into")
 	rootCmd.AddCommand(cloneCmd)
+}
+
+// splitPick flattens --pick's raw values into individual repo names: each
+// value may itself be a whitespace-separated list (--pick "r1 r2"), and
+// the flag may also be repeated (--pick r1 --pick r2). Either form, or a
+// mix of both, works.
+func splitPick(raw []string) []string {
+	var picks []string
+	for _, v := range raw {
+		picks = append(picks, strings.Fields(v)...)
+	}
+	return picks
 }
 
 func runClone(cmd *cobra.Command, args []string) error {
@@ -51,22 +63,22 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	col, caller, client, err := loadForGit(name)
+	col, caller, callerID, client, err := loadForGit(name)
 	if err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	accessible, err := access.FilterAccessible(col, caller, client)
+	accessible, err := access.FilterAccessible(col, callerID, client)
 	if err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	targets, skipped, err := selectCloneTargets(col, accessible, clonePick)
+	targets, skipped, err := selectCloneTargets(col, accessible, splitPick(clonePick))
 	if err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	printAccessSummary(col, caller, len(accessible), len(col.Repos))
+	printAccessSummary(col, caller, callerID, len(accessible), len(col.Repos))
 
 	if len(targets) == 0 {
 		output.Info("no repos to clone")
@@ -103,6 +115,16 @@ func runClone(cmd *cobra.Command, args []string) error {
 	if len(skipped) > 0 {
 		fmt.Printf("  %d repo(s) skipped (no access): %s\n", len(skipped), strings.Join(skipped, ", "))
 		output.Suggestion(fmt.Sprintf("gitcollect inspect %s --user %s", name, caller))
+
+		// A repo can be "skipped" here for two very different reasons: the
+		// caller genuinely isn't entitled to it (FilterAccessible's local
+		// rule check), or they ARE entitled but GitHub still has them as a
+		// pending, unaccepted invite rather than a confirmed collaborator
+		// (CheckCollaborator reports false either way). Distinguish the
+		// second case so they're not left thinking "no access" forever.
+		if repo := firstPendingInvite(col, caller, skipped, client); repo != "" {
+			output.InviteWarning(caller, col.Logins[col.Owner], api.GitHubNotificationsURL, fmt.Sprintf("gitcollect clone %s", name))
+		}
 	}
 
 	if len(failed) > 0 {
@@ -111,15 +133,30 @@ func runClone(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// firstPendingInvite returns the first repo in skipped where caller (a
+// login) has an unaccepted GitHub collaborator invite, or "" if none do.
+func firstPendingInvite(col *collection.Collection, caller string, skipped []string, client api.Client) string {
+	ownerLogin := col.RepoNamespace()
+	for _, repoName := range skipped {
+		has, err := client.GetPendingInvite(ownerLogin, repoName, caller)
+		if err == nil && has {
+			return repoName
+		}
+	}
+	return ""
+}
+
 // printAccessSummary prints the "access verified" header line shared by
 // clone/pull/status: who the caller is, what groups grant them access, and
-// how many of the collection's repos they can reach.
-func printAccessSummary(col *collection.Collection, caller string, accessibleCount, totalCount int) {
+// how many of the collection's repos they can reach. caller is their login
+// (for display); callerID is their platform ID (for the group-membership
+// lookup, which compares against col.Groups' ID-based member lists).
+func printAccessSummary(col *collection.Collection, caller, callerID string, accessibleCount, totalCount int) {
 	switch {
 	case col.Visibility == collection.VisibilityPublic:
 		output.Success("Public collection — %d of %d repos accessible", accessibleCount, totalCount)
 	default:
-		groups := strings.Join(groupsForMember(col, caller), ", ")
+		groups := strings.Join(groupsForMember(col, callerID), ", ")
 		if groups == "" {
 			groups = "no groups"
 		}
@@ -212,9 +249,10 @@ func cloneAll(col *collection.Collection, client api.Client, targets []collectio
 // cloneOne resolves repoName's HTTPS clone URL via the platform API and
 // clones it into <dest>/<repoName>.
 func cloneOne(col *collection.Collection, client api.Client, repoName, dest string, dryRun bool) error {
-	info, err := client.GetRepo(col.Owner, repoName)
+	ownerLogin := col.RepoNamespace()
+	info, err := client.GetRepo(ownerLogin, repoName)
 	if err != nil {
-		return fmt.Errorf("could not look up %s/%s: %w", col.Owner, repoName, err)
+		return fmt.Errorf("could not look up %s/%s: %w", ownerLogin, repoName, err)
 	}
 	if dryRun {
 		return nil

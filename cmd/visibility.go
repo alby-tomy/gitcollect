@@ -35,21 +35,12 @@ func runVisibility(cmd *cobra.Command, args []string) error {
 		return NewUsageError(fmt.Errorf("visibility: invalid visibility %q: must be %q or %q", want, collection.VisibilityPublic, collection.VisibilityPrivate))
 	}
 
-	col, err := loadCollection(name)
+	col, caller, callerID, _, err := loadForOwner("visibility", name)
 	if err != nil {
-		return fmt.Errorf("visibility: %w", err)
+		return err
 	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return fmt.Errorf("visibility: %w", err)
-	}
-	caller, err := currentUser(client)
-	if err != nil {
-		return fmt.Errorf("visibility: %w", err)
-	}
-	if caller != col.Owner {
-		return fmt.Errorf("visibility: only %s (the owner) can change visibility of %q", col.Owner, name)
+	if !col.IsOwner(callerID) {
+		return fmt.Errorf("visibility: only %s (the owner) can change visibility of %q", col.Logins[col.Owner], name)
 	}
 
 	old := col.Visibility

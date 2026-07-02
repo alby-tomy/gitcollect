@@ -105,13 +105,18 @@ func Execute() int {
 	return ExitError
 }
 
-// cachedClient and cachedUser memoize the authenticated client and caller
-// identity for the lifetime of one command invocation, satisfying the
-// "GetAuthenticatedUser called once per invocation" efficiency rule. A
-// process only ever runs one command, so these never need to be cleared.
+// cachedClient, cachedUser, and cachedUserID memoize the authenticated
+// client and caller identity for the lifetime of one command invocation,
+// satisfying the "GetAuthenticatedUser called once per invocation" rule.
+// A process only ever runs one command, so these never need to be
+// cleared. cachedUser is the caller's login (display/audit); cachedUserID
+// is their platform ID (the form collection.Collection.IsOwner/IsMember/
+// CanAccessRepo expect) — same login/ID split as collection.Collection's
+// own Owner/Members + Logins.
 var (
 	cachedClient api.Client
 	cachedUser   string
+	cachedUserID string
 )
 
 // currentClient returns an authenticated api.Client for host, loading the
@@ -131,101 +136,314 @@ func currentClient(host string) (api.Client, error) {
 	return cachedClient, nil
 }
 
-// currentUser returns the authenticated username for client, calling
-// GetAuthenticatedUser at most once per command invocation. The result is
-// also cached to config so other commands (e.g. list) can resolve "who am
-// I" from disk without a network call.
-func currentUser(client api.Client) (string, error) {
+// currentUserInfo returns the authenticated platform identity for client
+// — both login and ID — calling GetAuthenticatedUser at most once per
+// command invocation. The result is also cached to config (both forms)
+// so other commands (e.g. list) can resolve "who am I" from disk without
+// a network call. currentUser and currentUserID below are thin accessors
+// over this same cached resolution, for the common case where a caller
+// only needs one half of the identity.
+func currentUserInfo(client api.Client) (api.UserInfo, error) {
 	if cachedUser != "" {
-		return cachedUser, nil
+		return api.UserInfo{ID: cachedUserID, Login: cachedUser}, nil
 	}
 	user, err := client.GetAuthenticatedUser()
 	if err != nil {
-		return "", fmt.Errorf("could not verify identity: %w", err)
+		return api.UserInfo{}, fmt.Errorf("could not verify identity: %w", err)
 	}
-	cachedUser = user
-	if err := config.SaveUser(client.Host(), user); err != nil {
+	cachedUser = user.Login
+	cachedUserID = user.ID
+	if err := config.SaveUser(client.Host(), user.Login); err != nil {
 		output.Warn("could not cache username for %s: %v", client.Host(), err)
+	}
+	if err := config.SaveUserID(client.Host(), user.ID); err != nil {
+		output.Warn("could not cache user ID for %s: %v", client.Host(), err)
 	}
 	return user, nil
 }
 
-// loadCollection loads name for an owner-perspective command (init, delete,
-// visibility, member/group management, repo access) and maps a missing
-// manifest to gitcollect's standard, friendly not-found message. These
-// commands inherently require the caller to already know whether their own
-// collection exists, so there is nothing to disclose by being specific.
+// currentUser returns the authenticated login for client — see
+// currentUserInfo. Used everywhere gitcollect displays or audits the
+// caller's identity.
+func currentUser(client api.Client) (string, error) {
+	user, err := currentUserInfo(client)
+	if err != nil {
+		return "", err
+	}
+	return user.Login, nil
+}
+
+// currentUserID returns the authenticated platform ID for client — see
+// currentUserInfo. Used everywhere gitcollect compares the caller's
+// identity against a collection.Collection (IsOwner, IsMember,
+// CanAccessRepo) — never the login, which can change.
+func currentUserID(client api.Client) (string, error) {
+	user, err := currentUserInfo(client)
+	if err != nil {
+		return "", err
+	}
+	return user.ID, nil
+}
+
+// loadCollection loads name and maps a missing manifest to gitcollect's
+// standard, friendly not-found message. Used internally by loadForOwner
+// below — every owner-perspective command (init, delete, visibility,
+// member/group management, repo access) inherently requires the caller to
+// already know whether their own collection exists, so there is nothing
+// to disclose by being specific.
 func loadCollection(name string) (*collection.Collection, error) {
 	col, err := collection.Load(name)
 	if err != nil {
 		if errors.Is(err, collection.ErrNotFound) {
-			return nil, fmt.Errorf("collection %q not found. Run: gitcollect list", name)
+			msg := fmt.Sprintf("collection %q not found. Run: gitcollect list", name)
+			if suggestion := suggestCollectionName(name); suggestion != "" {
+				msg += fmt.Sprintf("\nDid you mean %q?", suggestion)
+			}
+			return nil, errors.New(msg)
 		}
 		return nil, err
 	}
 	return col, nil
 }
 
-// loadForRead loads name for a read/discovery command (show, inspect,
-// clone, pull, status) and enforces collection-level access, resolving the
-// caller's identity only if the collection turns out to be private (public
-// collections need no authentication at all). A missing manifest and an
-// access-denied result produce the exact same access.ErrForbidden so a
-// private collection's existence is never disclosed to a non-member.
-// caller is "" for public collections, since no identity was needed.
-func loadForRead(name string) (col *collection.Collection, caller string, err error) {
-	col, err = collection.Load(name)
+// loadForOwner loads name for an owner-perspective command (add, delete,
+// visibility, member/group management, repo access/grant/revoke),
+// resolving the authenticated client and caller identity (both login and
+// platform ID) and opportunistically migrating an old-format collection —
+// this is one of the three call sites in this file allowed to do that;
+// see migrateIfNeeded's doc comment for why the other two (list's bulk
+// scan, loadForRead's public fast-path) must not. Deliberately does NOT
+// check ownership itself: callers still write their own "only %s (the
+// owner) can <the specific thing>" check and message, since those vary
+// too much (which name goes in the message — collection name in most
+// commands, repo name in repo.go's) to generate generically. verb is used
+// only to prefix the returned error, the same convention loadForRead/
+// loadForGit's callers already apply manually.
+func loadForOwner(verb, name string) (col *collection.Collection, caller, callerID string, client api.Client, err error) {
+	col, err = loadCollection(name)
 	if err != nil {
-		if errors.Is(err, collection.ErrNotFound) {
-			return nil, "", access.ErrForbidden
-		}
-		return nil, "", err
-	}
-
-	if col.Visibility == collection.VisibilityPublic {
-		return col, "", nil
-	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return nil, "", err
-	}
-	caller, err = currentUser(client)
-	if err != nil {
-		return nil, "", err
-	}
-	if err := access.CheckCollectionAccess(col, caller); err != nil {
-		return nil, "", err
-	}
-	return col, caller, nil
-}
-
-// loadForGit loads name for clone/pull/status: unlike loadForRead, it always
-// resolves an authenticated client and caller, even for public collections,
-// because these commands need a real api.Client to fetch clone URLs and
-// verify platform collaborator status — there is no client-free path for
-// them the way there is for purely-local commands like show or inspect.
-func loadForGit(name string) (col *collection.Collection, caller string, client api.Client, err error) {
-	col, err = collection.Load(name)
-	if err != nil {
-		if errors.Is(err, collection.ErrNotFound) {
-			return nil, "", nil, access.ErrForbidden
-		}
-		return nil, "", nil, err
+		return nil, "", "", nil, fmt.Errorf("%s: %w", verb, err)
 	}
 
 	client, err = currentClient(col.Host)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", "", nil, fmt.Errorf("%s: %w", verb, err)
 	}
 	caller, err = currentUser(client)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", "", nil, fmt.Errorf("%s: %w", verb, err)
 	}
-	if err := access.CheckCollectionAccess(col, caller); err != nil {
-		return nil, "", nil, err
+	callerID, err = currentUserID(client)
+	if err != nil {
+		return nil, "", "", nil, fmt.Errorf("%s: %w", verb, err)
 	}
-	return col, caller, client, nil
+
+	if err := migrateIfNeeded(col, client); err != nil {
+		return nil, "", "", nil, fmt.Errorf("%s: %w", verb, err)
+	}
+
+	return col, caller, callerID, client, nil
+}
+
+// migrateIfNeeded bumps col from the legacy username-based format
+// (Version "1") to ID-based storage (collection.CurrentVersion) if
+// needed, resolving every referenced username via client and saving the
+// result. No-op if col is already current. Called only from loadForOwner,
+// loadForGit, and loadForRead's private-collection branch — every call
+// site in this file that already holds an authenticated client for
+// col.Host. Deliberately NOT called from list.go's bulk scan (which must
+// stay network-free across however many different hosts the caller's
+// collections span) or loadForRead's public-collection fast-path (which
+// must stay auth-free) — both keep working against an unmigrated file
+// exactly as before. Migration is opportunistic: triggered by whichever
+// owner-perspective or git command happens to touch a given collection
+// next, never guaranteed on every read.
+func migrateIfNeeded(col *collection.Collection, client api.Client) error {
+	if col.Version == collection.CurrentVersion {
+		return nil
+	}
+	if err := col.Migrate(client); err != nil {
+		return fmt.Errorf("could not migrate %q to ID-based access (some platform usernames could not be resolved): %w", col.Name, err)
+	}
+	if err := col.Save(); err != nil {
+		return fmt.Errorf("could not save migrated %q: %w", col.Name, err)
+	}
+	output.Info("migrated %q to ID-based access", col.Name)
+	return nil
+}
+
+// loginsFor maps each ID in ids to its cached login via col.Logins,
+// preserving order — the standard way display code turns an ID-based
+// list (col.Members, a group's member list, a repo's individually-
+// granted Users) into something a human can read. An ID with no cached
+// login (should not normally happen on a CurrentVersion collection — see
+// Collection.Validate) falls back to printing the raw ID rather than an
+// empty string, so a display bug is at least visible instead of silently
+// blank.
+func loginsFor(col *collection.Collection, ids []string) []string {
+	logins := make([]string, len(ids))
+	for i, id := range ids {
+		if login := col.Logins[id]; login != "" {
+			logins[i] = login
+		} else {
+			logins[i] = id
+		}
+	}
+	return logins
+}
+
+// suggestCollectionName returns the closest existing local collection name
+// to name (Levenshtein distance <= 2), or "" if none is close enough or
+// the lookup itself fails. Only ever compared against your OWN local
+// ~/.gitcollect/collections/*.yaml filenames — never against anything you
+// don't already have a local file for — so this can't be used to probe
+// for the existence of a private collection you're not a member of.
+func suggestCollectionName(name string) string {
+	names, err := collection.List()
+	if err != nil {
+		return ""
+	}
+
+	best, bestDist := "", 3 // distance must be <= 2 to suggest anything
+	for _, candidate := range names {
+		if candidate == name {
+			continue
+		}
+		if d := levenshtein(name, candidate); d < bestDist {
+			best, bestDist = candidate, d
+		}
+	}
+	return best
+}
+
+// levenshtein returns the edit distance between a and b (insertions,
+// deletions, substitutions, each cost 1) via the standard O(len(a)*len(b))
+// dynamic-programming table.
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	if len(ra) == 0 {
+		return len(rb)
+	}
+	if len(rb) == 0 {
+		return len(ra)
+	}
+
+	prev := make([]int, len(rb)+1)
+	curr := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+
+	for i := 1; i <= len(ra); i++ {
+		curr[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			curr[j] = min3(
+				prev[j]+1,      // deletion
+				curr[j-1]+1,    // insertion
+				prev[j-1]+cost, // substitution
+			)
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(rb)]
+}
+
+func min3(a, b, c int) int {
+	m := a
+	if b < m {
+		m = b
+	}
+	if c < m {
+		m = c
+	}
+	return m
+}
+
+// loadForRead loads name for a read/discovery command (show, inspect) and
+// enforces collection-level access, resolving the caller's identity only
+// if the collection turns out to be private (public collections need no
+// authentication at all). A missing manifest and an access-denied result
+// produce the exact same access.ErrForbidden so a private collection's
+// existence is never disclosed to a non-member. caller and callerID are
+// both "" for public collections, since no identity was needed. This is
+// one of the three call sites allowed to opportunistically migrate an
+// old-format collection — but only on the private branch below, where a
+// client is already being resolved anyway; the public fast-path stays
+// exactly as documented, network-free and auth-free, even against an
+// old-format file. See migrateIfNeeded's doc comment.
+func loadForRead(name string) (col *collection.Collection, caller, callerID string, err error) {
+	col, err = collection.Load(name)
+	if err != nil {
+		if errors.Is(err, collection.ErrNotFound) {
+			return nil, "", "", access.ErrForbidden
+		}
+		return nil, "", "", err
+	}
+
+	if col.Visibility == collection.VisibilityPublic {
+		return col, "", "", nil
+	}
+
+	client, err := currentClient(col.Host)
+	if err != nil {
+		return nil, "", "", err
+	}
+	caller, err = currentUser(client)
+	if err != nil {
+		return nil, "", "", err
+	}
+	callerID, err = currentUserID(client)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if err := migrateIfNeeded(col, client); err != nil {
+		return nil, "", "", err
+	}
+	if err := access.CheckCollectionAccess(col, callerID); err != nil {
+		return nil, "", "", err
+	}
+	return col, caller, callerID, nil
+}
+
+// loadForGit loads name for clone/pull/status/sync: unlike loadForRead, it
+// always resolves an authenticated client and caller, even for public
+// collections, because these commands need a real api.Client to fetch
+// clone URLs and verify platform collaborator status — there is no
+// client-free path for them the way there is for purely-local commands
+// like show or inspect. Always migrates an old-format collection if
+// needed, for the same reason: a client is always available here.
+func loadForGit(name string) (col *collection.Collection, caller, callerID string, client api.Client, err error) {
+	col, err = collection.Load(name)
+	if err != nil {
+		if errors.Is(err, collection.ErrNotFound) {
+			return nil, "", "", nil, access.ErrForbidden
+		}
+		return nil, "", "", nil, err
+	}
+
+	client, err = currentClient(col.Host)
+	if err != nil {
+		return nil, "", "", nil, err
+	}
+	caller, err = currentUser(client)
+	if err != nil {
+		return nil, "", "", nil, err
+	}
+	callerID, err = currentUserID(client)
+	if err != nil {
+		return nil, "", "", nil, err
+	}
+	if err := migrateIfNeeded(col, client); err != nil {
+		return nil, "", "", nil, err
+	}
+	if err := access.CheckCollectionAccess(col, callerID); err != nil {
+		return nil, "", "", nil, err
+	}
+	return col, caller, callerID, client, nil
 }
 
 // recordAudit appends entry to the collection's audit log. It is called

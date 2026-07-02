@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -9,6 +10,21 @@ import (
 	"github.com/alby-tomy/gitcollect/internal/config"
 	"github.com/alby-tomy/gitcollect/internal/output"
 )
+
+// staleAfter is how long since a collection's UpdatedAt before list/show
+// warn that the local manifest might no longer reflect the owner's latest
+// changes. Informational only — never blocks anything.
+const staleAfter = 30 * 24 * time.Hour
+
+// staleDays returns the whole number of days since updatedAt, or 0 if
+// that's under staleAfter (i.e. not stale).
+func staleDays(updatedAt time.Time) int {
+	age := time.Since(updatedAt)
+	if age < staleAfter {
+		return 0
+	}
+	return int(age.Hours() / 24)
+}
 
 var (
 	listPrivate bool
@@ -43,6 +59,7 @@ type listRow struct {
 	Role       string `json:"role"`
 	Members    int    `json:"members"`
 	Repos      int    `json:"repos"`
+	StaleDays  int    `json:"stale_days,omitempty"`
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -63,19 +80,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		username, err := config.LoadUser(col.Host)
-		if err != nil {
-			output.Warn("skipping %q: %v", name, err)
-			continue
-		}
-
-		var role string
-		switch {
-		case username != "" && username == col.Owner:
-			role = "owner"
-		case username != "" && col.IsMember(username):
-			role = "member"
-		default:
+		role, ok := roleFor(col)
+		if !ok {
 			continue // not yours
 		}
 
@@ -95,6 +101,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			Role:       role,
 			Members:    len(col.Members),
 			Repos:      len(col.Repos),
+			StaleDays:  staleDays(col.UpdatedAt),
 		})
 	}
 
@@ -107,5 +114,54 @@ func runList(cmd *cobra.Command, args []string) error {
 		tableRows = append(tableRows, []string{r.Name, r.Visibility, r.Role, fmt.Sprintf("%d", r.Members), fmt.Sprintf("%d", r.Repos)})
 	}
 	output.Table([]string{"NAME", "VISIBILITY", "ROLE", "MEMBERS", "REPOS"}, tableRows)
+
+	for _, r := range rows {
+		if r.StaleDays > 0 {
+			output.StaleWarning(r.Name, r.StaleDays)
+		}
+	}
 	return nil
+}
+
+// roleFor determines the caller's role in col ("owner"/"member"), or ""
+// (ok=false) if col isn't theirs — without ever touching the network, since
+// list must stay usable offline across however many different hosts the
+// caller's local collections span (its own doc comment promises "no
+// network calls are made"). A col already on CurrentVersion compares the
+// cached platform ID (config.LoadUserID, populated by auth); a col still
+// on the legacy "1" format compares the cached login instead (config.
+// LoadUser), exactly as before this migration — list never migrates a
+// collection itself (see migrateIfNeeded's doc comment for why), so it has
+// to keep working against both formats indefinitely. IsOwner/IsMember
+// don't need to know which format they're being called with: as long as
+// the caller passes the matching kind of value (ID for a CurrentVersion
+// col, login for a "1" col), plain string equality is correct either way.
+func roleFor(col *collection.Collection) (role string, ok bool) {
+	if col.Version == collection.CurrentVersion {
+		id, err := config.LoadUserID(col.Host)
+		if err != nil || id == "" {
+			return "", false
+		}
+		switch {
+		case col.IsOwner(id):
+			return "owner", true
+		case col.IsMember(id):
+			return "member", true
+		default:
+			return "", false
+		}
+	}
+
+	username, err := config.LoadUser(col.Host)
+	if err != nil || username == "" {
+		return "", false
+	}
+	switch {
+	case username == col.Owner:
+		return "owner", true
+	case col.IsMember(username):
+		return "member", true
+	default:
+		return "", false
+	}
 }

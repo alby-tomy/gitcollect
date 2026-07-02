@@ -22,7 +22,12 @@ func key(owner, repo, username string) string { return owner + "/" + repo + "/" 
 func (m *mockClient) GetRepo(owner, repo string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: repo, CloneURL: "https://example.com/" + owner + "/" + repo + ".git"}, nil
 }
-func (m *mockClient) GetAuthenticatedUser() (string, error) { return "owner", nil }
+func (m *mockClient) GetAuthenticatedUser() (api.UserInfo, error) {
+	return api.UserInfo{ID: "owner", Login: "owner"}, nil
+}
+func (m *mockClient) GetUser(username string) (api.UserInfo, error) {
+	return api.UserInfo{ID: username, Login: username}, nil
+}
 func (m *mockClient) AddCollaborator(owner, repo, username, permission string) error {
 	m.collaborators[key(owner, repo, username)] = true
 	return nil
@@ -40,13 +45,19 @@ func (m *mockClient) CheckCollaborator(owner, repo, username string) (bool, erro
 func (m *mockClient) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
 	return nil, nil
 }
+func (m *mockClient) GetPendingInvite(owner, repo, username string) (bool, error) {
+	return false, nil
+}
 func (m *mockClient) Host() string { return "github.com" }
 
 func newCol(t *testing.T, visibility collection.Visibility) *collection.Collection {
 	t.Helper()
-	col, err := collection.New("acme", "github.com", "owner", visibility)
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner", Login: "owner"}, visibility)
 	if err != nil {
 		t.Fatalf("collection.New: %v", err)
+	}
+	for _, login := range []string{"alice", "bob", "charlie", "diana", "stranger"} {
+		col.Logins[login] = login
 	}
 	return col
 }
@@ -251,7 +262,7 @@ func TestUserAccessMapAndRepoAccessMapAndFullMatrix(t *testing.T) {
 		{Name: "restricted", Groups: []string{"red-team"}},
 	}
 
-	userMap := UserAccessMap(col, "bob")
+	userMap := UserAccessMap(col, "bob", "bob")
 	if len(userMap) != 2 {
 		t.Fatalf("expected 2 repo entries, got %d", len(userMap))
 	}
@@ -289,12 +300,12 @@ func TestUserAccessMapAndRepoAccessMapAndFullMatrix(t *testing.T) {
 	}
 }
 
-// TestUserAccessMap_OwnerBypass is a regression test: col.CanAccessRepo has
-// no owner bypass of its own (by design — see decide() in inspect.go), so
-// before that fix, UserAccessMap(col, owner) would report CanAccess=false
-// for every repo on a private collection unless the owner happened to also
-// be listed as a member, while WhyCanAccess still said "owner" — a
-// contradictory false/"owner" pairing. decide() must make this consistent.
+// TestUserAccessMap_OwnerBypass is a regression test: col.CanAccessRepo's
+// owner bypass (now baked directly into the function — see access.go) must
+// make UserAccessMap report CanAccess=true for the owner on every repo
+// even when the owner isn't separately listed as a member, paired with a
+// reason that actually agrees with that true (not the old contradictory
+// false/"owner" pairing this was originally written to catch).
 func TestUserAccessMap_OwnerBypass(t *testing.T) {
 	col := newCol(t, collection.VisibilityPrivate)
 	// Deliberately do NOT add "owner" to col.Members.
@@ -304,7 +315,7 @@ func TestUserAccessMap_OwnerBypass(t *testing.T) {
 		{Name: "restricted", Groups: []string{"red-team"}},
 	}
 
-	details := UserAccessMap(col, "owner")
+	details := UserAccessMap(col, "owner", "owner")
 	if len(details) != 2 {
 		t.Fatalf("expected 2 repo entries, got %d", len(details))
 	}
@@ -312,8 +323,8 @@ func TestUserAccessMap_OwnerBypass(t *testing.T) {
 		if !d.CanAccess {
 			t.Errorf("expected owner to access %q even though not a listed member, got CanAccess=false", d.RepoName)
 		}
-		if d.Reason != "owner" {
-			t.Errorf("expected owner's reason to be %q, got %q", "owner", d.Reason)
+		if d.Reason != "owner — full access" {
+			t.Errorf("expected owner's reason to be %q, got %q", "owner — full access", d.Reason)
 		}
 	}
 

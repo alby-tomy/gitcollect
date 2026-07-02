@@ -34,17 +34,17 @@ func runPull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("pull: %w", err)
 	}
 
-	col, caller, client, err := loadForGit(name)
+	col, caller, callerID, client, err := loadForGit(name)
 	if err != nil {
 		return fmt.Errorf("pull: %w", err)
 	}
 
-	accessible, err := access.FilterAccessible(col, caller, client)
+	accessible, err := access.FilterAccessible(col, callerID, client)
 	if err != nil {
 		return fmt.Errorf("pull: %w", err)
 	}
 
-	printAccessSummary(col, caller, len(accessible), len(col.Repos))
+	printAccessSummary(col, caller, callerID, len(accessible), len(col.Repos))
 
 	var pulled, missing, failed []string
 	for _, repo := range accessible {
@@ -63,7 +63,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	output.Success("Pulled %d repo(s)", len(pulled))
 	if len(missing) > 0 {
 		output.Info("%d repo(s) not cloned locally, skipped: %v", len(missing), missing)
-		output.Suggestion(fmt.Sprintf("gitcollect clone %s --pick %s", name, strings.Join(missing, ",")))
+		output.Suggestion(fmt.Sprintf("gitcollect clone %s --pick %q", name, strings.Join(missing, " ")))
 	}
 	if len(failed) > 0 {
 		output.Error("%d repo(s) failed to pull:", len(failed))

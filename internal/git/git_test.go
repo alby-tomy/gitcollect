@@ -108,6 +108,73 @@ func TestPull_PassesDir(t *testing.T) {
 	}
 }
 
+// installFakeGitForPull puts a fake "git" on PATH that handles the exact
+// sequence PullWithSummary issues: "rev-parse HEAD" (returns before, then
+// after, in that order), "pull" (always succeeds), and
+// "rev-list --count before..after" (returns revListCount). Used instead of
+// installFakeGit because PullWithSummary needs different output across
+// multiple invocations within one call, not a single fixed response.
+func installFakeGitForPull(t *testing.T, before, after, revListCount string) {
+	t.Helper()
+	dir := t.TempDir()
+	counterPath := filepath.Join(dir, "calls")
+
+	script := `@echo off
+if "%1"=="rev-parse" (
+  if not exist "` + counterPath + `" (
+    echo x >> "` + counterPath + `"
+    echo ` + before + `
+  ) else (
+    echo ` + after + `
+  )
+  exit /b 0
+)
+if "%1"=="pull" exit /b 0
+if "%1"=="rev-list" (
+  echo ` + revListCount + `
+  exit /b 0
+)
+exit /b 0
+`
+	if err := os.WriteFile(filepath.Join(dir, "git.bat"), []byte(script), 0o755); err != nil {
+		t.Fatalf("could not write fake git: %v", err)
+	}
+	t.Setenv("PATH", dir)
+}
+
+func TestPullWithSummary_UpToDate(t *testing.T) {
+	installFakeGitForPull(t, "commit-a", "commit-a", "0")
+
+	n, err := PullWithSummary(t.TempDir())
+	if err != nil {
+		t.Fatalf("PullWithSummary: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 new commits when HEAD doesn't change, got %d", n)
+	}
+}
+
+func TestPullWithSummary_NewCommits(t *testing.T) {
+	installFakeGitForPull(t, "commit-a", "commit-b", "3")
+
+	n, err := PullWithSummary(t.TempDir())
+	if err != nil {
+		t.Fatalf("PullWithSummary: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("expected 3 new commits, got %d", n)
+	}
+}
+
+func TestPullWithSummary_PropagatesPullFailure(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "log.txt")
+	installFakeGit(t, logPath, true) // every git invocation fails, including the first rev-parse
+
+	if _, err := PullWithSummary(t.TempDir()); err == nil {
+		t.Fatal("expected an error when the underlying git commands fail")
+	}
+}
+
 func TestStatus_ReturnsTrimmedOutput(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "log.txt")
 	installFakeGit(t, logPath, false)

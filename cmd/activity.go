@@ -31,11 +31,9 @@ var (
 var activityCmd = &cobra.Command{
 	Use:   "activity <collection>",
 	Short: "Show commits across a collection's repos, fetched live from the platform",
-	Long: `Fetches the most recent commits on each accessible repo's default branch
-directly from GitHub/GitLab, records any genuinely new ones to
-~/.gitcollect/activity/<collection>.log, and prints the combined history
-(this run's fetch plus everything previously recorded) filtered by --repo
-and --since.
+	Long: `[EXPERIMENTAL] Show recent git commit activity across all accessible
+repos in a collection. This command fetches recent commits from the platform
+API and caches results locally at ~/.gitcollect/activity/<collection>.log.
 
 Unlike "gitcollect audit", which tracks access changes gitcollect itself
 made, "activity" tracks git commits gitcollect observed in the repos —
@@ -46,7 +44,7 @@ code changes, not access changes.`,
 
 func init() {
 	activityCmd.Flags().StringVar(&activityRepo, "repo", "", "show activity for only this repo")
-	activityCmd.Flags().StringVar(&activitySince, "since", "", "filter to commits within this duration (e.g. 7d, 30d, 90d, 24h)")
+	activityCmd.Flags().StringVar(&activitySince, "since", "", "filter to commits within this duration: 1h, 24h, 7d, 30d, or 90d")
 	activityCmd.Flags().IntVar(&activityLimit, "limit", defaultActivityLimit, "max commits to fetch per repo this run")
 	activityCmd.Flags().BoolVar(&activityJSON, "json", false, "machine-readable output")
 	rootCmd.AddCommand(activityCmd)
@@ -63,12 +61,12 @@ func runActivity(cmd *cobra.Command, args []string) error {
 		return NewUsageError(fmt.Errorf("activity: --limit must be at least 1"))
 	}
 
-	col, caller, client, err := loadForGit(name)
+	col, _, callerID, client, err := loadForGit(name)
 	if err != nil {
 		return fmt.Errorf("activity: %w", err)
 	}
 
-	accessible, err := access.FilterAccessible(col, caller, client)
+	accessible, err := access.FilterAccessible(col, callerID, client)
 	if err != nil {
 		return fmt.Errorf("activity: %w", err)
 	}
@@ -179,6 +177,7 @@ func fetchActivity(col *collection.Collection, client api.Client, targets []coll
 		err     error
 	}
 	results := make([]result, len(targets))
+	ownerLogin := col.RepoNamespace()
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, defaultActivityConcurrency)
@@ -189,7 +188,7 @@ func fetchActivity(col *collection.Collection, client api.Client, targets []coll
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			info, err := client.GetRepo(col.Owner, repoName)
+			info, err := client.GetRepo(ownerLogin, repoName)
 			if err != nil {
 				results[i] = result{err: fmt.Errorf("%s: could not look up repo: %w", repoName, err)}
 				return
@@ -199,7 +198,7 @@ func fetchActivity(col *collection.Collection, client api.Client, targets []coll
 				branch = "main"
 			}
 
-			commits, err := client.ListCommits(col.Owner, repoName, branch, limit)
+			commits, err := client.ListCommits(ownerLogin, repoName, branch, limit)
 			if err != nil {
 				results[i] = result{err: fmt.Errorf("%s: %w", repoName, err)}
 				return

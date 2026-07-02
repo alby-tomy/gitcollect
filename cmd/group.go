@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/audit"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 	"github.com/alby-tomy/gitcollect/internal/output"
@@ -32,9 +33,9 @@ var groupDeleteCmd = &cobra.Command{
 }
 
 var groupAddCmd = &cobra.Command{
-	Use:   "add <collection> <group> <username>",
-	Short: "Add a member to a group",
-	Args:  cobra.ExactArgs(3),
+	Use:   "add <collection> <group> <username> [username...]",
+	Short: "Add one or more members to a group",
+	Args:  cobra.MinimumNArgs(3),
 	RunE:  runGroupAdd,
 }
 
@@ -69,24 +70,19 @@ func init() {
 	rootCmd.AddCommand(groupCmd)
 }
 
-// requireOwner loads name, resolves the caller, and confirms the caller is
-// the collection's owner — every group mutation in this file is owner-only.
+// requireOwner loads name, resolves the caller (login + platform ID), and
+// confirms the caller is the collection's owner — every group mutation in
+// this file is owner-only. Built on loadForOwner, the shared helper every
+// owner-perspective command in cmd/ uses for load+resolve+migrate; this
+// wrapper adds back the one-line ownership check and message that
+// loadForOwner deliberately leaves to its callers.
 func requireOwner(verb, name string) (col *collection.Collection, caller string, err error) {
-	col, err = loadCollection(name)
+	col, caller, callerID, _, err := loadForOwner(verb, name)
 	if err != nil {
-		return nil, "", fmt.Errorf("%s: %w", verb, err)
+		return nil, "", err
 	}
-
-	client, err := currentClient(col.Host)
-	if err != nil {
-		return nil, "", fmt.Errorf("%s: %w", verb, err)
-	}
-	caller, err = currentUser(client)
-	if err != nil {
-		return nil, "", fmt.Errorf("%s: %w", verb, err)
-	}
-	if caller != col.Owner {
-		return nil, "", fmt.Errorf("%s: only %s (the owner) can manage groups in %q", verb, col.Owner, name)
+	if !col.IsOwner(callerID) {
+		return nil, "", fmt.Errorf("%s: only %s (the owner) can manage groups in %q", verb, col.Logins[col.Owner], name)
 	}
 	return col, caller, nil
 }
@@ -173,7 +169,7 @@ func runGroupDelete(cmd *cobra.Command, args []string) error {
 func runGroupAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	group := args[1]
-	username := args[2]
+	usernames := args[2:]
 
 	col, caller, err := requireOwner("group add", name)
 	if err != nil {
@@ -185,6 +181,24 @@ func runGroupAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("group add: %w", err)
 	}
 
+	var failed []string
+	for _, username := range usernames {
+		if err := addOneToGroup(col, name, group, caller, username, client); err != nil {
+			failed = append(failed, fmt.Sprintf("%s (%v)", username, err))
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("group add: %d of %d failed: %s", len(failed), len(usernames), strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+// addOneToGroup adds a single username to group within col, reporting and
+// auditing the result. Factored out of runGroupAdd so adding several members
+// to a group in one invocation can continue past an individual failure
+// instead of aborting the whole batch.
+func addOneToGroup(col *collection.Collection, name, group, caller, username string, client api.Client) error {
 	if err := col.AddToGroup(username, group, client); err != nil {
 		recordAudit(audit.AuditEntry{
 			Collection: name,
@@ -197,9 +211,9 @@ func runGroupAdd(cmd *cobra.Command, args []string) error {
 		if errors.Is(err, collection.ErrNotMember) {
 			output.Error("group add: %q is not a member of %s", username, name)
 			output.Suggestion(fmt.Sprintf("gitcollect member add %s %s", name, username))
-			return fmt.Errorf("group add: aborted")
+			return errors.New("not a member")
 		}
-		return fmt.Errorf("group add: %w", err)
+		return err
 	}
 
 	recordAudit(audit.AuditEntry{
@@ -258,7 +272,7 @@ func runGroupRemove(cmd *cobra.Command, args []string) error {
 func runGroupList(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	col, _, err := loadForRead(name)
+	col, _, _, err := loadForRead(name)
 	if err != nil {
 		return fmt.Errorf("group list: %w", err)
 	}
@@ -269,12 +283,12 @@ func runGroupList(cmd *cobra.Command, args []string) error {
 	}
 
 	rows := make([][]string, 0, len(col.Groups))
-	for group, users := range col.Groups {
+	for group, ids := range col.Groups {
 		memberList := "—"
-		if len(users) > 0 {
-			memberList = strings.Join(users, ", ")
+		if len(ids) > 0 {
+			memberList = strings.Join(loginsFor(col, ids), ", ")
 		}
-		rows = append(rows, []string{group, fmt.Sprintf("%d", len(users)), memberList})
+		rows = append(rows, []string{group, fmt.Sprintf("%d", len(ids)), memberList})
 	}
 	output.Table([]string{"GROUP", "MEMBERS", "USERS"}, rows)
 	return nil
@@ -284,23 +298,23 @@ func runGroupShow(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	group := args[1]
 
-	col, _, err := loadForRead(name)
+	col, _, _, err := loadForRead(name)
 	if err != nil {
 		return fmt.Errorf("group show: %w", err)
 	}
 
-	users, ok := col.Groups[group]
+	ids, ok := col.Groups[group]
 	if !ok {
 		return fmt.Errorf("group show: %q has no group %q", name, group)
 	}
 
 	fmt.Printf("Group:   %s\n", group)
-	fmt.Printf("Members: %d\n", len(users))
-	if len(users) > 0 {
+	fmt.Printf("Members: %d\n", len(ids))
+	if len(ids) > 0 {
 		fmt.Println()
-		rows := make([][]string, 0, len(users))
-		for _, u := range users {
-			rows = append(rows, []string{u})
+		rows := make([][]string, 0, len(ids))
+		for _, login := range loginsFor(col, ids) {
+			rows = append(rows, []string{login})
 		}
 		output.Table([]string{"MEMBER"}, rows)
 	}

@@ -44,24 +44,53 @@ GitHub/GitLab collaborator APIs — not by maintaining a shadow list.
 ── Authentication ──────────────────────────────────────────────────────────
 gitcollect auth                               Store GitHub token (hidden prompt)
 gitcollect auth --host gitlab.com            Authenticate a GitLab instance
-gitcollect whoami                            Show authenticated user + token scope
+gitcollect whoami                            Show authenticated user per host
+gitcollect whoami --json                     Machine-readable output (added session 11)
 
 ── Collection lifecycle ────────────────────────────────────────────────────
 gitcollect init <name>                        Create collection (default: private)
+                                              (no --owner flag — owner is always
+                                               whoever ran "gitcollect auth"; an
+                                               --owner-for-orgs flag was considered
+                                               in session 11 and deliberately NOT
+                                               added — see decisions log, every
+                                               owner-only check is a literal
+                                               caller==col.Owner string compare,
+                                               which an org name could never satisfy)
 gitcollect delete <collection>               Delete collection + revoke all access
+                                              (requires typing the collection name
+                                               to confirm)
 gitcollect list                              List your collections (owned + member), any visibility
 gitcollect list --private                    Filter to private collections only
 gitcollect list --public                     Filter to public collections only
-  (REVISED session 4, on user request — original spec's "list --all" is gone;
-   see decisions log. "list" with no flags now shows everything --all used to.)
+  (REVISED session 4, on user request — original spec's "list --all" is gone, and
+   stayed gone after being reconsidered in session 11; see decisions log. "list"
+   with no flags shows everything --all used to. Each row also reports staleness:
+   a collection whose updated_at is >30 days old gets a "Last updated N days ago"
+   warning printed below the table — added session 11.)
 gitcollect show <collection>                 Summary: repos, members, groups, plus a
-                                              per-repo YOU column (caller's own
-                                              ✓/✗ access + reason) — added session 9,
-                                              see decisions log
+                                              per-repo access column. For an ordinary
+                                              caller: YOU (✓/✗ + reason, added session
+                                              9) and, for any denied repo, the exact
+                                              fix command in the footer (added session
+                                              11, via Collection.FixCmd). For the
+                                              collection OWNER specifically: a WHO HAS
+                                              ACCESS column instead (every member who
+                                              can reach each repo) — added session 11,
+                                              since a YOU column is pointless for an
+                                              owner who always passes every check.
+                                              Also gets the same >30-day stale warning
+                                              as list, printed above the tables.
 gitcollect visibility <collection> public|private   Change visibility
 
 ── Repo management ─────────────────────────────────────────────────────────
-gitcollect add <collection> <repo>           Add repo (default: all members)
+gitcollect add <collection> <repo> [repo...]  Add one or more repos (default: all
+                                              members). Multi-repo support added
+                                              session 12 — see decisions log. One
+                                              failure doesn't abort the rest; a
+                                              malformed repo name anywhere in the
+                                              batch is checked up front, before
+                                              anything is added.
 gitcollect remove <collection> <repo>        Remove repo + revoke access on platform
                                               (requires typing the repo name to confirm,
                                                same as `delete` — changed session 8, was
@@ -74,27 +103,57 @@ gitcollect repo grant <collection> <repo> <user>   Grant one user individual acc
 gitcollect repo revoke <collection> <repo> <user>  Revoke one user's individually granted access (same)
 
 ── Member management ───────────────────────────────────────────────────────
-gitcollect member add <collection> <username>      Add member to collection
+gitcollect member add <collection> <username> [username...]   Add one or more
+                                                    members to a collection. Multi-
+                                                    username support added session
+                                                    12 — see decisions log; with more
+                                                    than one username, each one's
+                                                    output is printed under its own
+                                                    "--- username ---" header, and one
+                                                    failing doesn't abort the rest.
+                                                    If any newly granted repo leaves a
+                                                    member with a pending (unaccepted)
+                                                    GitHub collaborator invite, warns
+                                                    about it with the accept URL —
+                                                    added session 11, via
+                                                    Client.GetPendingInvite. GitLab
+                                                    never has this state (project
+                                                    membership there is immediate), so
+                                                    this never fires on GitLab hosts.
 gitcollect member remove <collection> <username>   Remove member + revoke all access
+gitcollect member remove <collection> <username> --confirm-self   Required to remove yourself
 gitcollect member list <collection>               List members + their group memberships
 
 ── Group management ────────────────────────────────────────────────────────
 gitcollect group create <collection> <group>       Create a group
 gitcollect group delete <collection> <group>       Delete group (blocked if repos use it)
-gitcollect group add <collection> <group> <user>   Add member to group
+gitcollect group add <collection> <group> <user> [user...]   Add one or more
+                                                    members to a group. Multi-user
+                                                    support added session 12 — see
+                                                    decisions log; one failing doesn't
+                                                    abort the rest.
 gitcollect group remove <collection> <group> <user> Remove member from group
 gitcollect group list <collection>                List groups + members
 gitcollect group show <collection> <group>        Show group members + accessible repos
 
 ── Access inspection ───────────────────────────────────────────────────────
-gitcollect inspect <collection> --user <username>  Show full access map for a user
+gitcollect inspect <collection> --user <username>  Show full access map for a user.
+                                                    Denied rows get a "To fix:" footer
+                                                    listing the exact command — added
+                                                    session 11 (Collection.FixCmd).
 gitcollect inspect <collection> --repo <repo>      Show who can access a repo and why
+                                                    (same "To fix:" footer addition)
 gitcollect inspect <collection>                    Show full collection access matrix
 
 ── Audit trail ─────────────────────────────────────────────────────────────
 gitcollect audit <collection>                 Show access change log
 gitcollect audit <collection> --user <u>      Filter log by user
-gitcollect audit <collection> --since 7d      Filter log by time (7d, 30d, 90d)
+gitcollect audit <collection> --since <dur>   Filter log by time: 1h, 24h, 7d, 30d, or
+                                               90d ONLY (strict allow-list, no other
+                                               duration accepted — changed session 11
+                                               on user request; previously accepted
+                                               anything time.ParseDuration understood
+                                               plus arbitrary "Nd"; see decisions log)
 gitcollect audit <collection> --json          Machine-readable output
 
 ── Code activity (added session 7; not in the original spec — see decisions
@@ -104,22 +163,41 @@ gitcollect activity <collection>              Show commits across accessible
                                                live + recorded to
                                                ~/.gitcollect/activity/<name>.log
 gitcollect activity <collection> --repo <r>   Limit to one repo
-gitcollect activity <collection> --since 7d   Filter by commit time
+gitcollect activity <collection> --since <dur>  Same strict allow-list as audit
+                                                 --since (1h/24h/7d/30d/90d only)
 gitcollect activity <collection> --limit <n>  Max commits fetched per repo this run (default 10)
 gitcollect activity <collection> --json       Machine-readable output
 
 ── Git operations ──────────────────────────────────────────────────────────
 gitcollect clone <collection>                 Clone all accessible repos
-gitcollect clone <collection> --pick r1 r2   Clone selected repos only
+gitcollect clone <collection> --pick "r1 r2"  Clone selected repos only — value is
+                                               whitespace-separated (changed session
+                                               11 on user request, was comma-separated
+                                               before); repeating --pick also still
+                                               works (--pick r1 --pick r2)
 gitcollect clone <collection> --dry-run       Preview without executing
 gitcollect clone <collection> --concurrency 8 Override parallel limit (default: 4)
 gitcollect clone <collection> --dest <dir>   Clone into specific directory
+                                              If a skipped repo turns out to be a
+                                              pending GitHub invite rather than a
+                                              genuine denial, warns about it with the
+                                              accept URL + retry command — added
+                                              session 11.
 gitcollect pull <collection>                 git pull inside all cloned repos
 gitcollect status <collection>               git status inside all repos
+gitcollect sync <collection>                  Clone every repo not yet present
+                                               locally, pull every repo that already
+                                               is — one pass instead of running clone
+                                               then pull separately. Added session 11;
+                                               not in the original spec.
+gitcollect sync <collection> --dest <dir>    Directory to clone into / where repos
+                                              were already cloned
+gitcollect sync <collection> --dry-run        Preview without executing
+gitcollect sync <collection> --concurrency 8  Override parallel limit (default: 4)
 
 ── System ──────────────────────────────────────────────────────────────────
 gitcollect version                           Print version + platform
-gitcollect completion bash|zsh|fish          Generate shell completion script
+gitcollect completion bash|zsh|fish|powershell  Generate shell completion script
 ```
 
 ---
@@ -207,11 +285,12 @@ test assertion libraries, ORMs. Use stdlib for all of these.
 
 ```yaml
 # ~/.gitcollect/collections/cybersecurity.yaml
-version: "1"
+version: "2"
 name: cybersecurity
 description: "Penetration testing and security research tools"
 host: github.com
-owner: yourusername
+owner: <platform-user-id>          # immutable platform ID (Version "2")
+namespace: acme-corp                # optional; defaults to owner's cached login
 visibility: private # public | private
 created_at: "2025-01-15T10:00:00Z"
 updated_at: "2025-01-20T14:32:00Z"
@@ -296,11 +375,13 @@ type Collection struct {
     Name        string              `yaml:"name"`
     Description string              `yaml:"description"`
     Host        string              `yaml:"host"`
-    Owner       string              `yaml:"owner"`
+    Owner       string              `yaml:"owner"`     // immutable platform ID (Version "2")
     Visibility  Visibility          `yaml:"visibility"`
     Members     []string            `yaml:"members"`
-    Groups      map[string][]string `yaml:"groups"`  // group name → []username
+    Groups      map[string][]string `yaml:"groups"`    // group name → []platform-ID
     Repos       []RepoAccess        `yaml:"repos"`
+    Logins      map[string]string   `yaml:"logins"`    // ID → cached login
+    Namespace   string              `yaml:"namespace,omitempty"` // org/user for API paths; defaults to Logins[Owner]
     CreatedAt   time.Time           `yaml:"created_at"`
     UpdatedAt   time.Time           `yaml:"updated_at"`
 
@@ -657,10 +738,10 @@ same `access.UserAccessMap`/`FilterAccessible` decision.
 ```
 $ gitcollect audit cybersecurity --since 7d
 
-2026-01-20 14:32  alice       member.add            bob             Added member
-2026-01-20 14:35  alice       member.add_to_group   bob → red-team  Added bob to red-team
-2026-01-19 09:10  alice       repo.access.set       vuln-scanner    open to all members → groups: red-team
-2026-01-15 10:00  alice       init                  cybersecurity   Collection created (private)
+2026-01-20 14:32  alice       member.add            bob                   Added member
+2026-01-20 14:35  alice       member.add_to_group   bob → red-team        Added bob to red-team
+2026-01-19 09:10  alice       repo.access.set       vuln-scanner          open to all members → groups: red-team
+2026-01-15 10:00  alice       init                  cybersecurity         Collection created (private)
 ```
 
 Real format string (`cmd/audit.go`): `"%s  %-10s  %-20s  %-20s  %s%s\n"` —
@@ -685,6 +766,65 @@ Run: gitcollect group add cybersecurity <group> diana
 (`cmd/member.go`'s `printAccessBreakdown`. The "Granted"/"Skipped" lines
 are dim/secondary text; the suggestion only appears if at least one repo
 was skipped.)
+
+### gitcollect member add / group add / add — multiple values (session 12)
+
+`member add`, `group add`, and `add` all accept more than one trailing
+positional argument now (`cobra.MinimumNArgs` instead of `ExactArgs`), so a
+whole team or a batch of repos can be added in one invocation instead of one
+command per item. Each item is processed independently — verified against
+the real CLI by exercising `addOneMember`/`addOneToGroup`/`addOneRepo`
+directly in a throwaway test and capturing actual output, not hand-derived:
+
+```
+$ gitcollect member add research alice bob charlie
+
+--- alice ---
+✓ Added alice to research
+
+  Granted access: repo-a, repo-b, repo-c
+
+--- bob ---
+✓ Added bob to research
+
+  Granted access: repo-a, repo-b, repo-c
+
+--- charlie ---
+✓ Added charlie to research
+
+  Granted access: repo-a, repo-b, repo-c
+```
+
+`member add` prints a `--- username ---` header before each one's block
+since that block is multiple lines (the "--- " header is only printed when
+more than one username was given, so the single-username invocation's
+output is byte-for-byte unchanged from before session 12). `group add` and
+`add` skip the header — their per-item success output is a single line, so
+there's nothing to disambiguate.
+
+A failure partway through a batch does not abort the rest — every item is
+attempted, failures are collected, and the command reports them together as
+one line at the very end, exiting non-zero only if at least one item
+actually failed:
+
+```
+$ gitcollect member add research alice bad_name
+
+--- alice ---
+alice is already a member of "research"
+
+--- bad_name ---
+✗ member add: 1 of 2 failed: bad_name (invalid name: username "bad_name" must match ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$)
+```
+
+`add`'s repo-name format validation is the one exception to "check each item
+independently": every repo name is validated up front, before the
+collection is even loaded, so a single malformed name anywhere in the batch
+is a usage error (exit 2) for the whole command rather than a partial
+failure — consistent with how usage errors work everywhere else in
+gitcollect (see the exit-code decision in the decisions log). Once past that
+gate, each repo's own already-in-collection/not-found/sync-failure outcomes
+are independent, same as member add and group add.
 
 ### gitcollect repo access — output
 
@@ -1513,6 +1653,426 @@ In progress:  (none)
 Blockers:     (none)
 Next session should start with: cmd/list_test.go — unchanged pointer,
 now named by SIX consecutive sessions (5 through 10).
+
+Session 11 — 2026-06-30 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+User dropped a second spec file, PROMPT_v2.md, into the project root
+mid-session with its own from-scratch PROGRESS TRACKER (every file
+"todo") and an instruction to generate files one at a time as if
+starting over. Paused before writing any code, since the codebase was
+already 10 sessions in and fully working — flagged the conflict to the
+user via AskUserQuestion rather than complying literally. User
+confirmed: treat PROMPT_v2.md as a delta spec against the existing
+implementation, not a rewrite — see decisions log entry "PROMPT_v2.md
+TREATED AS A DELTA SPEC". This happened a SECOND time later in the same
+session (same framing, "previous session was interrupted, resume from
+the tracker") and was met the same way — re-verified PROMPT_v2.md's
+tracker was still blank (because it was never meant to be live) and
+confirmed with the user again before continuing.
+Completed:    Diffed PROMPT_v2.md against the real implementation and
+              shipped every non-conflicting delta, each confirmed with
+              the user via AskUserQuestion before implementing where
+              it touched an existing deliberate decision:
+                - Owner bypass moved from scattered per-caller checks
+                  into CanAccessRepo/WhyCanAccess directly (user chose
+                  this over keeping session 9's layered approach) —
+                  see decisions log.
+                - --owner flag on `init` considered and explicitly
+                  rejected (architectural conflict: owner checks are
+                  literal string equality against the caller's own
+                  login, which an org name could never satisfy) — see
+                  decisions log.
+                - `list --all` stays removed (reconfirmed; see session
+                  4's original decision).
+                - --pick: comma-separated → space-separated
+                  (StringArrayVar + splitPick), matching PROMPT_v2.md's
+                  examples exactly per user's explicit choice. Caught
+                  and fixed a bug this introduced in cmd/pull.go's
+                  "run clone --pick ..." suggestion, which was still
+                  comma-joining.
+                - --since (audit + activity): flexible ParseDuration-
+                  plus-"Nd" parsing → strict 1h/24h/7d/30d/90d
+                  allow-list, per user's "match v2 exactly" choice.
+                - `show`: owner now sees a WHO HAS ACCESS column
+                  instead of YOU (trivially always true for an owner);
+                  added a >30-day-stale warning shared with `list`.
+                - Collection.FixCmd(username, repo) — the exact
+                  gitcollect command to fix a denial — surfaced in
+                  show's denied-repo footer and inspect --user/--repo's
+                  new "To fix:" footer.
+                - Levenshtein-distance (≤2) typo suggestion for
+                  unrecognized collection names, scoped ONLY to
+                  loadCollection's owner-required path — deliberately
+                  NOT added to loadForRead's private-collection
+                  non-disclosure path, to avoid leaking the existence
+                  of private collections to non-members via typo
+                  suggestions.
+                - whoami --json.
+                - Client.GetPendingInvite (GitHub: real GET
+                  /repos/{owner}/{repo}/invitations check; GitLab:
+                  stub, always false) wired into `member add` (warn
+                  after granting access) and `clone` (warn when a
+                  skipped repo is actually a pending invite, not a
+                  genuine denial) — see decisions log.
+                - `gitcollect sync` (new command, not in the original
+                  spec): clone-missing + pull-existing in one pass.
+                  Added git.PullWithSummary to internal/git/git.go to
+                  report new-commit counts per repo. Concurrent
+                  (default 4), reuses clone.go's cloneOne/
+                  selectCloneTargets — see decisions log.
+              Test files added: cmd/root_test.go, cmd/member_test.go,
+              cmd/clone_test.go (extended), cmd/sync_test.go,
+              internal/git/git_test.go (extended with a new fake-git
+              harness that varies output per call, needed for
+              PullWithSummary's before/after HEAD comparison — the
+              existing installFakeGit always returns a fixed "ok").
+              Full go build/vet/test pass: all packages green, no
+              regressions. Coverage held steady or improved across
+              every touched package (cmd: 12.9%, access: 93.9%, git:
+              85.4%, api: 85.5%, output: 98.1%).
+              Updated PROMPT.md (this file): command surface section,
+              project structure tree, file completion table, and this
+              session log entry — folding PROMPT_v2.md's delta in here
+              rather than maintaining a second tracker.
+In progress:  (none)
+Blockers:     (none)
+Decisions:    See decisions log entries: "PROMPT_v2.md TREATED AS A
+DELTA SPEC", "OWNER BYPASS MOVED INTO CanAccessRepo/WhyCanAccess",
+"--owner FLAG ON init DELIBERATELY NOT ADDED", "--pick CHANGED FROM
+COMMA- TO SPACE-SEPARATED", "--since CHANGED FROM FLEXIBLE TO A STRICT
+ALLOW-LIST", "PENDING-INVITE DETECTION (GitHub-only)", "gitcollect sync".
+Next session should start with: cmd/list_test.go — unchanged pointer,
+now named by SEVEN consecutive sessions (5 through 11). This session
+added test files for several other previously-untested cmd/ surfaces
+(root.go, member.go, clone.go, sync.go) but list.go itself — now also
+carrying the stale-warning logic — is still completely untested at the
+cmd-package level. Strongly consider making this its own session.
+README.md and docs/index.html WERE updated before this session ended
+(initially deferred, then done in the same session once flagged here) —
+see the "Listing the repos..." / new "Cloning and keeping repos up to
+date" sections in README.md, and the new `sync` entry plus updated
+flag descriptions across the command reference in docs/index.html.
+
+Session 12 — 2026-06-30 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+User asked for one feature: `member add`, `group add`, and `add` (repo
+add) should each accept multiple values in a single invocation —
+several usernames, several group members, or several repos at once —
+plus matching tests/coverage and an end-to-end docs/index.html update.
+Completed:    `member add <collection> <username> [username...]`,
+              `group add <collection> <group> <username> [username...]`,
+              and `add <collection> <repo> [repo...]` all changed from
+              cobra.ExactArgs to cobra.MinimumNArgs, taking the extra
+              positional arguments as a trailing slice. Each command's
+              per-item logic was factored out into a new helper
+              (addOneMember, addOneToGroup, addOneRepo respectively) so
+              the command loops over its values calling the helper,
+              collecting failures rather than aborting the whole batch
+              on the first one — matching the partial-failure-tolerant
+              pattern `sync` already established in session 11, applied
+              here for consistency rather than introduced fresh. A
+              failed batch is reported as one combined error at the
+              end ("member add: 1 of 3 failed: bob (...)") and only
+              exits non-zero if at least one item failed; an
+              already-satisfied item (already a member, already in the
+              group) is still a no-op, not a failure, even inside an
+              otherwise-failing batch. `member add` additionally prints
+              a `--- username ---` header before each username's block
+              when given more than one — its per-item output is
+              multi-line (success line + granted/skipped breakdown), so
+              without a header multiple users' blocks would run
+              together unreadably; `group add` and `add` skip the
+              header since their per-item output is a single line each.
+              The single-value invocation of all three commands is
+              byte-for-byte unchanged from before this session — the
+              header only appears when len(values) > 1, and the
+              extracted helpers contain exactly the same logic the
+              inline code used to.
+              `add` has one deliberate asymmetry from the other two:
+              repo name format validation (collection.ValidateRepoName)
+              runs over every name in the batch up front, before the
+              collection is even loaded, so one malformed name is a
+              usage error (exit 2) for the whole command rather than a
+              partial per-item failure. This matches how usage errors
+              work everywhere else in gitcollect (cmd.NewUsageError —
+              see the exit-code decision in the decisions log) — a
+              malformed argument is a problem with how the command was
+              invoked, not a runtime outcome that should vary item by
+              item.
+              Tests: cmd/member_test.go gained a new shared mock,
+              multiAddMock (concurrency-safe, tracks real collaborator
+              state and can force one specific username's
+              AddCollaborator call to fail) — used by TestAddOneMember
+              there and by the two new test files, cmd/group_test.go
+              (TestAddOneToGroup) and cmd/add_test.go (TestAddOneRepo).
+              Each test covers the same three outcomes the batch loop
+              needs to handle correctly: a fresh success, an
+              already-satisfied no-op, and a sync/validation failure
+              that rolls back cleanly without leaving partial state.
+              cmd package coverage: 12.9% → 15.5%. Full
+              `go build`/`go vet`/`go test ./...` pass: all packages
+              green, no regressions.
+              docs/index.html: updated the `add`, `member add`, and
+              `group add` command-reference entries for the new
+              MinimumNArgs signatures and partial-failure behavior;
+              added a new walkthrough subsection, "Bulk operations:
+              adding several repos, members, or group members at
+              once," between steps 2 and 3, with example output for
+              all three commands plus a partial-failure example.
+              Every line in that subsection's output blocks was
+              verified against real execution before being written —
+              a throwaway test in cmd/ called addOneMember/
+              addOneToGroup/addOneRepo directly against a real
+              in-memory collection.Collection and multiAddMock, with
+              its output captured via `go test -v`, then deleted —
+              not hand-derived from reading the source, to honor this
+              page's existing promise ("every line below is the actual
+              output gitcollect prints, not an illustration").
+              PROMPT.md (this file): command surface section (`add`/
+              `member add`/`group add` lines), a new "gitcollect member
+              add / group add / add — multiple values" example block
+              in "Command behaviour," file completion table, decisions
+              log, and this session log entry. Also caught and fixed a
+              stale contradiction left over from session 11's own log
+              entry, which said README.md/docs/index.html were "NOT
+              updated this session" even though both were, in fact,
+              updated later in that same session once the gap was
+              flagged — see the correction above session 12's entry.
+In progress:  (none)
+Blockers:     (none)
+Decisions:    See decisions log entry "MULTI-VALUE SUPPORT FOR member
+add / group add / add (SESSION 12)".
+Next session should start with: cmd/list_test.go — unchanged pointer,
+now named by EIGHT consecutive sessions (5 through 12). Still the
+oldest, most consistently deferred test-coverage gap in the project.
+
+Session 13 — 2026-07-01 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Identity migration: replaced mutable login strings in Collection.Owner,
+Members, Groups, and RepoAccess.Users with immutable platform user IDs.
+GitHub/GitLab logins can be renamed by the account owner at any time —
+storing them as the identity token means a rename silently breaks every
+ownership and membership check. All design decisions were locked in via
+an explicit confirmation exchange before any code was written; see
+decisions log entry "SESSION 13, IDENTITY MIGRATION" for the full list.
+Completed:    internal/api — UserInfo{ID, Login string} struct; Client
+              interface changed GetAuthenticatedUser() to return UserInfo
+              and gained GetUser(username string) (UserInfo, error) for
+              resolving arbitrary logins to IDs; new ErrUserNotFound
+              sentinel distinct from ErrNotFound. github.go: GetUser hits
+              GET /users/{username}, maps 404→ErrUserNotFound. gitlab.go:
+              GetUser wraps existing lookupUserID. api_test.go: all tests
+              updated for UserInfo return type; new TestGitHubGetUser,
+              TestGitHubGetUser_NotFound, TestGitLabGetUser,
+              TestGitLabGetUser_NotFound.
+              internal/collection/collection.go — CurrentVersion "1"→"2";
+              new Logins map[string]string yaml field (ID→login cache,
+              single source of truth for display and API calls); New()
+              takes api.UserInfo instead of string for owner; Validate()
+              gates Logins-completeness check on Version == CurrentVersion.
+              internal/collection/access.go — new IsOwner(id bool);
+              all method parameters renamed to id; FixCmd changed from
+              2-param to 3-param (id, login, repo) — login passed
+              explicitly because the subject may not be in col.Logins
+              (non-member case).
+              internal/collection/mutation.go — new helpers: cloneLogins
+              (shallow map copy for rollback), resolveUsers (concurrent
+              batch GetUser, max 4 in flight), IDForLogin (reverse Logins
+              scan, used by remove operations), Migrate (resolves all
+              legacy logins to IDs, populates Logins, bumps Version, does
+              NOT save — caller decides). All add operations call GetUser
+              live; all remove operations use IDForLogin (no network).
+              SyncCollaborators uses col.Logins[id] for all API calls.
+              internal/collection/collection_test.go — mockClient gained
+              GetUser stub; New() calls → api.UserInfo{ID:x, Login:x};
+              newTestCollection pre-populates col.Logins for test
+              usernames; all ID-based method params updated.
+              internal/config/config.go — new Config.UserIDs
+              map[string]string (host→id); SaveUserID/LoadUserID; Load()
+              initialises UserIDs if nil for backward compat with old
+              config files.
+              internal/access/enforce.go — parameters renamed to callerID;
+              col.IsOwner(callerID) replaces direct string compare;
+              col.Logins[col.Owner]/col.Logins[callerID] for all API calls.
+              internal/access/inspect.go — UserAccessMap gains id and
+              login params (now 3-param: col, id, login); RepoAccessMap/
+              FullMatrix resolve IDs to logins via col.Logins for display;
+              FixCmd call sites updated for 3-param signature.
+              internal/access/access_test.go — GetUser stub added;
+              test fixtures updated for ID-based Members/Owner + Logins.
+              cmd/root.go — cachedUserID alongside cachedUser;
+              currentUserInfo(client) resolves and caches both Login and
+              ID, saves both to config; currentUser/currentUserID thin
+              wrappers; new loadForOwner(verb, name) returning (col,
+              caller, callerID, client, err) — consolidates load+resolve+
+              migrate for all 10+ owner-perspective commands; new
+              migrateIfNeeded(col, client) — calls Migrate then Save then
+              prints a one-time notice; loadForRead→4 return values;
+              loadForGit→5 return values; both call migrateIfNeeded;
+              new loginsFor(col, ids) display helper (shared across all
+              cmd/ files in the package).
+              cmd/auth.go — saves both Login and ID to config via
+              currentUserInfo. cmd/init.go — passes owner api.UserInfo to
+              collection.New. cmd/whoami.go — uses user.Login for display.
+              cmd/list.go's roleFor — now format-aware: Version "2" files
+              compare cached platform ID (config.LoadUserID); legacy "1"
+              files compare cached login (config.LoadUser). list never
+              migrates a collection (must stay network-free) so must
+              handle both formats indefinitely.
+              All remaining cmd/ files (add, delete, visibility, member,
+              group, repo, inspect, show, audit, clone, pull, status,
+              sync, activity) — updated for 4/5-value loader
+              destructuring, col.IsOwner(callerID), col.Logins[col.Owner]
+              for display and API calls, loginsFor for member/user ID
+              display. audit.go: ZERO changes — Actor/Target stay login
+              strings, populated by callers; the audit package itself is
+              unchanged.
+              cmd/member_test.go, cmd/group_test.go, cmd/add_test.go,
+              cmd/show_test.go — api.UserInfo constructors; col.Logins
+              population in fixtures; GetUser stubs where needed.
+              go build ./... && go test ./...: all 9 packages green,
+              no regressions.
+In progress:  (none)
+Blockers:     (none)
+Decisions:    See decisions log entry "SESSION 13, IDENTITY MIGRATION".
+Next session should start with: cmd/list_test.go — unchanged pointer,
+now named by NINE consecutive sessions (5 through 13). Identity
+migration also changed list.go's roleFor (now format-aware: ID
+comparison for Version "2", login comparison for "1") — its branching
+logic is now more important to cover than ever.
+
+Session 14 — 2026-07-01 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Documentation and state-audit session. No new functional code written.
+Completed:    State verification on session resume: go build ./... and
+              go test ./... both clean; confirmed api_test.go and
+              collection_test.go were complete (not mid-edit) when the
+              prior context window ended.
+              PROMPT.md — wrote the missing Session 13 session log entry,
+              architecture decisions entry "SESSION 13, IDENTITY
+              MIGRATION", and updated 20+ file entries in the file
+              completion table; also updated the "next session" pointer
+              from "EIGHT" to "NINE consecutive sessions".
+              PROGRESS.md — new file (was listed in project structure but
+              never created); complete feature inventory from sessions 1-13:
+              command groups, session-by-session summary, architecture
+              highlights, what was deliberately not built, test coverage.
+              README.md — replaced placeholder Installation section with
+              five subsections (go install, Download binary, Homebrew,
+              Verify the install, Upgrading). Download binary section uses
+              exact GoReleaser v2 default archive naming sourced from
+              .goreleaser.yaml (gitcollect_<version>_<os>_<arch>[.tar.gz|
+              .zip]) and covers Linux/macOS/Windows with curl and
+              PowerShell examples. Homebrew marked "coming soon". Added
+              separate Shell completion section (cobra's built-in
+              completion subcommand; bash/zsh/fish/PowerShell one-liners).
+              All facts sourced from go.mod, .goreleaser.yaml,
+              cmd/version.go — no invented paths or names.
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: cmd/list_test.go — unchanged pointer,
+now named by TEN consecutive sessions (5 through 14). list.go's roleFor
+is now format-aware (ID comparison for Version "2", login comparison
+for "1") — its branching logic is more important to cover than ever.
+```
+
+Session 15 — 2026-07-01 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+PRE_SHIP_IMPROVEMENTS.md Priority 2: removed `repo grant` and
+`repo revoke` commands.
+Completed:    PRE_SHIP_IMPROVEMENTS Priority 1 (tests from prior
+              session context) + Priority 2 in this session.
+              Priority 2 changes:
+              cmd/repo.go — removed repoGrantCmd, repoRevokeCmd
+              var declarations; removed their AddCommand registrations
+              from init(); removed runRepoGrant and runRepoRevoke
+              functions; removed containsExact helper (was only used
+              by those two); removed `errors` import (only used by
+              those two); added Long description to repoAccessCmd
+              explaining --users as the way to grant/revoke individual
+              user access.
+              internal/collection/mutation.go — removed ErrRepoOpen
+              and ErrRepoWouldOpen sentinel errors; removed
+              GrantRepoUser and RevokeRepoUser methods.
+              internal/collection/collection_test.go — removed 6 test
+              functions: TestGrantRepoUser, TestGrantRepoUser_Refuses
+              OnOpenRepo, TestGrantRepoUser_SyncFailureRollsBack,
+              TestRevokeRepoUser, TestRevokeRepoUser_RefusesIfIt
+              WouldOpenRepo, TestRevokeRepoUser_SyncFailureRollsBack.
+              internal/collection/access.go — FixCmd: changed
+              "gitcollect repo grant %s %s %s" →
+              "gitcollect repo access %s %s --users %s".
+              docs/index.html — removed repo grant and repo revoke
+              <div class="cmd"> entries.
+              README.md — removed repo grant/revoke row from command
+              reference table; replaced the paragraph explaining
+              grant/revoke guardrails with a note pointing to
+              `repo access --users`.
+              go build ./... and go test ./... both clean.
+              Coverage: 23.3% (up from 22.4%; removed dead code
+              outweighed the line count reduction).
+Decision:     Removed grant/revoke because they expose a footgun
+              (narrowing open repos, reopening restricted ones) as
+              a dedicated command pair, creating two user-visible
+              failure modes that the --users flag on repo access
+              handles more naturally without special-case errors.
+              The "guardrails" were essentially compensating for the
+              existence of the commands themselves.
+In progress:  PRE_SHIP_IMPROVEMENTS Priority 3 — --namespace flag
+Blockers:     (none)
+Next session should start with: Priority 3 — add Namespace field
+to Collection, RepoNamespace() helper, Validate() check, replace
+col.Logins[col.Owner] in API calls, --namespace flag in cmd/init.go,
+display in cmd/show.go, 4 tests.
+```
+
+Session 16 — 2026-07-02 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+PRE_SHIP_IMPROVEMENTS Priorities 3–8 completed. All pure-logic
+changes; no new commands added.
+Completed:    Priority 3 (namespace fix) — already done at session
+              start, completed the one open item (PROMPT.md YAML
+              example updated with namespace field and Go struct
+              updated to include Logins + Namespace fields).
+              Priority 4 — Added "Sharing collections with teammates"
+              section to README.md between Shell completion and
+              Quickstart: manual cp flow (Option A/B), why YAML
+              editing doesn't grant access, coming-soon fetch command.
+              Priority 5 — parseSince error message now lists all five
+              valid values in duration order ("1h, 24h, 7d, 30d, 90d")
+              instead of lexicographic sort; removed `sort` import from
+              audit.go; --pick flag usage updated to show quoted form
+              (e.g. --pick "r1 r2"); added cmd/audit_test.go with
+              TestParseSince_ValidValues and TestParseSince_InvalidValue
+              _ListsAllFive; --pick two-value test already covered by
+              TestSplitPick (cmd/clone_test.go line 22).
+              Priority 6 — Added "### Windows" subsection to README.md
+              Installation section with PATH setup steps (7 numbered
+              steps) and best-effort support note linking to issues.
+              Priority 7 — Added "### Upgrading from an earlier version"
+              to README.md Installation section explaining opportunistic
+              v1→v2 migration; added gitcollect member list as a
+              migration trigger to PROMPT.md architecture note.
+              Priority 8 — Added [EXPERIMENTAL] prefix to
+              cmd/activity.go's Long description; added [experimental]
+              badge + Note to README.md activity command reference row;
+              added "Stabilise gitcollect activity" roadmap item to
+              README.md.
+Decision:     Coverage target (50%) was not reached: final is 23.7%.
+              All pure-logic helpers that don't require real auth were
+              covered in Priority 1. The remaining ~76% of cmd/ code
+              requires live network auth (currentClient, RunE paths for
+              all 15+ commands) which cannot be unit-tested without a
+              real token. The spec acknowledged this constraint ("Focus
+              on pure-logic helpers that don't require real config or
+              a running platform API"). 23.7% is the realistic ceiling
+              without a testable auth stub or integration test harness.
+go build ./... clean; go test ./... all green; go vet ./... clean.
+In progress:  (none — all 8 PRE_SHIP priorities complete)
+Blockers:     (none)
+Next session should start with: Final review pass — verify every
+PRE_SHIP_IMPROVEMENTS checklist item against the actual repo state,
+run go vet ./..., confirm docs render correctly, and commit.
 ```
 
 ---
@@ -1530,40 +2090,124 @@ go.mod                                       done
 Makefile                                     done
 .goreleaser.yaml                             done
 
-cmd/root.go                                  done         +ErrUnauthorized hint in Execute(), session 6
-cmd/auth.go                                  done
-cmd/whoami.go                                done         +anyRejected hint, session 6
-cmd/init.go                                  done
+cmd/root.go                                  done         +ErrUnauthorized hint in Execute(), session 6;
+                                                           +Levenshtein typo suggestion in loadCollection
+                                                           (owner-required path only, NOT loadForRead's
+                                                           private-collection non-disclosure path), session 11;
+                                                           +currentUserInfo (caches Login+ID, saves both);
+                                                           +loadForOwner (load+resolve+migrate for all owner
+                                                           commands); +migrateIfNeeded; +loginsFor; loadForRead
+                                                           →4-val, loadForGit→5-val; cachedUserID, session 13
+cmd/root_test.go                             done         new, session 11 — TestLevenshtein, TestSuggestCollectionName, TestStaleDays
+cmd/auth.go                                  done         saves both Login and ID to config via
+                                                           currentUserInfo, session 13
+cmd/whoami.go                                done         +anyRejected hint, session 6; +--json flag, session 11;
+                                                           uses user.Login for display, session 13
+cmd/init.go                                  done         no --owner flag — considered and deliberately
+                                                           rejected in session 11, see decisions log;
+                                                           passes api.UserInfo to collection.New, session 13
 cmd/delete.go                                done
-cmd/list.go                                  done         redesigned session 4 — see decisions log
-cmd/show.go                                  done         +per-caller YOU column, session 9
-cmd/show_test.go                             done         new, session 9
+cmd/list.go                                  done         redesigned session 4 — see decisions log;
+                                                           +stale-collection warning (>30 days since
+                                                           updated_at), session 11; roleFor now format-aware:
+                                                           Version "2" compares cached platform ID, legacy "1"
+                                                           compares cached login, session 13
+cmd/show.go                                  done         +per-caller YOU column, session 9; +owner-only
+                                                           WHO HAS ACCESS view, +FixCmd-driven footer for
+                                                           denied repos, +stale warning, session 11;
+                                                           callerID-based owner check; loginsFor for
+                                                           Members/Users display, session 13
+cmd/show_test.go                             done         new, session 9; +TestBuildOwnerShowRepoRows,
+                                                           updated deniedRepo/FixCmd assertions, session 11;
+                                                           api.UserInfo constructors; col.Logins, session 13
 cmd/visibility.go                            done
-cmd/add.go                                   done
+cmd/add.go                                   done         ExactArgs(2) → MinimumNArgs(2): accepts multiple
+                                                           repo names, session 12 — see decisions log; logic
+                                                           split into addOneRepo so a batch continues past
+                                                           one repo's failure
+cmd/add_test.go                              done         new, session 12 — TestAddOneRepo; api.UserInfo
+                                                           constructor; col.Logins["bob"] fixture, session 13
 cmd/remove.go                                done         y/N → type-name-to-confirm, session 8
 cmd/repo.go                                  done         grant/revoke subcommands added session 3
-cmd/member.go                                done
-cmd/group.go                                 done
-cmd/inspect.go                               done
-cmd/audit.go                                 done
-cmd/activity.go                              done         new command, session 7 — not in original spec
+cmd/member.go                                done         +pending-invite warning after member add,
+                                                           session 11 (Client.GetPendingInvite); ExactArgs(2)
+                                                           → MinimumNArgs(2): accepts multiple usernames,
+                                                           session 12 — see decisions log; logic split into
+                                                           addOneMember so a batch continues past one
+                                                           username's failure
+cmd/member_test.go                           done         new, session 11 — TestHasPendingInvite; +multiAddMock
+                                                           (shared with add_test.go/group_test.go) and
+                                                           TestAddOneMember, session 12; GetUser stub;
+                                                           api.UserInfo constructors, session 13
+cmd/group.go                                 done         ExactArgs(3) → MinimumNArgs(3) on group add: accepts
+                                                           multiple usernames, session 12 — see decisions log;
+                                                           logic split into addOneToGroup so a batch continues
+                                                           past one username's failure
+cmd/group_test.go                            done         new, session 12 — TestAddOneToGroup;
+                                                           api.UserInfo constructor; col.Logins
+                                                           pre-populated in fixture, session 13
+cmd/inspect.go                               done         +"To fix:" footer via Collection.FixCmd, session 11
+cmd/audit.go                                 done         --since: flexible parsing → strict 1h/24h/7d/30d/90d
+                                                           allow-list, session 11 — see decisions log
+cmd/activity.go                              done         new command, session 7 — not in original spec;
+                                                           --since help text updated to match audit.go's
+                                                           strict allow-list, session 11
 cmd/activity_test.go                         done         session 7; cmd/'s first ever test file (6.5% pkg cov)
-cmd/clone.go                                 done
-cmd/pull.go                                  done
+cmd/clone.go                                 done         --pick: comma-separated StringSlice → space-
+                                                           separated StringArray + splitPick, session 11;
+                                                           +pending-invite warning on skipped repos, session 11
+cmd/clone_test.go                            done         new, session 11 — TestSplitPick, TestFirstPendingInvite
+cmd/pull.go                                  done         fixed --pick suggestion to space-join after
+                                                           session 11's --pick flag change (was comma-join,
+                                                           would have produced a non-functional suggestion)
 cmd/status.go                                done
+cmd/sync.go                                  done         new command, session 11 — not in original spec;
+                                                           clones missing repos + pulls existing ones in one
+                                                           pass; reuses clone.go's cloneOne/selectCloneTargets
+cmd/sync_test.go                             done         new, session 11 — TestFormatSyncLine
 cmd/version.go                               done
 (shell completion: cobra's built-in `completion` subcommand covers this
  — no separate file needed; verified with `gitcollect completion --help`)
 
-internal/collection/collection.go            done
-internal/collection/access.go                done         groupsContaining (dead code) removed
-internal/collection/mutation.go              done         +GrantRepoUser/RevokeRepoUser, session 3
-internal/collection/collection_test.go       done         85.9% coverage; mock +ListCommits stub, session 7
+internal/collection/collection.go            done         +Logins map[string]string yaml field (ID→login cache);
+                                                           CurrentVersion "1"→"2"; New() takes api.UserInfo
+                                                           (not string) for owner; Validate() gates
+                                                           Logins-completeness check on Version "2", session 13
+internal/collection/access.go                done         groupsContaining (dead code) removed; owner-bypass
+                                                           moved INTO CanAccessRepo/WhyCanAccess directly
+                                                           (was scattered across callers), session 11 — see
+                                                           decisions log; +FixCmd, session 11; +IsOwner(id);
+                                                           all params renamed to id; FixCmd 3-param
+                                                           (id, login, repo), session 13
+internal/collection/mutation.go              done         +GrantRepoUser/RevokeRepoUser, session 3;
+                                                           +Migrate, IDForLogin, resolveUsers, cloneLogins;
+                                                           add ops call GetUser live; remove ops use
+                                                           IDForLogin (no network); SyncCollaborators uses
+                                                           col.Logins[id] for all API calls, session 13
+internal/collection/collection_test.go       done         83.8% coverage; mock +ListCommits stub, session 7;
+                                                           +GetPendingInvite stub, session 11; WhyCanAccess
+                                                           assertions updated for new reason strings, session 11;
+                                                           +GetUser stub; New()→api.UserInfo{...};
+                                                           newTestCollection pre-populates col.Logins;
+                                                           all ID-based method params updated, session 13
 
-internal/access/enforce.go                   done
+internal/access/enforce.go                   done         redundant owner checks in CheckRepoAccess/
+                                                           FilterAccessible removed now that CanAccessRepo
+                                                           does the bypass itself, session 11; callerID params;
+                                                           col.IsOwner(callerID)/col.Logins for comparisons
+                                                           and API calls, session 13
 internal/access/sync.go                      done
-internal/access/inspect.go                   done         +decide() owner-bypass fix, session 9 — see decisions log
-internal/access/access_test.go               done         93.0% coverage; +TestUserAccessMap_OwnerBypass, session 9
+internal/access/inspect.go                   done         +decide() owner-bypass fix, session 9 — see decisions
+                                                           log; decide() helper REMOVED session 11 (redundant
+                                                           after the CanAccessRepo refactor); +FixCmd field on
+                                                           RepoAccessDetail/MemberAccessDetail, session 11;
+                                                           UserAccessMap→3-param (col, id, login); col.Logins
+                                                           for all display, session 13
+internal/access/access_test.go               done         93.9% coverage; +TestUserAccessMap_OwnerBypass,
+                                                           session 9 (assertions updated for new owner reason
+                                                           string, session 11); +GetPendingInvite stub,
+                                                           session 11; +GetUser stub; fixtures updated for
+                                                           ID-based Members/Owner + Logins maps, session 13
 
 internal/audit/audit.go                      done
 internal/audit/audit_test.go                 done         82.8% coverage
@@ -1571,19 +2215,46 @@ internal/audit/audit_test.go                 done         82.8% coverage
 internal/activity/activity.go                done         new package, session 7 — not in original spec
 internal/activity/activity_test.go           done         84.4% coverage, session 7
 
-internal/git/git.go                          done
-internal/git/git_test.go                     done         91.7% coverage
+internal/git/git.go                          done         +PullWithSummary (reports new-commit count for
+                                                           sync's per-repo reporting), session 11
+internal/git/git_test.go                     done         85.4% coverage; +TestPullWithSummary_* (3 cases,
+                                                           new fake-git harness with per-call varying output), session 11
 
-internal/api/client.go                       done         +ListCommits, +CommitInfo, +RepoInfo.DefaultBranch, session 7
-internal/api/github.go                       done         githubBaseURL: const → var (see decisions log); +ListCommits, session 7
-internal/api/gitlab.go                       done         +ListCommits, session 7
-internal/api/api_test.go                     done         85.4% coverage (was 84.8%; +ListCommits/DefaultBranch tests, session 7)
+internal/api/client.go                       done         +ListCommits, +CommitInfo, +RepoInfo.DefaultBranch,
+                                                           session 7; +GetPendingInvite, +GitHubNotificationsURL
+                                                           const, session 11; +UserInfo{ID,Login} struct,
+                                                           GetUser(username) (UserInfo, error),
+                                                           ErrUserNotFound, session 13
+internal/api/github.go                       done         githubBaseURL: const → var (see decisions log);
+                                                           +ListCommits, session 7; +GetPendingInvite
+                                                           (GET /repos/{owner}/{repo}/invitations), session 11;
+                                                           +GetUser (GET /users/{username}), GetAuthenticatedUser
+                                                           now returns UserInfo, session 13
+internal/api/gitlab.go                       done         +ListCommits, session 7; +GetPendingInvite stub
+                                                           (always false — GitLab has no pending-invite state;
+                                                           membership added via API is immediate), session 11;
+                                                           +GetUser (wraps existing lookupUserID), session 13
+internal/api/api_test.go                     done         85.5% coverage; +ListCommits/DefaultBranch tests,
+                                                           session 7; +TestGitHub/GitLabGetPendingInvite*,
+                                                           session 11; all tests updated for UserInfo return
+                                                           type; +TestGitHub/GitLabGetUser(_NotFound), session 13
 
-internal/config/config.go                    done         +ActivityDir(), session 7
+internal/config/config.go                    done         +ActivityDir(), session 7; +UserIDs
+                                                           map[string]string (host→id), SaveUserID/LoadUserID;
+                                                           Load() inits UserIDs if nil for backward compat,
+                                                           session 13
 internal/config/config_test.go               done         82.5% coverage (was 82.8%; +ActivityDir assertion, session 7)
 
-internal/output/output.go                    done         Table/padRight: byte len → rune count (real bug fix)
-internal/output/output_test.go               done         97.9% coverage
+internal/output/output.go                    done         Table/padRight: byte len → rune count (real bug fix);
+                                                           +StaleWarning, +InviteWarning, session 11
+internal/output/output_test.go               done         98.1% coverage; +TestStaleWarning, +TestInviteWarning, session 11
+
+README.md                                    done         +Installation (go install, Download binary, Homebrew,
+                                                           Verify, Upgrading) and Shell completion sections,
+                                                           session 14; prior updates: activity section s7,
+                                                           list/show/sync sections s9-s12
+PROGRESS.md                                  done         new file, session 14 — full feature inventory
+                                                           sessions 1-13
 ```
 
 ---
@@ -1850,6 +2521,201 @@ sessions do not re-debate them.
   package must assume SyncCollaborators will call it from multiple
   goroutines and lock accordingly — don't repeat this with a "simpler"
   unsynchronized mock later.
+- SESSION 11, PROMPT_v2.md TREATED AS A DELTA SPEC, NOT A REWRITE: a
+  second spec file, PROMPT_v2.md, was dropped into the project root with
+  its own from-scratch PROGRESS TRACKER (every file marked "todo",
+  Session 1 blank) and an instruction implying the codebase needed to be
+  regenerated file-by-file from nothing. The actual codebase was already
+  10 sessions in and fully working. Rather than blindly follow the
+  literal instruction (which would have meant regenerating already-
+  correct, already-tested files and risked silently reverting 10
+  sessions of refinements), this was flagged to the user, who confirmed:
+  treat PROMPT_v2.md as a delta spec against the existing implementation
+  — diff it against current behavior, implement only what's genuinely
+  new or changed, and keep tracking progress in PROMPT.md (this file),
+  not PROMPT_v2.md's own tracker. PROMPT_v2.md's tracker was deliberately
+  never updated/written to — it isn't live and was never meant to be;
+  this was reconfirmed once more mid-session when the same "previous
+  session was interrupted, resume from PROMPT_v2.md's tracker" framing
+  came up a second time. PROMPT_v2.md itself is left in the repo as a
+  historical reference for what the delta was sourced from, not as an
+  active spec — if you're starting a new session and see it, this entry
+  is the explanation; do not restart a from-scratch build off of it.
+- SESSION 11, OWNER BYPASS MOVED INTO CanAccessRepo/WhyCanAccess: every
+  caller previously implemented its own "if caller == col.Owner, allow"
+  check on top of CanAccessRepo (enforce.go's CheckRepoAccess/
+  FilterAccessible, inspect.go's now-removed decide() helper) — a
+  layered design chosen deliberately in session 9 specifically so
+  CanAccessRepo's return value stayed a pure function of the documented
+  member/group/user rules, with the bypass living only at the few call
+  sites that needed it. PROMPT_v2.md's spec puts the bypass inside
+  CanAccessRepo itself instead. Presented both options to the user
+  (keep the session-9 layered approach vs. move the bypass inboard);
+  user explicitly chose the more invasive inboard refactor. CanAccessRepo
+  now checks `username == c.Owner` first, unconditionally, before the
+  public-visibility check; WhyCanAccess mirrors this and returns
+  "owner — full access" (was bare "owner"). Every downstream caller's
+  redundant copy of the bypass was then deleted — this eliminates an
+  entire class of "forgot to bypass for the owner at some new call site"
+  bugs at the source instead of requiring each new caller to remember to
+  add it. Tradeoff accepted: CanAccessRepo is no longer a pure function
+  of the member/group/user rules alone; "is this person the owner" is
+  now baked into the access-control primitive itself, not layered on top.
+- SESSION 11, --owner FLAG ON `init` DELIBERATELY NOT ADDED: PROMPT_v2.md
+  proposes `gitcollect init <name> --owner <org>` for org-owned
+  collections. Not implemented. Every owner-only check in the codebase
+  (CanAccessRepo's bypass, member/group mutation guards, `show`'s
+  owner-view detection) is a literal `caller == col.Owner` string
+  comparison against the authenticated user's own login. An org name can
+  never equal an authenticated personal user's login, so an org-owned
+  collection could never pass a single owner-only check — every
+  org-collection's true administrators would be permanently locked out
+  of their own collection's owner-only commands (delete, repo access
+  changes, member/group management, etc.) the moment --owner pointed at
+  an org instead of themselves. Fixing this properly would require a
+  real authorization model (e.g. "owner OR member of org's admin team"),
+  which is a substantially bigger change than this flag implies. Flagged
+  to the user as an architectural conflict rather than implemented as a
+  flag that would silently produce an unusable collection; user agreed
+  to skip it for now.
+- SESSION 11, --pick CHANGED FROM COMMA- TO SPACE-SEPARATED: matching
+  PROMPT_v2.md's examples (`--pick repo1 repo2`) exactly, per explicit
+  user choice over keeping the original comma-separated StringSliceVar.
+  Implemented as StringArrayVar (so cobra doesn't itself comma-split
+  values) plus a manual splitPick() that runs strings.Fields() over each
+  raw value — this supports both a single quoted value with embedded
+  spaces (`--pick "r1 r2"`) and the flag repeated (`--pick r1 --pick
+  r2"`), but does NOT support genuinely bare unquoted multi-token
+  picks as two separate positional-looking arguments outside of pflag's
+  own repeated-flag or quoted-value mechanisms — pflag has no built-in
+  concept of a flag consuming a variable number of bare following
+  arguments. cmd/pull.go's "repos not cloned, run clone --pick ..."
+  suggestion was comma-joining the missing list before this change and
+  needed a matching fix (space-join) — caught and fixed in the same
+  session; comma-joined output would have silently produced a
+  suggestion the new splitPick() couldn't parse correctly.
+- SESSION 11, --since CHANGED FROM FLEXIBLE TO A STRICT ALLOW-LIST:
+  `audit --since` and `activity --since` previously accepted anything
+  time.ParseDuration understood (e.g. "2h30m") plus an ad hoc "Nd" shorthand
+  for days. PROMPT_v2.md's spec only documents five exact values: 1h, 24h,
+  7d, 30d, 90d. Per explicit user choice ("match v2 exactly" over keeping
+  the more flexible parser), --since now rejects anything outside that
+  five-value set, including previously-valid inputs like "30m" or "2h30m".
+  The five values map to a fixed `sinceDurations` lookup table rather than
+  being parsed, so there's no ambiguity about what's accepted.
+- SESSION 11, PENDING-INVITE DETECTION (GitHub-only): GitHub's
+  AddCollaborator creates a pending, unaccepted invitation unless the
+  invitee already has access on the repo — CheckCollaborator returns
+  false for someone with a pending invite exactly the same as it does for
+  someone with no access at all, so without this, `member add` and
+  `clone` had no way to tell "you're not entitled" apart from "you're
+  entitled but haven't accepted the GitHub email yet." Added
+  Client.GetPendingInvite(owner, repo, username) — GitHub hits
+  GET /repos/{owner}/{repo}/invitations and checks invitee logins; GitLab
+  always returns (false, nil) since GitLab project membership added via
+  API is immediate, with no pending/unaccepted state to query. Wired into
+  member.go (warns after granting access if any newly-granted repo shows
+  a pending invite) and clone.go (warns when a "skipped" repo turns out to
+  be a pending invite rather than a genuine local-rule denial).
+- SESSION 11, `gitcollect sync` (new command, not in the original spec):
+  combines clone + pull into one pass — for every accessible repo, clones
+  it if absent at --dest, pulls it if already present. Reuses clone.go's
+  cloneOne/selectCloneTargets rather than duplicating the clone-URL-
+  resolution logic. Added git.PullWithSummary(dir) to internal/git/git.go
+  specifically to support sync's per-repo "N new commits" vs "up to date"
+  reporting — it compares `git rev-parse HEAD` before/after the pull and,
+  if it changed, runs `git rev-list --count old..new` to report exactly
+  how many commits arrived. Concurrent like clone (bounded by
+  --concurrency, default 4), unlike the existing sequential pull.go —
+  this was a deliberate choice for the new command, not a retrofit onto
+  pull.go, since pull.go's existing sequential behavior wasn't reported as
+  a problem and changing it wasn't part of this session's approved scope.
+- SESSION 12, MULTI-VALUE SUPPORT FOR member add / group add / add: user
+  asked for `member add`, `group add`, and `add` (repo add) to each accept
+  multiple values in one invocation instead of exactly one. Implemented as
+  cobra.ExactArgs → cobra.MinimumNArgs on all three, with the per-item logic
+  factored into addOneMember/addOneToGroup/addOneRepo and the command itself
+  reduced to a loop over its values plus failure collection — the same
+  partial-failure-tolerant shape session 11's `sync` already used (process
+  every item, collect failures, report them together, exit non-zero only if
+  something actually failed), reused here rather than inventing a different
+  batch semantics for these three commands.
+  Two things worth remembering if this pattern gets extended to more
+  commands later (member remove, group remove, repo grant/revoke would be
+  the natural next candidates, but were NOT done this session — out of
+  scope, not requested):
+    - The single-value call path must stay byte-for-byte identical to
+      before. This was achieved by keeping the extracted per-item helper's
+      logic an exact copy of what used to be inline in the command, and by
+      making any new "multiple items" UI (the `--- username ---` header in
+      member add) conditional on len(values) > 1. Do NOT let a refactor like
+      this change single-item output even slightly — there are three
+      sessions' worth of docs/index.html example blocks whose stated
+      contract is "every line is the actual output gitcollect prints, not
+      an illustration," and single-item invocations are still the common
+      case.
+    - `add` validates every repo name's format up front, before touching
+      the collection at all, so one malformed name fails the whole command
+      as a usage error (exit 2) rather than as one partial failure among
+      many. `member add` and `group add` do NOT do this — a malformed
+      username there only fails that one username (ValidateUsername runs
+      inside AddMember/AddToGroup, after the loop has already started, so
+      it naturally becomes a per-item failure like any other). This
+      asymmetry is intentional, not an oversight: a malformed repo name is
+      knowable immediately from the argument alone, the same category of
+      problem cobra's own Args validators would catch if they could; a
+      malformed username is comparatively rare and this codebase already
+      had no precedent for pre-validating usernames before session 12, so
+      changing member add/group add's behavior here would have been an
+      unrequested behavior change beyond what was asked.
+  Verification note: every example output block added to docs/index.html
+  for this feature was checked against a real run (a throwaway Go test
+  calling the extracted helpers directly against a real in-memory
+  collection.Collection and a real, if mocked, api.Client, with output
+  captured via `go test -v` and the test file deleted afterward) rather
+  than typed from reading the source — this page has stated since it was
+  written that its output blocks are real, not illustrations, and that
+  claim needed to keep holding for the new content too.
+- SESSION 13, IDENTITY MIGRATION — immutable platform IDs replacing
+  mutable usernames: GitHub/GitLab logins can be renamed by the account
+  owner at any time. Storing them in Collection.Owner, Members, Groups,
+  and RepoAccess.Users means a rename silently breaks every ownership
+  and membership check. Fixed by storing the immutable numeric platform
+  user ID (formatted as a decimal string) in those fields and keeping a
+  separate Logins map[string]string (ID→login) as the single source of
+  truth for display and API path-building (REST paths use login strings).
+  Design decisions locked in before any code was written:
+    - ID used ONLY for comparisons: IsOwner, IsMember, IsInGroup,
+      CanAccessRepo. Login used for: all API calls, all user-facing
+      display, audit log Actor/Target, FixCmd suggestions.
+    - Version field bumped "1"→"2" in collection YAML to detect legacy
+      files. Validate() only checks Logins-completeness on Version "2"
+      files; legacy "1" files pass the old checks unchanged.
+    - Migration is OPPORTUNISTIC: Migrate() is called only from
+      loadForOwner, loadForGit, and loadForRead's private branch — never
+      from list (must stay network-free) or loadForRead's public fast-
+      path (must stay auth-free). A Version "2" file triggers no
+      migration call at all. `gitcollect member list` also triggers
+      migration (it uses loadForOwner when the caller is the owner),
+      making it a useful manual upgrade path for owners.
+    - Add operations (AddMember, AddToGroup, GrantRepoUser,
+      SetRepoAccess --users) always call client.GetUser() live — the
+      account must exist on the platform before access is granted.
+    - Remove operations (RemoveMember, RemoveFromGroup, RevokeRepoUser)
+      use IDForLogin() reverse-lookup from the cached Logins map — no
+      network call; works even for renamed or deleted platform accounts.
+    - FixCmd changed from 2-param to 3-param (id, login, repo): the
+      subject may not be in col.Logins (non-members have no entry), so
+      login is passed explicitly by callers rather than looked up.
+    - loadForOwner(verb, name) consolidates the repeated load+resolve+
+      migrate boilerplate from 10+ owner-perspective cmd/ files into one
+      helper returning (col, caller, callerID, client, err).
+    - cmd/list.go's roleFor is format-aware: Version "2" compares the
+      cached platform ID (config.LoadUserID); legacy "1" compares the
+      cached login (config.LoadUser). list never migrates a collection
+      (no client, no network) so must handle both formats indefinitely.
+    - audit.go: ZERO changes. Actor/Target stay login strings, populated
+      by callers. The audit package itself is unchanged.
 ```
 
 <!-- v1 -->

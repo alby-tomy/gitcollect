@@ -17,16 +17,51 @@ const requestTimeout = 15 * time.Second
 // APIs.
 type Client interface {
 	GetRepo(owner, repo string) (RepoInfo, error)
-	GetAuthenticatedUser() (string, error)
+	GetAuthenticatedUser() (UserInfo, error)
+	// GetUser resolves username (as typed on the command line — by "member
+	// add", "group add", "repo grant", "repo access --users", or during
+	// old-format-collection migration) to that account's platform identity.
+	// Returns ErrUserNotFound if no account with that username exists.
+	GetUser(username string) (UserInfo, error)
 	AddCollaborator(owner, repo, username, permission string) error
 	RemoveCollaborator(owner, repo, username string) error
 	CheckCollaborator(owner, repo, username string) (bool, error)
+	// GetPendingInvite returns true if username has been granted access to
+	// owner/repo but hasn't accepted it yet. GitHub creates a pending
+	// "repository invitation" whenever AddCollaborator grants someone who
+	// isn't already org-level entitled — they show up as NOT a confirmed
+	// collaborator (CheckCollaborator false) until they accept it, which
+	// otherwise looks identical to never having been granted at all.
+	// GitLab has no equivalent state — project membership added via its
+	// API takes effect immediately — so gitlabClient always returns false.
+	GetPendingInvite(owner, repo, username string) (bool, error)
 	// ListCommits returns the most recent commits on branch, newest first,
 	// capped at limit. Used by "gitcollect activity" to report code changes
 	// — distinct from the collaborator methods above, which gitcollect's
 	// access-control mutations drive.
 	ListCommits(owner, repo, branch string, limit int) ([]CommitInfo, error)
 	Host() string
+}
+
+// GitHubNotificationsURL is where a user accepts a pending GitHub
+// collaborator invitation. There's no API endpoint to accept one
+// programmatically — it's always a manual, web-based step.
+const GitHubNotificationsURL = "https://github.com/notifications"
+
+// UserInfo identifies a platform account. ID is the platform's own
+// immutable numeric identifier, stable across username/login renames —
+// gitcollect stores this, never the login, anywhere it needs to decide
+// "is this the same person" (Collection.Owner, Members, group membership,
+// per-repo individual grants). Login is the current, human-readable
+// username: required for API path-building (GitHub and GitLab both
+// address repos and collaborators by login in the URL, never by ID) and
+// anywhere gitcollect displays or types out a command involving this
+// person. Both are carried as strings — ID is numeric on both platforms,
+// but kept as a string here so gitcollect's storage/comparison code never
+// has to special-case GitHub's int64 range vs GitLab's int.
+type UserInfo struct {
+	ID    string
+	Login string
 }
 
 // RepoInfo is the subset of platform repository metadata gitcollect needs.
@@ -55,6 +90,11 @@ var (
 	ErrUnauthorized = errors.New("invalid or missing token")
 	ErrForbidden    = errors.New("insufficient permissions")
 	ErrRateLimit    = errors.New("API rate limit exceeded")
+	// ErrUserNotFound is returned by GetUser when no account with the
+	// given username exists on the platform — distinct from ErrNotFound,
+	// which means "repository not found", so callers can tell the two
+	// apart in error messages.
+	ErrUserNotFound = errors.New("platform user not found")
 )
 
 // NewClient returns the Client implementation for host: GitHub for

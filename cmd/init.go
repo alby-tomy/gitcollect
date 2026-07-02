@@ -14,6 +14,7 @@ import (
 var (
 	initHost        string
 	initDescription string
+	initNamespace   string
 	initPublic      bool
 )
 
@@ -27,6 +28,7 @@ var initCmd = &cobra.Command{
 func init() {
 	initCmd.Flags().StringVar(&initHost, "host", config.DefaultHost, "platform host the collection's repos live on")
 	initCmd.Flags().StringVar(&initDescription, "description", "", "human-readable description of the collection")
+	initCmd.Flags().StringVar(&initNamespace, "namespace", "", "org or username under which the repos live (defaults to your own login)")
 	initCmd.Flags().BoolVar(&initPublic, "public", false, "create the collection as public instead of the default, private")
 	rootCmd.AddCommand(initCmd)
 }
@@ -49,7 +51,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("init: %w", err)
 	}
-	owner, err := currentUser(client)
+	owner, err := currentUserInfo(client)
 	if err != nil {
 		return fmt.Errorf("init: %w", err)
 	}
@@ -64,11 +66,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("init: %w", err)
 	}
 	col.Description = initDescription
+	col.Namespace = initNamespace
 
 	if err := col.Save(); err != nil {
 		recordAudit(audit.AuditEntry{
 			Collection: name,
-			Actor:      owner,
+			Actor:      owner.Login,
 			Action:     "init",
 			Target:     name,
 			Detail:     fmt.Sprintf("Collection creation failed (%s)", visibility),
@@ -79,7 +82,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	recordAudit(audit.AuditEntry{
 		Collection: name,
-		Actor:      owner,
+		Actor:      owner.Login,
 		Action:     "init",
 		Target:     name,
 		Detail:     fmt.Sprintf("Collection created (%s)", visibility),

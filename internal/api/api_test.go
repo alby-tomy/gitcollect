@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -50,15 +51,45 @@ func TestGitHubGetAuthenticatedUser(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Errorf("Authorization header = %q", got)
 		}
-		json.NewEncoder(w).Encode(map[string]string{"login": "alice"})
+		json.NewEncoder(w).Encode(map[string]any{"id": 583231, "login": "alice"})
 	})
 
 	user, err := client.GetAuthenticatedUser()
 	if err != nil {
 		t.Fatalf("GetAuthenticatedUser: %v", err)
 	}
-	if user != "alice" {
-		t.Errorf("got %q, want %q", user, "alice")
+	if user.Login != "alice" {
+		t.Errorf("Login = %q, want %q", user.Login, "alice")
+	}
+	if user.ID != "583231" {
+		t.Errorf("ID = %q, want %q", user.ID, "583231")
+	}
+}
+
+func TestGitHubGetUser(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/users/bob" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": 99, "login": "bob"})
+	})
+
+	user, err := client.GetUser("bob")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if user.ID != "99" || user.Login != "bob" {
+		t.Errorf("unexpected UserInfo: %+v", user)
+	}
+}
+
+func TestGitHubGetUser_NotFound(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	if _, err := client.GetUser("ghost"); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("expected ErrUserNotFound, got %v", err)
 	}
 }
 
@@ -156,15 +187,51 @@ func TestGitLabGetAuthenticatedUser(t *testing.T) {
 		if got := r.Header.Get("PRIVATE-TOKEN"); got != "test-token" {
 			t.Errorf("PRIVATE-TOKEN header = %q", got)
 		}
-		json.NewEncoder(w).Encode(map[string]string{"username": "alice"})
+		json.NewEncoder(w).Encode(map[string]any{"id": 7, "username": "alice"})
 	})
 
 	user, err := client.GetAuthenticatedUser()
 	if err != nil {
 		t.Fatalf("GetAuthenticatedUser: %v", err)
 	}
-	if user != "alice" {
-		t.Errorf("got %q, want %q", user, "alice")
+	if user.Login != "alice" {
+		t.Errorf("Login = %q, want %q", user.Login, "alice")
+	}
+	if user.ID != "7" {
+		t.Errorf("ID = %q, want %q", user.ID, "7")
+	}
+}
+
+func TestGitLabGetUser(t *testing.T) {
+	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("username"); got != "bob" {
+			t.Errorf("expected username=bob, got %q", got)
+		}
+		json.NewEncoder(w).Encode([]map[string]any{{"id": 99}})
+	})
+
+	user, err := client.GetUser("bob")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	// GitLab's lookup is an exact-match query, so GetUser trusts the input
+	// username for Login rather than re-decoding it from the response —
+	// see GetUser's doc comment.
+	if user.ID != "99" || user.Login != "bob" {
+		t.Errorf("unexpected UserInfo: %+v", user)
+	}
+}
+
+func TestGitLabGetUser_NotFound(t *testing.T) {
+	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]int{}) // no match
+	})
+
+	if _, err := client.GetUser("ghost"); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("expected ErrUserNotFound, got %v", err)
 	}
 }
 
@@ -478,6 +545,52 @@ func TestGitHubListCommits_Error(t *testing.T) {
 	})
 	if _, err := client.ListCommits("acme", "ghost", "main", 5); err != ErrNotFound {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGitHubGetPendingInvite(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/acme/widgets/invitations" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"invitee": map[string]string{"login": "bob"}},
+		})
+	})
+
+	has, err := client.GetPendingInvite("acme", "widgets", "bob")
+	if err != nil {
+		t.Fatalf("GetPendingInvite: %v", err)
+	}
+	if !has {
+		t.Error("expected bob to have a pending invite")
+	}
+
+	has, err = client.GetPendingInvite("acme", "widgets", "carol")
+	if err != nil {
+		t.Fatalf("GetPendingInvite: %v", err)
+	}
+	if has {
+		t.Error("expected carol (not in the invitations list) to have no pending invite")
+	}
+}
+
+func TestGitHubGetPendingInvite_Error(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	if _, err := client.GetPendingInvite("acme", "ghost", "bob"); err != ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGitLabGetPendingInvite_AlwaysFalse(t *testing.T) {
+	client := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("GetPendingInvite should never make a request on GitLab")
+	})
+	has, err := client.GetPendingInvite("acme", "widgets", "bob")
+	if err != nil || has {
+		t.Fatalf("expected (false, nil), got (%v, %v)", has, err)
 	}
 }
 

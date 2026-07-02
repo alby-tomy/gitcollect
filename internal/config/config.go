@@ -86,12 +86,17 @@ func EnsureDir(dir string) error {
 }
 
 // Config holds gitcollect's per-host authentication tokens, plus the
-// username each token resolved to the last time it was verified (cached
+// identity each token resolved to the last time it was verified (cached
 // during "gitcollect auth" so commands like "list" can reason about
-// ownership/membership without a network call).
+// ownership/membership without a network call). Users caches the login
+// (for display); UserIDs caches the platform ID (for the ID-based
+// ownership/membership comparisons collection.Collection.IsOwner/IsMember
+// expect) — the same login/ID split as collection.Collection's own
+// Owner/Members + Logins.
 type Config struct {
-	Tokens map[string]string `yaml:"tokens"`
-	Users  map[string]string `yaml:"users"`
+	Tokens  map[string]string `yaml:"tokens"`
+	Users   map[string]string `yaml:"users"`
+	UserIDs map[string]string `yaml:"user_ids"`
 }
 
 // Load reads ~/.gitcollect/config. A missing file is not an error: it
@@ -105,7 +110,7 @@ func Load() (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Config{Tokens: map[string]string{}, Users: map[string]string{}}, nil
+			return &Config{Tokens: map[string]string{}, Users: map[string]string{}, UserIDs: map[string]string{}}, nil
 		}
 		return nil, fmt.Errorf("could not read config: %w", err)
 	}
@@ -119,6 +124,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.Users == nil {
 		cfg.Users = map[string]string{}
+	}
+	if cfg.UserIDs == nil {
+		cfg.UserIDs = map[string]string{}
 	}
 	return &cfg, nil
 }
@@ -211,6 +219,32 @@ func LoadUser(host string) (string, error) {
 		return "", err
 	}
 	return cfg.Users[host], nil
+}
+
+// SaveUserID caches the platform ID a host's token resolved to, alongside
+// the login SaveUser already caches — call both right after a token is
+// verified (e.g. during "auth"), from the same GetAuthenticatedUser
+// response, so this never costs an extra network call.
+func SaveUserID(host, id string) error {
+	cfg, err := Load()
+	if err != nil {
+		return err
+	}
+	cfg.UserIDs[host] = id
+	return cfg.save()
+}
+
+// LoadUserID returns the cached platform ID for host, or "" if none is
+// cached — either no token has ever been verified for that host, or the
+// cache predates this field (an existing ~/.gitcollect/config from before
+// the ID migration has Users entries but no UserIDs entries yet; it gets
+// one the next time "gitcollect auth" runs for that host).
+func LoadUserID(host string) (string, error) {
+	cfg, err := Load()
+	if err != nil {
+		return "", err
+	}
+	return cfg.UserIDs[host], nil
 }
 
 // Hosts returns every host with a stored token.

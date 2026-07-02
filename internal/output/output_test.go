@@ -203,3 +203,31 @@ func TestConfirmWord(t *testing.T) {
 		t.Error("expected ConfirmWord to reject a non-matching word")
 	}
 }
+
+func TestStaleWarning(t *testing.T) {
+	out := captureStderr(t, func() {
+		StaleWarning("cybersecurity", 45)
+	})
+	if !strings.Contains(out, "⚠") || !strings.Contains(out, "45 days ago") || !strings.Contains(out, "cybersecurity") {
+		t.Errorf("StaleWarning output = %q, want it to mention both the collection name and the day count", out)
+	}
+}
+
+func TestInviteWarning(t *testing.T) {
+	out := captureStderr(t, func() {
+		InviteWarning("bob", "alice", "https://github.com/notifications", "")
+	})
+	if !strings.Contains(out, "bob") || !strings.Contains(out, "alice") || !strings.Contains(out, "https://github.com/notifications") {
+		t.Errorf("InviteWarning output = %q", out)
+	}
+	if strings.Contains(out, "Then retry") {
+		t.Errorf("expected no retry line when retryCmd is empty, got %q", out)
+	}
+
+	out = captureStderr(t, func() {
+		InviteWarning("bob", "alice", "https://github.com/notifications", "gitcollect clone cybersecurity")
+	})
+	if !strings.Contains(out, "Then retry: gitcollect clone cybersecurity") {
+		t.Errorf("expected a retry line when retryCmd is set, got %q", out)
+	}
+}

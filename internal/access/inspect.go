@@ -8,34 +8,24 @@ type RepoAccessDetail struct {
 	RepoName  string
 	CanAccess bool
 	Reason    string
+	FixCmd    string
 }
 
-// decide is the single place that resolves whether username can reach
-// repoName, used by every function in this file. col.CanAccessRepo
-// deliberately has no owner bypass of its own (PROMPT.md's documented
-// decision table treats it as a pure member rule) — callers that need the
-// owner to always pass, the way the platform itself always would, apply
-// that bypass on top, same as enforce.go's CheckRepoAccess/FilterAccessible
-// already do. Without it, col.CanAccessRepo(owner, ...) returns false
-// whenever the owner isn't separately listed as a member, while
-// col.WhyCanAccess still answers "owner" — a contradictory true/false-vs-
-// reason pairing that used to leak into inspect's output before this fix.
-func decide(col *collection.Collection, username, repoName string) (bool, string) {
-	if col.Visibility == collection.VisibilityPublic {
-		return true, "open to all members"
-	}
-	if username == col.Owner {
-		return true, "owner"
-	}
-	return col.CanAccessRepo(username, repoName), col.WhyCanAccess(username, repoName)
-}
-
-// UserAccessMap returns the access detail for every repo for username.
-func UserAccessMap(col *collection.Collection, username string) []RepoAccessDetail {
+// UserAccessMap returns the access detail for every repo for the user
+// identified by id. login is that user's current username, needed only to
+// build FixCmd's suggested commands (see collection.Collection.FixCmd's
+// doc comment for why login can't be derived from col.Logins[id] here —
+// id is frequently someone who isn't a member of col at all, the most
+// common case needing a fix in the first place).
+func UserAccessMap(col *collection.Collection, id, login string) []RepoAccessDetail {
 	details := make([]RepoAccessDetail, 0, len(col.Repos))
 	for _, r := range col.Repos {
-		can, reason := decide(col, username, r.Name)
-		details = append(details, RepoAccessDetail{RepoName: r.Name, CanAccess: can, Reason: reason})
+		details = append(details, RepoAccessDetail{
+			RepoName:  r.Name,
+			CanAccess: col.CanAccessRepo(id, r.Name),
+			Reason:    col.WhyCanAccess(id, r.Name),
+			FixCmd:    col.FixCmd(id, login, r.Name),
+		})
 	}
 	return details
 }
@@ -43,24 +33,31 @@ func UserAccessMap(col *collection.Collection, username string) []RepoAccessDeta
 // MemberAccessDetail is one row of a per-repo access report: a member and
 // whether/why they can reach the repo.
 type MemberAccessDetail struct {
-	Username  string
+	Username  string // the member's current cached login (col.Logins[id]), for display
 	CanAccess bool
 	Reason    string
+	FixCmd    string
 }
 
 // RepoAccessMap returns the access detail for every member for repoName.
 func RepoAccessMap(col *collection.Collection, repoName string) []MemberAccessDetail {
 	details := make([]MemberAccessDetail, 0, len(col.Members))
-	for _, m := range col.Members {
-		can, reason := decide(col, m, repoName)
-		details = append(details, MemberAccessDetail{Username: m, CanAccess: can, Reason: reason})
+	for _, id := range col.Members {
+		login := col.Logins[id]
+		details = append(details, MemberAccessDetail{
+			Username:  login,
+			CanAccess: col.CanAccessRepo(id, repoName),
+			Reason:    col.WhyCanAccess(id, repoName),
+			FixCmd:    col.FixCmd(id, login, repoName),
+		})
 	}
 	return details
 }
 
 // AccessMatrix is a grid of every member x every repo for display as a
 // table: Grid[i][j] is whether Members[i] can access Repos[j], and
-// Reasons[i][j] explains why or why not.
+// Reasons[i][j] explains why or why not. Members holds each member's
+// current cached login (for display) — never their platform ID.
 type AccessMatrix struct {
 	Members []string
 	Repos   []string
@@ -75,18 +72,21 @@ func FullMatrix(col *collection.Collection) AccessMatrix {
 		repoNames[i] = r.Name
 	}
 
+	logins := make([]string, len(col.Members))
 	grid := make([][]bool, len(col.Members))
 	reasons := make([][]string, len(col.Members))
-	for i, m := range col.Members {
+	for i, id := range col.Members {
+		logins[i] = col.Logins[id]
 		grid[i] = make([]bool, len(repoNames))
 		reasons[i] = make([]string, len(repoNames))
 		for j, repoName := range repoNames {
-			grid[i][j], reasons[i][j] = decide(col, m, repoName)
+			grid[i][j] = col.CanAccessRepo(id, repoName)
+			reasons[i][j] = col.WhyCanAccess(id, repoName)
 		}
 	}
 
 	return AccessMatrix{
-		Members: append([]string{}, col.Members...),
+		Members: logins,
 		Repos:   repoNames,
 		Grid:    grid,
 		Reasons: reasons,
