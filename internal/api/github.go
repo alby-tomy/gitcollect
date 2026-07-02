@@ -306,6 +306,171 @@ func (c *githubClient) CheckCollaborator(owner, repo, username string) (bool, er
 	}
 }
 
+// retryDo is a thin wrapper around c.httpClient.Do. The context timeout is
+// already on the request; no retry logic exists in this codebase.
+func (c *githubClient) retryDo(r *http.Request) (*http.Response, error) {
+	return c.httpClient.Do(r)
+}
+
+// paginate calls startURL repeatedly, following Link: rel="next" headers,
+// until all pages are fetched. Calls fn with each page's raw response body.
+func (c *githubClient) paginate(startURL string, fn func([]byte) error) error {
+	pageURL := startURL
+	for pageURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
+		if err != nil {
+			cancel()
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+		resp, err := c.retryDo(req)
+		if err != nil {
+			cancel()
+			return err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		cancel()
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return classifyStatus(resp.StatusCode)
+		}
+		if err := fn(body); err != nil {
+			return err
+		}
+		pageURL = nextPageURL(resp.Header.Get("Link"))
+	}
+	return nil
+}
+
+// nextPageURL parses GitHub's Link header and returns the "next" URL.
+// Returns "" when there is no next page.
+// Link header format:
+//
+//	<https://api.github.com/...?page=2>; rel="next", <...>; rel="last"
+func nextPageURL(link string) string {
+	for _, part := range strings.Split(link, ",") {
+		part = strings.TrimSpace(part)
+		if strings.Contains(part, `rel="next"`) {
+			parts := strings.SplitN(part, ";", 2)
+			if len(parts) > 0 {
+				return strings.Trim(strings.TrimSpace(parts[0]), "<>")
+			}
+		}
+	}
+	return ""
+}
+
+func (c *githubClient) ListOrgTeams(org string) ([]TeamInfo, error) {
+	startURL := fmt.Sprintf("%s/orgs/%s/teams?per_page=100", githubBaseURL, url.PathEscape(org))
+	var teams []TeamInfo
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			ID          int64  `json:"id"`
+			Name        string `json:"name"`
+			Slug        string `json:"slug"`
+			Description string `json:"description"`
+			Privacy     string `json:"privacy"`
+			Parent      *struct {
+				Slug string `json:"slug"`
+			} `json:"parent"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, t := range page {
+			ti := TeamInfo{
+				ID:          t.ID,
+				Name:        t.Name,
+				Slug:        t.Slug,
+				Description: t.Description,
+				Privacy:     t.Privacy,
+			}
+			if t.Parent != nil {
+				ti.ParentSlug = t.Parent.Slug
+			}
+			teams = append(teams, ti)
+		}
+		return nil
+	})
+	return teams, err
+}
+
+func (c *githubClient) ListTeamMembers(org, teamSlug, role string) ([]UserInfo, error) {
+	startURL := fmt.Sprintf("%s/orgs/%s/teams/%s/members?per_page=100",
+		githubBaseURL, url.PathEscape(org), url.PathEscape(teamSlug))
+	if role != "" {
+		startURL += "&role=" + url.QueryEscape(role)
+	}
+	var members []UserInfo
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			ID    int64  `json:"id"`
+			Login string `json:"login"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, m := range page {
+			members = append(members, UserInfo{
+				ID:    strconv.FormatInt(m.ID, 10),
+				Login: m.Login,
+			})
+		}
+		return nil
+	})
+	return members, err
+}
+
+func (c *githubClient) ListTeamRepos(org, teamSlug string) ([]RepoInfo, error) {
+	startURL := fmt.Sprintf("%s/orgs/%s/teams/%s/repos?per_page=100",
+		githubBaseURL, url.PathEscape(org), url.PathEscape(teamSlug))
+	var repos []RepoInfo
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			Name     string `json:"name"`
+			CloneURL string `json:"clone_url"`
+			Private  bool   `json:"private"`
+			Archived bool   `json:"archived"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, r := range page {
+			repos = append(repos, RepoInfo{
+				Name:     r.Name,
+				CloneURL: r.CloneURL,
+				Private:  r.Private,
+				Archived: r.Archived,
+			})
+		}
+		return nil
+	})
+	return repos, err
+}
+
+func (c *githubClient) GetTokenScopes() ([]string, error) {
+	resp, err := c.do(http.MethodGet, "/user", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+	scopeHeader := resp.Header.Get("X-OAuth-Scopes")
+	if scopeHeader == "" {
+		return []string{}, nil
+	}
+	var scopes []string
+	for _, s := range strings.Split(scopeHeader, ",") {
+		scopes = append(scopes, strings.TrimSpace(s))
+	}
+	return scopes, nil
+}
+
 // GetPendingInvite checks GitHub's list of not-yet-accepted repository
 // invitations for owner/repo and reports whether username is among them.
 func (c *githubClient) GetPendingInvite(owner, repo, username string) (bool, error) {
