@@ -98,6 +98,9 @@ func (m *rootMock) GetPendingInvite(owner, repo, username string) (bool, error) 
 func (m *rootMock) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
 	return nil, nil
 }
+func (m *rootMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
+	return api.RepoInfo{Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git", Private: private}, nil
+}
 func (m *rootMock) Host() string { return "github.com" }
 
 // resetCallerCache clears the package-level identity cache before a test and

@@ -119,6 +119,11 @@ type Collection struct {
 	// the legacy username string. Resolve to a login via Logins[Owner].
 	Owner      string     `yaml:"owner"`
 	Visibility Visibility `yaml:"visibility"`
+	// GroupAdminsEnabled controls whether the organisation tier is active.
+	// When false (default), only the owner can mutate groups. When true,
+	// group admins listed in GroupAdmins can manage their own group's
+	// membership independently.
+	GroupAdminsEnabled bool `yaml:"group_admins_enabled,omitempty"`
 	// Members holds each member's platform ID once Version is
 	// CurrentVersion (legacy usernames on a "1" file). Same Logins[id]
 	// resolution rule as Owner.
@@ -126,7 +131,10 @@ type Collection struct {
 	// Groups maps a group name to the platform IDs of its members (legacy
 	// usernames on a "1" file) — same ID/login split as Members.
 	Groups map[string][]string `yaml:"groups"`
-	Repos  []RepoAccess        `yaml:"repos"`
+	// GroupAdmins maps group name → list of member platform IDs who are
+	// admins of that group. Only populated when GroupAdminsEnabled is true.
+	GroupAdmins map[string][]string `yaml:"group_admins,omitempty"`
+	Repos       []RepoAccess        `yaml:"repos"`
 	// Logins caches each known ID's current login: the one place
 	// gitcollect resolves an ID back to something a human can read or an
 	// API call can use as a path component. Populated whenever a member
@@ -286,6 +294,14 @@ func (c *Collection) Validate() error {
 		for _, u := range users {
 			if !members[u] {
 				return fmt.Errorf("group %q references %q, who is not a member", group, u)
+			}
+		}
+	}
+
+	for group, admins := range c.GroupAdmins {
+		for _, id := range admins {
+			if !members[id] {
+				return fmt.Errorf("group admin %q in group %q is not a collection member", id, group)
 			}
 		}
 	}

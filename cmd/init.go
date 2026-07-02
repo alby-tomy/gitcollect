@@ -90,6 +90,27 @@ func runInit(cmd *cobra.Command, args []string) error {
 	})
 
 	output.Success("Created collection %q (%s) on %s", name, visibility, initHost)
-	output.Suggestion(fmt.Sprintf("gitcollect add %s <repo>", name))
+
+	if output.Confirm("Enable group admin support for organisation-scale teams?") {
+		col.GroupAdminsEnabled = true
+		if saveErr := col.Save(); saveErr != nil {
+			output.Warn("Could not enable group admin support: %v", saveErr)
+			output.Suggestion(fmt.Sprintf("gitcollect scale %s organisation", name))
+		} else {
+			recordAudit(audit.AuditEntry{
+				Collection: name,
+				Actor:      owner.Login,
+				Action:     "scale.organisation",
+				Target:     name,
+				Detail:     "Group admin support enabled at init",
+				Result:     "ok",
+			})
+			output.Success("Group admin support enabled")
+			output.Dim("  Add group admins after creating groups:")
+			output.Suggestion(fmt.Sprintf("gitcollect group admin add %s <group> <username>", name))
+		}
+	} else {
+		output.Suggestion(fmt.Sprintf("gitcollect add %s <repo>", name))
+	}
 	return nil
 }

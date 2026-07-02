@@ -277,6 +277,56 @@ func (c *gitlabClient) ListCommits(owner, repo, branch string, limit int) ([]Com
 	return commits, nil
 }
 
+// CreateRepo creates a new GitLab project under namespace_path (owner).
+// GitLab uses a single POST /projects endpoint for both personal and group
+// namespaces — namespace_path distinguishes them.
+func (c *gitlabClient) CreateRepo(owner, name string, private bool, description string) (RepoInfo, error) {
+	visibility := "private"
+	if !private {
+		visibility = "public"
+	}
+
+	body := map[string]any{
+		"name":                   name,
+		"path":                   name,
+		"namespace_path":         owner,
+		"visibility":             visibility,
+		"description":            description,
+		"initialize_with_readme": false,
+	}
+
+	resp, err := c.do(http.MethodPost, "/projects", body)
+	if err != nil {
+		return RepoInfo{}, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusCreated:
+		// success
+	case http.StatusConflict:
+		return RepoInfo{}, ErrNameConflict
+	case http.StatusForbidden, http.StatusNotFound:
+		return RepoInfo{}, ErrForbidden
+	default:
+		return RepoInfo{}, classifyStatus(resp.StatusCode)
+	}
+
+	var out struct {
+		Name          string `json:"name"`
+		HTTPURLToRepo string `json:"http_url_to_repo"`
+		Visibility    string `json:"visibility"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return RepoInfo{}, fmt.Errorf("parse create repo response: %w", err)
+	}
+	return RepoInfo{
+		Name:     out.Name,
+		CloneURL: out.HTTPURLToRepo,
+		Private:  out.Visibility == "private",
+	}, nil
+}
+
 func (c *gitlabClient) CheckCollaborator(owner, repo, username string) (bool, error) {
 	userID, err := c.lookupUserID(username)
 	if err != nil {

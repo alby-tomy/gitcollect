@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>gitcollect — Group your repos, clone with intent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+        rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --ink: #0A0E14;
+            --ink2: #111720;
+            --ink3: #1A2230;
+            --wire: #1E2A3A;
+            --wire2: #2A3A50;
+            --dim: #4A5A70;
+            --muted: #6A7A90;
+            --body: #B8C4D4;
+            --head: #E8EEF8;
+            --lime: #C8FF57;
+            --lime2: #A8E040;
+            --mono: 'JetBrains Mono', monospace;
+            --sans: 'Space Grotesk', system-ui, sans-serif;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: var(--ink);
+            color: var(--body);
+            font-family: var(--sans);
+            font-size: 16px;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── UTILITY ── */
+        .container {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 0 40px;
+        }
+
+        .mono {
+            font-family: var(--mono);
+        }
+
+        /* ── NAV ── */
+        nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10, 14, 20, 0.92);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--wire);
+            padding: 0;
+        }
+
+        .nav-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 0 40px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            font-family: var(--mono);
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--lime);
+            text-decoration: none;
+            letter-spacing: -0.02em;
+        }
+
+        .nav-logo span {
+            color: var(--muted);
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 32px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--muted);
+            text-decoration: none;
+            letter-spacing: 0.02em;
+            transition: color 0.15s;
+        }
+
+        .nav-links a:hover {
+            color: var(--head);
+        }
+
+        .nav-cta {
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 600;
+            padding: 7px 16px;
+            background: var(--lime);
+            color: var(--ink);
+            border-radius: 4px;
+            text-decoration: none;
+            transition: background 0.15s;
+        }
+
+        .nav-cta:hover {
+            background: var(--lime2);
+        }
+
+        /* ── HERO ── */
+        .hero {
+            padding: 100px 0 80px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -200px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(ellipse, rgba(200, 255, 87, 0.06) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero-eyebrow {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--lime);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .hero-eyebrow::before {
+            content: '';
+            width: 20px;
+            height: 1px;
+            background: var(--lime);
+        }
+
+        .hero h1 {
+            font-size: clamp(36px, 5.5vw, 64px);
+            font-weight: 700;
+            color: var(--head);
+            line-height: 1.1;
+            letter-spacing: -0.03em;
+            max-width: 680px;
+            margin-bottom: 20px;
+        }
+
+        .hero h1 em {
+            font-style: normal;
+            color: var(--lime);
+        }
+
+        .hero-sub {
+            font-size: 17px;
+            color: var(--muted);
+            max-width: 480px;
+            line-height: 1.7;
+            margin-bottom: 36px;
+            font-weight: 400;
+        }
+
+        .hero-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 64px;
+        }
+
+        .btn-primary {
+            font-family: var(--mono);
+            font-size: 13px;
+            font-weight: 600;
+            padding: 12px 24px;
+            background: var(--lime);
+            color: var(--ink);
+            border-radius: 4px;
+            text-decoration: none;
+            transition: background 0.15s, transform 0.1s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary:hover {
+            background: var(--lime2);
+            transform: translateY(-1px);
+        }
+
+        .btn-ghost {
+            font-family: var(--mono);
+            font-size: 13px;
+            font-weight: 500;
+            padding: 12px 24px;
+            border: 1px solid var(--wire2);
+            color: var(--body);
+            border-radius: 4px;
+            text-decoration: none;
+            transition: border-color 0.15s, color 0.15s;
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--muted);
+            color: var(--head);
+        }
+
+        /* ── TERMINAL ── */
+        .terminal-wrap {
+            background: var(--ink2);
+            border: 1px solid var(--wire);
+            border-radius: 10px;
+            overflow: hidden;
+            max-width: 680px;
+        }
+
+        .terminal-bar {
+            background: var(--ink3);
+            border-bottom: 1px solid var(--wire);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .term-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .term-dot.r {
+            background: #FF5F57;
+        }
+
+        .term-dot.y {
+            background: #FEBC2E;
+        }
+
+        .term-dot.g {
+            background: #28C840;
+        }
+
+        .terminal-title {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--dim);
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .terminal-body {
+            padding: 20px 24px;
+            font-family: var(--mono);
+            font-size: 13px;
+            line-height: 1.8;
+            min-height: 280px;
+        }
+
+        .t-prompt {
+            color: var(--lime);
+        }
+
+        .t-cmd {
+            color: var(--head);
+        }
+
+        .t-arg {
+            color: #7DBBE6;
+        }
+
+        .t-flag {
+            color: #C792EA;
+        }
+
+        .t-ok {
+            color: var(--lime);
+        }
+
+        .t-err {
+            color: #FF6B6B;
+        }
+
+        .t-dim {
+            color: var(--dim);
+        }
+
+        .t-time {
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .t-info {
+            color: #7DBBE6;
+        }
+
+        #term-output {
+            display: block;
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 7px;
+            height: 13px;
+            background: var(--lime);
+            vertical-align: middle;
+            animation: blink 1s step-end infinite;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+
+        /* ── STATS BAR ── */
+        .stats-bar {
+            border-top: 1px solid var(--wire);
+            border-bottom: 1px solid var(--wire);
+            padding: 28px 0;
+            margin: 80px 0;
+        }
+
+        .stats-inner {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0;
+        }
+
+        .stat-item {
+            padding: 0 32px;
+            border-right: 1px solid var(--wire);
+        }
+
+        .stat-item:first-child {
+            padding-left: 0;
+        }
+
+        .stat-item:last-child {
+            border-right: none;
+        }
+
+        .stat-num {
+            font-family: var(--mono);
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--head);
+            letter-spacing: -0.04em;
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+
+        .stat-num span {
+            color: var(--lime);
+        }
+
+        .stat-lbl {
+            font-size: 12px;
+            color: var(--muted);
+            font-weight: 400;
+        }
+
+        /* ── SECTION LABELS ── */
+        .section {
+            padding: 80px 0;
+        }
+
+        .section-label {
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--lime);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-label::after {
+            content: '';
+            flex: 1;
+            max-width: 40px;
+            height: 1px;
+            background: var(--lime);
+            opacity: 0.4;
+        }
+
+        .section-title {
+            font-size: clamp(24px, 3vw, 36px);
+            font-weight: 700;
+            color: var(--head);
+            letter-spacing: -0.025em;
+            line-height: 1.2;
+            margin-bottom: 16px;
+        }
+
+        .section-sub {
+            font-size: 15px;
+            color: var(--muted);
+            max-width: 480px;
+            margin-bottom: 48px;
+            line-height: 1.7;
+        }
+
+        /* ── PROBLEM SECTION ── */
+        .problem-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1px;
+            background: var(--wire);
+            border: 1px solid var(--wire);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .problem-cell {
+            background: var(--ink2);
+            padding: 28px 32px;
+        }
+
+        .problem-cell h3 {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin-bottom: 14px;
+        }
+
+        .problem-cell.before h3 {
+            color: #FF6B6B;
+        }
+
+        .problem-cell.after h3 {
+            color: var(--lime);
+        }
+
+        .problem-cell ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .problem-cell li {
+            font-family: var(--mono);
+            font-size: 12px;
+            line-height: 1.5;
+            display: flex;
+            gap: 10px;
+            color: var(--body);
+        }
+
+        .problem-cell.before li::before {
+            content: '✗';
+            color: #FF6B6B;
+            flex-shrink: 0;
+        }
+
+        .problem-cell.after li::before {
+            content: '✓';
+            color: var(--lime);
+            flex-shrink: 0;
+        }
+
+        /* ── SETUP SECTION ── */
+        .setup-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            position: relative;
+        }
+
+        .setup-steps::before {
+            content: '';
+            position: absolute;
+            left: 19px;
+            top: 38px;
+            bottom: 38px;
+            width: 1px;
+            background: var(--wire);
+        }
+
+        .setup-step {
+            display: flex;
+            gap: 24px;
+            position: relative;
+        }
+
+        .step-num {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: var(--ink2);
+            border: 1px solid var(--wire2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--mono);
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--lime);
+            flex-shrink: 0;
+            position: relative;
+            z-index: 1;
+        }
+
+        .step-body {
+            padding-top: 8px;
+            padding-bottom: 36px;
+            flex: 1;
+        }
+
+        .step-body h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--head);
+            margin-bottom: 6px;
+            letter-spacing: -0.01em;
+        }
+
+        .step-body p {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 14px;
+            line-height: 1.6;
+        }
+
+        /* ── CODE BLOCK ── */
+        .code-block {
+            background: var(--ink2);
+            border: 1px solid var(--wire);
+            border-radius: 6px;
+            padding: 14px 18px;
+            font-family: var(--mono);
+            font-size: 12.5px;
+            line-height: 1.7;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .code-block .comment {
+            color: var(--dim);
+            font-style: italic;
+        }
+
+        .code-block .prompt {
+            color: var(--lime);
+            user-select: none;
+        }
+
+        .code-block .out {
+            color: var(--muted);
+        }
+
+        .code-block .ok {
+            color: var(--lime);
+        }
+
+        .code-block .flag {
+            color: #C792EA;
+        }
+
+        .code-block .str {
+            color: #7DBBE6;
+        }
+
+        .code-tag {
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--dim);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        /* ── COMMANDS SECTION ── */
+        .cmd-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2px;
+            background: var(--wire);
+            border: 1px solid var(--wire);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 48px;
+        }
+
+        .cmd-group {
+            background: var(--ink2);
+            padding: 24px 28px;
+        }
+
+        .cmd-group-title {
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--lime);
+            margin-bottom: 16px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--wire);
+        }
+
+        .cmd-row {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .cmd-item {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .cmd-item code {
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--head);
+            display: block;
+        }
+
+        .cmd-item code .arg {
+            color: #7DBBE6;
+        }
+
+        .cmd-item code .flag {
+            color: #C792EA;
+        }
+
+        .cmd-item span {
+            font-size: 11px;
+            color: var(--dim);
+        }
+
+        /* ── PILLARS ── */
+        .pillars {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1px;
+            background: var(--wire);
+            border: 1px solid var(--wire);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .pillar {
+            background: var(--ink2);
+            padding: 28px 28px 32px;
+        }
+
+        .pillar-icon {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--lime);
+            margin-bottom: 14px;
+            padding: 5px 10px;
+            background: rgba(200, 255, 87, 0.06);
+            border: 1px solid rgba(200, 255, 87, 0.15);
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        .pillar h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--head);
+            margin-bottom: 10px;
+            letter-spacing: -0.01em;
+        }
+
+        .pillar p {
+            font-size: 12px;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        /* ── YAML SPEC ── */
+        .yaml-demo {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            align-items: start;
+        }
+
+        .yaml-annotated {
+            position: relative;
+        }
+
+        /* ── INSTALL SECTION ── */
+        .install-tabs {
+            display: flex;
+            gap: 2px;
+            margin-bottom: 0;
+            background: var(--wire);
+            border: 1px solid var(--wire);
+            border-bottom: none;
+            border-radius: 6px 6px 0 0;
+            padding: 8px 8px 0;
+        }
+
+        .tab-btn {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 7px 16px;
+            border-radius: 4px 4px 0 0;
+            background: transparent;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            transition: color 0.15s;
+            letter-spacing: 0.04em;
+        }
+
+        .tab-btn:hover {
+            color: var(--body);
+        }
+
+        .tab-btn.active {
+            background: var(--ink2);
+            color: var(--lime);
+        }
+
+        .tab-panel {
+            display: none;
+            background: var(--ink2);
+            border: 1px solid var(--wire);
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            padding: 18px 20px;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* ── FOOTER ── */
+        footer {
+            border-top: 1px solid var(--wire);
+            padding: 40px 0;
+            margin-top: 40px;
+        }
+
+        .footer-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 0 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .footer-logo {
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--dim);
+        }
+
+        .footer-logo span {
+            color: var(--lime);
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 24px;
+            list-style: none;
+        }
+
+        .footer-links a {
+            font-size: 12px;
+            color: var(--dim);
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+
+        .footer-links a:hover {
+            color: var(--body);
+        }
+
+        /* ── RESPONSIVE ── */
+        @media (max-width: 768px) {
+            .container {
+                padding: 0 24px;
+            }
+
+            .nav-inner {
+                padding: 0 24px;
+            }
+
+            .nav-links li:not(:last-child) {
+                display: none;
+            }
+
+            .stats-inner {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .stat-item {
+                padding: 16px;
+                border-right: none;
+                border-bottom: 1px solid var(--wire);
+            }
+
+            .problem-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .cmd-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .pillars {
+                grid-template-columns: 1fr;
+            }
+
+            .yaml-demo {
+                grid-template-columns: 1fr;
+            }
+
+            .footer-inner {
+                flex-direction: column;
+                gap: 20px;
+            }
+
+            .hero {
+                padding: 64px 0 48px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .cursor {
+                animation: none;
+                opacity: 1;
+            }
+
+            * {
+                transition: none !important;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ── NAV ── -->
+    <nav>
+        <div class="nav-inner">
+            <a href="#" class="nav-logo">git<span>collect</span></a>
+            <ul class="nav-links">
+                <li><a href="#setup">Setup</a></li>
+                <li><a href="#commands">Commands</a></li>
+                <li><a href="#design">Design</a></li>
+                <li><a href="#install">Install</a></li>
+                <li><a href="https://github.com/yourusername/gitcollect" class="nav-cta">GitHub →</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- ── HERO ── -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-eyebrow">CLI tool · Go · Open source</div>
+            <h1>Group your repos,<br>clone with <em>intent</em></h1>
+            <p class="hero-sub">Git manages individual repositories. gitcollect manages the relationships between them.
+                Define collections, clone selectively, keep everything in sync.</p>
+            <div class="hero-actions">
+                <a href="#install" class="btn-primary">↓ Install gitcollect</a>
+                <a href="#commands" class="btn-ghost">View commands</a>
+            </div>
+
+            <div class="terminal-wrap">
+                <div class="terminal-bar">
+                    <div class="term-dot r"></div>
+                    <div class="term-dot y"></div>
+                    <div class="term-dot g"></div>
+                    <span class="terminal-title">zsh — ~</span>
+                </div>
+                <div class="terminal-body">
+                    <pre id="term-output"></pre><span class="cursor" id="cursor"></span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── STATS ── -->
+    <div class="stats-bar">
+        <div class="container">
+            <div class="stats-inner">
+                <div class="stat-item">
+                    <div class="stat-num"><span>4</span>x</div>
+                    <div class="stat-lbl">faster than cloning one by one</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num">0</div>
+                    <div class="stat-lbl">runtime dependencies to install</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num"><span>3</span></div>
+                    <div class="stat-lbl">platforms — Linux, macOS, Windows</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num">MIT</div>
+                    <div class="stat-lbl">licence — free to use forever</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── PROBLEM ── -->
+    <section class="section" id="problem">
+        <div class="container">
+            <div class="section-label">The problem</div>
+            <h2 class="section-title">Git is flat. Your work isn't.</h2>
+            <p class="section-sub">Repos belong to domains. Git doesn't know that, and it shows every time you set up a
+                new machine.</p>
+
+            <div class="problem-grid">
+                <div class="problem-cell before">
+                    <h3>Without gitcollect</h3>
+                    <ul>
+                        <li>Clone 12 security repos one by one</li>
+                        <li>Forget which repos belong to a project</li>
+                        <li>Run git pull in each folder manually</li>
+                        <li>Scroll through 40 repos to find the right one</li>
+                        <li>Re-figure out the setup on every new machine</li>
+                    </ul>
+                </div>
+                <div class="problem-cell after">
+                    <h3>With gitcollect</h3>
+                    <ul>
+                        <li><code>gitcollect clone cybersecurity</code></li>
+                        <li>Collections make intent explicit and permanent</li>
+                        <li><code>gitcollect pull cybersecurity</code> — all repos</li>
+                        <li><code>gitcollect list</code> shows every domain at once</li>
+                        <li>Share collection.yaml in your dotfiles repo</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── SETUP ── -->
+    <section class="section" id="setup">
+        <div class="container">
+            <div class="section-label">Getting started</div>
+            <h2 class="section-title">Up and running in 3 minutes</h2>
+            <p class="section-sub">Install once, authenticate once, then define collections to match how you actually
+                think about your work.</p>
+
+            <div class="setup-steps">
+
+                <div class="setup-step">
+                    <div class="step-num">1</div>
+                    <div class="step-body">
+                        <h3>Install</h3>
+                        <p>Download the binary for your platform and put it in your PATH. No runtime required — it is a
+                            single self-contained executable.</p>
+                        <div class="install-tabs" style="margin-bottom:0">
+                            <button class="tab-btn active" onclick="switchTab(this,'mac')">macOS</button>
+                            <button class="tab-btn" onclick="switchTab(this,'linux')">Linux</button>
+                            <button class="tab-btn" onclick="switchTab(this,'brew')">Homebrew</button>
+                        </div>
+                        <div class="tab-panel active" id="tab-mac">
+                            <div class="code-block"><span class="prompt">$ </span>curl -L
+                                https://github.com/yourusername/gitcollect/releases/latest/download/gitcollect_darwin_arm64.tar.gz
+                                | tar xz
+                                <span class="prompt">$ </span>sudo mv gitcollect /usr/local/bin/
+                                <span class="prompt">$ </span>gitcollect version
+                                <span class="ok">gitcollect v1.0.0 darwin/arm64</span>
+                            </div>
+                        </div>
+                        <div class="tab-panel" id="tab-linux">
+                            <div class="code-block"><span class="prompt">$ </span>curl -L
+                                https://github.com/yourusername/gitcollect/releases/latest/download/gitcollect_linux_amd64.tar.gz
+                                | tar xz
+                                <span class="prompt">$ </span>sudo mv gitcollect /usr/local/bin/
+                                <span class="prompt">$ </span>gitcollect version
+                                <span class="ok">gitcollect v1.0.0 linux/amd64</span>
+                            </div>
+                        </div>
+                        <div class="tab-panel" id="tab-brew">
+                            <div class="code-block"><span class="prompt">$ </span>brew install
+                                yourusername/tap/gitcollect
+                                <span class="prompt">$ </span>gitcollect version
+                                <span class="ok">gitcollect v1.0.0 darwin/arm64</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setup-step">
+                    <div class="step-num">2</div>
+                    <div class="step-body">
+                        <h3>Authenticate</h3>
+                        <p>Run <code class="mono" style="font-size:13px;color:var(--head)">gitcollect auth</code> and
+                            enter a GitHub personal access token when prompted. The token input is hidden — it never
+                            appears on screen or in shell history. Your token is stored at <code class="mono"
+                                style="font-size:12px;color:var(--body)">~/.gitcollect/config</code> with permissions
+                            <code class="mono" style="font-size:12px;color:var(--body)">0600</code>.</p>
+                        <div class="code-block">
+                            <span class="prompt">$ </span>gitcollect auth
+                            <span class="out">Enter GitHub token: </span><span class="comment">(hidden)</span>
+                            <span class="ok">✓ Authenticated as yourusername</span>
+                        </div>
+                        <p style="font-size:12px;color:var(--dim);margin-top:10px">Generate a token at
+                            github.com/settings/tokens — requires <code class="mono">repo</code> scope for private
+                            repos, <code class="mono">public_repo</code> for public only.</p>
+                    </div>
+                </div>
+
+                <div class="setup-step">
+                    <div class="step-num">3</div>
+                    <div class="step-body">
+                        <h3>Create a collection</h3>
+                        <p>A collection is a named group of repos under your GitHub account or organisation. Create one
+                            with <code class="mono" style="font-size:13px;color:var(--head)">gitcollect init</code>.</p>
+                        <div class="code-block">
+                            <span class="prompt">$ </span>gitcollect init cybersecurity <span
+                                class="flag">--owner</span> <span class="str">yourusername</span> <span
+                                class="flag">--description</span> <span class="str">"Security research tools"</span>
+                            <span class="ok">✓ Created collection: cybersecurity</span>
+                            <span class="out"> Location: ~/.gitcollect/collections/cybersecurity.yaml</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setup-step">
+                    <div class="step-num">4</div>
+                    <div class="step-body">
+                        <h3>Add repositories</h3>
+                        <p>Add repos by name — gitcollect resolves the rest from the GitHub API.</p>
+                        <div class="code-block">
+                            <span class="prompt">$ </span>gitcollect add cybersecurity pen-test-tools
+                            <span class="ok">✓ Added pen-test-tools to cybersecurity</span>
+                            <span class="prompt">$ </span>gitcollect add cybersecurity vuln-scanner
+                            <span class="ok">✓ Added vuln-scanner to cybersecurity</span>
+                            <span class="prompt">$ </span>gitcollect add cybersecurity ctf-writeups
+                            <span class="ok">✓ Added ctf-writeups to cybersecurity</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setup-step">
+                    <div class="step-num">5</div>
+                    <div class="step-body">
+                        <h3>Clone your collection</h3>
+                        <p>Clone everything at once, or pick exactly what you need today.</p>
+                        <div class="code-block">
+                            <span class="comment"># Clone all repos in the collection (4 parallel by default)</span>
+                            <span class="prompt">$ </span>gitcollect clone cybersecurity
+
+                            <span class="comment"># Clone only the two repos you need right now</span>
+                            <span class="prompt">$ </span>gitcollect clone cybersecurity <span
+                                class="flag">--pick</span> <span class="str">pen-test-tools vuln-scanner</span>
+
+                            <span class="out">[1/2] Cloning pen-test-tools... <span class="ok">done</span> (1.2s)
+                                [2/2] Cloning vuln-scanner... <span class="ok">done</span> (0.8s)
+
+                                <span class="ok">✓ Cloned 2 repos in 1.5s</span></span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- ── COMMANDS ── -->
+    <section class="section" id="commands">
+        <div class="container">
+            <div class="section-label">Commands</div>
+            <h2 class="section-title">Everything you can do</h2>
+            <p class="section-sub">Every command follows the same pattern: <code class="mono"
+                    style="color:var(--head)">gitcollect &lt;command&gt; &lt;collection&gt; [options]</code></p>
+
+            <div class="cmd-grid">
+                <div class="cmd-group">
+                    <div class="cmd-group-title">Managing collections</div>
+                    <div class="cmd-row">
+                        <div class="cmd-item">
+                            <code>gitcollect init <span class="arg">&lt;name&gt;</span></code>
+                            <span>Create a new collection</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect add <span class="arg">&lt;collection&gt; &lt;repo&gt;</span></code>
+                            <span>Add a repo to a collection</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect remove <span class="arg">&lt;collection&gt; &lt;repo&gt;</span></code>
+                            <span>Remove a repo from a collection</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect list</code>
+                            <span>List all your collections</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect show <span class="arg">&lt;collection&gt;</span></code>
+                            <span>Show all repos in a collection</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cmd-group">
+                    <div class="cmd-group-title">Git operations</div>
+                    <div class="cmd-row">
+                        <div class="cmd-item">
+                            <code>gitcollect clone <span class="arg">&lt;collection&gt;</span></code>
+                            <span>Clone all repos in collection</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect clone <span class="arg">&lt;name&gt;</span> <span class="flag">--pick</span> <span class="arg">r1 r2</span></code>
+                            <span>Clone only specific repos</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect clone <span class="arg">&lt;name&gt;</span> <span class="flag">--dry-run</span></code>
+                            <span>Preview without cloning</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect pull <span class="arg">&lt;collection&gt;</span></code>
+                            <span>git pull in every repo</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect status <span class="arg">&lt;collection&gt;</span></code>
+                            <span>git status in every repo</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cmd-group">
+                    <div class="cmd-group-title">Key flags</div>
+                    <div class="cmd-row">
+                        <div class="cmd-item">
+                            <code><span class="flag">--pick</span> <span class="arg">repo1 repo2</span></code>
+                            <span>Select repos by name</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code><span class="flag">--concurrency</span> <span class="arg">N</span></code>
+                            <span>Parallel operations (default: 4)</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code><span class="flag">--dest</span> <span class="arg">&lt;dir&gt;</span></code>
+                            <span>Target directory for clone</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code><span class="flag">--dry-run</span></code>
+                            <span>Preview without executing</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code><span class="flag">--json</span></code>
+                            <span>Machine-readable output</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cmd-group">
+                    <div class="cmd-group-title">System</div>
+                    <div class="cmd-row">
+                        <div class="cmd-item">
+                            <code>gitcollect auth</code>
+                            <span>Store GitHub / GitLab token</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect version</code>
+                            <span>Print version and platform</span>
+                        </div>
+                        <div class="cmd-item">
+                            <code>gitcollect completion <span class="arg">bash|zsh|fish</span></code>
+                            <span>Generate shell completion</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="code-tag">collection.yaml — the file behind every collection</div>
+            <div class="code-block">
+                <span class="comment"># ~/.gitcollect/collections/cybersecurity.yaml</span>
+                <span style="color:#C792EA">version</span>: <span class="str">"1"</span>
+                <span style="color:#C792EA">name</span>: <span class="str">cybersecurity</span>
+                <span style="color:#C792EA">description</span>: <span class="str">"Penetration testing and security
+                    research tools"</span>
+                <span style="color:#C792EA">host</span>: <span class="str">github.com</span>
+                <span style="color:#C792EA">owner</span>: <span class="str">yourusername</span>
+                <span style="color:#C792EA">tags</span>: [<span class="str">security</span>, <span
+                    class="str">red-team</span>]
+                <span style="color:#C792EA">repos</span>:
+                - <span class="str">pen-test-tools</span>
+                - <span class="str">vuln-scanner</span>
+                - <span class="str">ctf-writeups</span>
+                - <span class="str">nmap-scripts</span>
+                <span class="out">
+                    # Edit this file directly, or use gitcollect add/remove
+                    # Commit it to your dotfiles repo to share across machines</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── DESIGN PRINCIPLES ── -->
+    <section class="section" id="design">
+        <div class="container">
+            <div class="section-label">Design principles</div>
+            <h2 class="section-title">Built to a standard, not a deadline</h2>
+            <p class="section-sub">Five properties every part of the codebase is measured against — not aspirations,
+                hard constraints.</p>
+
+            <div class="pillars">
+                <div class="pillar">
+                    <div class="pillar-icon">Efficiency</div>
+                    <h3>Concurrent by default</h3>
+                    <p>Cloning and pulling run in parallel with a configurable semaphore. A collection of 10 repos
+                        completes in the time of the slowest 4, not all 10 sequentially.</p>
+                </div>
+                <div class="pillar">
+                    <div class="pillar-icon">Security</div>
+                    <h3>Token never leaks</h3>
+                    <p>Stored at 0600 permissions. Input is always hidden. Never logged, never printed, never passed as
+                        a CLI flag that ends up in shell history.</p>
+                </div>
+                <div class="pillar">
+                    <div class="pillar-icon">Reliability</div>
+                    <h3>Atomic writes, partial success</h3>
+                    <p>Collection files are written atomically — a crash never corrupts your config. If 3 of 10 clones
+                        fail, the other 7 succeed and all failures are reported together.</p>
+                </div>
+                <div class="pillar">
+                    <div class="pillar-icon">Consistency</div>
+                    <h3>Predictable everywhere</h3>
+                    <p>Errors go to stderr, output to stdout, so pipes work. Colours disable automatically when output
+                        is not a TTY. Exit codes follow POSIX convention.</p>
+                </div>
+                <div class="pillar">
+                    <div class="pillar-icon">Usability</div>
+                    <h3>Errors guide, not block</h3>
+                    <p>Every error message tells you what happened and what to do next. Typos in repo names get a
+                        closest-match suggestion. The first-run experience is a single command.</p>
+                </div>
+                <div class="pillar">
+                    <div class="pillar-icon">Zero deps</div>
+                    <h3>Single binary</h3>
+                    <p>No Node, no Python, no runtime. Download one file and it works. Cross-compiled for Linux, macOS
+                        (Intel + Apple Silicon), and Windows from a single codebase.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── INSTALL ── -->
+    <section class="section" id="install">
+        <div class="container">
+            <div class="section-label">Installation</div>
+            <h2 class="section-title">Get the binary</h2>
+            <p class="section-sub">Pick your platform. No package manager required — download, move to PATH, done.</p>
+
+            <div style="display:flex;flex-direction:column;gap:20px;max-width:640px;">
+                <div>
+                    <div class="code-tag">macOS — Apple Silicon (M1/M2/M3)</div>
+                    <div class="code-block"><span class="prompt">$ </span>curl -L
+                        https://github.com/yourusername/gitcollect/releases/latest/download/gitcollect_darwin_arm64.tar.gz
+                        | tar xz && sudo mv gitcollect /usr/local/bin/</div>
+                </div>
+                <div>
+                    <div class="code-tag">macOS — Intel</div>
+                    <div class="code-block"><span class="prompt">$ </span>curl -L
+                        https://github.com/yourusername/gitcollect/releases/latest/download/gitcollect_darwin_amd64.tar.gz
+                        | tar xz && sudo mv gitcollect /usr/local/bin/</div>
+                </div>
+                <div>
+                    <div class="code-tag">Linux — amd64</div>
+                    <div class="code-block"><span class="prompt">$ </span>curl -L
+                        https://github.com/yourusername/gitcollect/releases/latest/download/gitcollect_linux_amd64.tar.gz
+                        | tar xz && sudo mv gitcollect /usr/local/bin/</div>
+                </div>
+                <div>
+                    <div class="code-tag">Homebrew</div>
+                    <div class="code-block"><span class="prompt">$ </span>brew install yourusername/tap/gitcollect</div>
+                </div>
+                <div>
+                    <div class="code-tag">Build from source (requires Go 1.22+)</div>
+                    <div class="code-block"><span class="prompt">$ </span>go install
+                        github.com/yourusername/gitcollect@latest</div>
+                </div>
+                <div>
+                    <div class="code-tag">Windows — download the .zip from</div>
+                    <div class="code-block"><span class="out">https://github.com/yourusername/gitcollect/releases</span>
+                    </div>
+                </div>
+            </div>
+
+            <div
+                style="margin-top:32px;padding:20px 24px;background:var(--ink2);border:1px solid var(--wire);border-radius:6px;max-width:640px;">
+                <div
+                    style="font-family:var(--mono);font-size:11px;color:var(--lime);margin-bottom:8px;font-weight:600;">
+                    VERIFY INSTALLATION</div>
+                <div class="code-block" style="margin:0"><span class="prompt">$ </span>gitcollect version
+                    <span class="ok">gitcollect v1.0.0 (linux/amd64) built 2025-01-15</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── FOOTER ── -->
+    <footer>
+        <div class="footer-inner">
+            <div class="footer-logo">git<span>collect</span> — MIT licence</div>
+            <ul class="footer-links">
+                <li><a href="https://github.com/yourusername/gitcollect">GitHub</a></li>
+                <li><a href="https://github.com/yourusername/gitcollect/releases">Releases</a></li>
+                <li><a href="https://github.com/yourusername/gitcollect/issues">Issues</a></li>
+                <li><a href="https://github.com/yourusername/gitcollect/blob/main/README.md">Docs</a></li>
+            </ul>
+        </div>
+    </footer>
+
+    <script>
+        /* ── TERMINAL ANIMATION ── */
+        const lines = [
+            { text: '$ gitcollect list', delay: 0, class: '' },
+            { text: '  cybersecurity   12 repos   github.com', delay: 600, class: 't-dim' },
+            { text: '  machine-learning  8 repos  github.com', delay: 750, class: 't-dim' },
+            { text: '  frontend-libs     6 repos  github.com', delay: 900, class: 't-dim' },
+            { text: '', delay: 1100, class: '' },
+            { text: '$ gitcollect clone cybersecurity --pick pen-test-tools vuln-scanner', delay: 1400, class: '' },
+            { text: '[1/2] Cloning pen-test-tools...   done  (1.2s)', delay: 2200, class: 't-ok' },
+            { text: '[2/2] Cloning vuln-scanner...     done  (0.8s)', delay: 2800, class: 't-ok' },
+            { text: '', delay: 3100, class: '' },
+            { text: '✓ Cloned 2 repos in 1.5s', delay: 3200, class: 't-ok' },
+            { text: '', delay: 3500, class: '' },
+            { text: '$ gitcollect pull machine-learning', delay: 3800, class: '' },
+            { text: '[1/8] Pulling model-training...   already up to date', delay: 4400, class: 't-dim' },
+            { text: '[2/8] Pulling data-pipeline...    2 commits behind, pulling...', delay: 4700, class: 't-info' },
+            { text: '[3/8] Pulling inference-api...    already up to date', delay: 5100, class: 't-dim' },
+            { text: '', delay: 5400, class: '' },
+            { text: '✓ Pulled 8 repos', delay: 5500, class: 't-ok' },
+        ];
+
+        const out = document.getElementById('term-output');
+        const cursor = document.getElementById('cursor');
+        let running = true;
+
+        function typeText(el, text, cb) {
+            let i = 0;
+            function next() {
+                if (!running) return;
+                if (i < text.length) {
+                    el.textContent += text[i++];
+                    setTimeout(next, text.startsWith('$') && i < 3 ? 80 : 28);
+                } else {
+                    cb && cb();
+                }
+            }
+            next();
+        }
+
+        function runLines(idx) {
+            if (!running || idx >= lines.length) {
+                cursor.style.display = 'none';
+                return;
+            }
+            const line = lines[idx];
+            setTimeout(() => {
+                if (!running) return;
+                const span = document.createElement('span');
+                if (line.class) span.className = line.class;
+                out.appendChild(span);
+
+                if (line.text.startsWith('$')) {
+                    typeText(span, line.text, () => {
+                        out.appendChild(document.createTextNode('\n'));
+                        runLines(idx + 1);
+                    });
+                } else {
+                    span.textContent = line.text;
+                    out.appendChild(document.createTextNode('\n'));
+                    runLines(idx + 1);
+                }
+            }, line.delay);
+        }
+
+        runLines(0);
+
+        /* ── TABS ── */
+        function switchTab(btn, id) {
+            const wrap = btn.closest('div');
+            const container = wrap.parentElement;
+            wrap.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            container.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            const panel = container.querySelector('#tab-' + id);
+            if (panel) panel.classList.add('active');
+        }
+
+        /* ── NAV ACTIVE ── */
+        const sections = document.querySelectorAll('section[id], .stats-bar');
+        const navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
+        const observer = new IntersectionObserver(entries => {
+            entries.forEach(e => {
+                if (e.isIntersecting) {
+                    const id = e.target.id;
+                    navLinks.forEach(a => {
+                        a.style.color = a.getAttribute('href') === '#' + id ? 'var(--head)' : '';
+                    });
+                }
+            });
+        }, { threshold: 0.4 });
+        sections.forEach(s => s.id && observer.observe(s));
+    </script>
+</body>
+
+</html>

@@ -231,6 +231,63 @@ func firstLine(s string) string {
 	return s
 }
 
+// CreateRepo creates a new repository under owner. If owner matches the
+// authenticated user's login, the personal repo endpoint is used
+// (POST /user/repos); otherwise the org endpoint is used
+// (POST /orgs/{owner}/repos). The "owner == me" check calls
+// GetAuthenticatedUser, whose result is memoized at the cmd layer so this
+// is at most one additional network call per invocation, and only when
+// the repo does not already exist.
+func (c *githubClient) CreateRepo(owner, name string, private bool, description string) (RepoInfo, error) {
+	me, err := c.GetAuthenticatedUser()
+	if err != nil {
+		return RepoInfo{}, fmt.Errorf("create repo: resolve authenticated user: %w", err)
+	}
+
+	endpoint := "/user/repos"
+	if owner != me.Login {
+		endpoint = fmt.Sprintf("/orgs/%s/repos", owner)
+	}
+
+	body := map[string]any{
+		"name":        name,
+		"private":     private,
+		"description": description,
+		"auto_init":   false,
+	}
+
+	resp, err := c.do(http.MethodPost, endpoint, body)
+	if err != nil {
+		return RepoInfo{}, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusCreated:
+		// success
+	case http.StatusUnprocessableEntity:
+		return RepoInfo{}, ErrNameConflict
+	case http.StatusForbidden, http.StatusNotFound:
+		return RepoInfo{}, ErrForbidden
+	default:
+		return RepoInfo{}, classifyStatus(resp.StatusCode)
+	}
+
+	var out struct {
+		Name     string `json:"name"`
+		CloneURL string `json:"clone_url"`
+		Private  bool   `json:"private"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return RepoInfo{}, fmt.Errorf("parse create repo response: %w", err)
+	}
+	return RepoInfo{
+		Name:     out.Name,
+		CloneURL: out.CloneURL,
+		Private:  out.Private,
+	}, nil
+}
+
 func (c *githubClient) CheckCollaborator(owner, repo, username string) (bool, error) {
 	path := fmt.Sprintf("/repos/%s/%s/collaborators/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(username))
 	resp, err := c.do(http.MethodGet, path, nil)
