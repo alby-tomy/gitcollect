@@ -11,7 +11,11 @@ import (
 	"github.com/alby-tomy/gitcollect/internal/output"
 )
 
-var whoamiJSON bool
+var (
+	whoamiJSON      bool
+	whoamiCheck     bool
+	whoamiNewClient = func(host, token string) api.Client { return api.NewClient(host, token) }
+)
 
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami",
@@ -22,6 +26,7 @@ var whoamiCmd = &cobra.Command{
 
 func init() {
 	whoamiCmd.Flags().BoolVar(&whoamiJSON, "json", false, "machine-readable output")
+	whoamiCmd.Flags().BoolVar(&whoamiCheck, "check", false, "exit with code 1 if any stored token is rejected by the platform")
 	rootCmd.AddCommand(whoamiCmd)
 }
 
@@ -48,7 +53,7 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("whoami: could not read token for %s: %w", host, err)
 		}
 
-		client := api.NewClient(host, token)
+		client := whoamiNewClient(host, token)
 		user, err := client.GetAuthenticatedUser()
 		if err != nil {
 			if errors.Is(err, api.ErrUnauthorized) {
@@ -75,6 +80,9 @@ func runWhoami(cmd *cobra.Command, args []string) error {
 	output.Table([]string{"HOST", "USER"}, rows)
 	if anyRejected {
 		output.Suggestion("gitcollect auth  # for any host shown above with a rejected token")
+		if whoamiCheck {
+			return fmt.Errorf("whoami: one or more stored tokens were rejected by the platform")
+		}
 	}
 	return nil
 }

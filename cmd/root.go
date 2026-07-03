@@ -136,6 +136,20 @@ func currentClient(host string) (api.Client, error) {
 	return cachedClient, nil
 }
 
+// requiresAuth verifies that a token is stored for host. Returns a
+// descriptive error with the exact command needed to fix it if no token
+// is found — callers should propagate this error directly to the user.
+func requiresAuth(host string) error {
+	_, err := config.LoadToken(host)
+	if err != nil {
+		return fmt.Errorf(
+			"not authenticated with %s\n  Run: gitcollect auth --host %s",
+			host, host,
+		)
+	}
+	return nil
+}
+
 // currentUserInfo returns the authenticated platform identity for client
 // — both login and ID — calling GetAuthenticatedUser at most once per
 // command invocation. The result is also cached to config (both forms)

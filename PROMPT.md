@@ -2358,6 +2358,55 @@ Read current README.md and docs/index.html before writing anything.
 Run ./bin/gitcollect --help to get real binary output for command ref.
 ```
 
+Session 21 — 2026-07-03 — Claude Sonnet 4.6
+────────────────────────────────────────────────────────────────────
+Completed FEATURE_IMPORT.md Phase 2 in full (README.md + docs/index.html).
+Completed:    Phase 2 Part A — README.md rewritten from scratch covering:
+                badges (Go 1.26+, platforms, license: unspecified);
+                one-line description; the problem; quick demo (import +
+                manual quickstart); ghorg comparison (honest framing);
+                installation (go install, pre-built binary per goreleaser
+                targets, build from source, Homebrew coming soon, Windows
+                note); quickstart (auth→init→add→member add→show→clone);
+                shell completion; full command reference in <details> groups
+                (authentication, collection lifecycle, repo management,
+                member management, group management, access inspection, git
+                operations, organisation import, system); organisation import
+                section (enterprise onboarding flow, dry-run, conflict
+                handling, sharing with publish/pull-config); how access
+                control works (two-person walkthrough + union access rule
+                diagram); security model (7 bullet points); architecture
+                (28 cmd files listed, folder tree with internal/ packages);
+                roadmap (fetch, brew/winget, dashboard, shared audit log,
+                activity stabilisation — gitcollect fetch kept as roadmap
+                since per-URL single fetch is still missing); contributing;
+                license (honest: no LICENSE file, all rights reserved).
+              Phase 2 Part B — docs/index.html updated:
+                - Nav: added #import-cmds and #org-import-walkthrough entries
+                - Walkthrough Step 3: replaced outdated manual YAML copy
+                  instructions with publish/pull-config as primary approach;
+                  manual file copy kept as Options B/C; removed stale
+                  "gitcollect fetch planned" note (replaced by publish flow)
+                - New section: org-import-walkthrough (4 setup steps:
+                  admin import → admin publish → employee join --clone →
+                  ongoing sync-config + re-publish)
+                - New command group: #import-cmds before #system-cmds
+                  covering import, publish, pull-config, join, sync-config
+                  with full flag tables
+                - Accuracy pass: no yourusername, no TODO/FIXME,
+                  declaration of intent preserved (1 hit),
+                  all new flag names verified (skip-existing: 2,
+                  pull-config: 6, owner-from-maintainer: 1)
+              FINAL CHECKS:
+                go build ./... clean; go test ./... all green (9 pkgs);
+                docs/index.html 1614 lines (was 1374).
+In progress:  (none)
+Blockers:     (none)
+Next session should start with: Phase 2 complete. FEATURE_IMPORT.md
+fully done. Next: create the two commits specified in FEATURE_IMPORT.md
+commit messages section, or proceed to next feature per roadmap.
+```
+
 ---
 
 ### File completion table

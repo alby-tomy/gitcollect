@@ -476,7 +476,7 @@ func TestSyncCollaborators_CheckAndRemoveFailures(t *testing.T) {
 
 	checkFail := newMockClient()
 	checkFail.failCheck = true
-	if _, _, err := col.SyncCollaborators(checkFail); err == nil {
+	if _, _, err := col.SyncCollaborators(checkFail, nil); err == nil {
 		t.Fatal("expected SyncCollaborators to surface CheckCollaborator failures")
 	}
 
@@ -487,7 +487,7 @@ func TestSyncCollaborators_CheckAndRemoveFailures(t *testing.T) {
 	col2.Members = []string{"alice"}
 	col2.Groups = map[string][]string{"red-team": {}} // alice is a member but not in red-team
 	col2.Repos = []RepoAccess{{Name: "r", Groups: []string{"red-team"}}}
-	if _, _, err := col2.SyncCollaborators(removeFail); err == nil {
+	if _, _, err := col2.SyncCollaborators(removeFail, nil); err == nil {
 		t.Fatal("expected SyncCollaborators to surface RemoveCollaborator failures")
 	}
 }

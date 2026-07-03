@@ -410,6 +410,37 @@ func (c *Collection) Save() error {
 	return nil
 }
 
+// Path returns the absolute path of the collection's manifest file on disk.
+// Empty string if the collection was constructed but never saved or loaded.
+func (c *Collection) Path() string { return c.path }
+
+// SaveAs saves the collection under newName, writing a new manifest file
+// and updating c.Name and c.path in place. The original file is left
+// unchanged — rename semantics require the caller to remove it afterward.
+// Returns ErrAlreadyExists if a collection named newName already exists.
+func (c *Collection) SaveAs(newName string) error {
+	if err := ValidateCollectionName(newName); err != nil {
+		return err
+	}
+	if ok, err := Exists(newName); err != nil {
+		return err
+	} else if ok {
+		return fmt.Errorf("%w: collection %q already exists", ErrAlreadyExists, newName)
+	}
+	newPath, err := manifestPath(newName)
+	if err != nil {
+		return err
+	}
+	origName, origPath := c.Name, c.path
+	c.Name = newName
+	c.path = newPath
+	if err := c.Save(); err != nil {
+		c.Name, c.path = origName, origPath
+		return err
+	}
+	return nil
+}
+
 // Delete removes the collection's manifest from disk.
 func (c *Collection) Delete() error {
 	if c.path == "" {

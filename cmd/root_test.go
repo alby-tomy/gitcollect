@@ -346,3 +346,30 @@ func TestLoadForOwner_CollectionNotFound_VerbPrefixed(t *testing.T) {
 		t.Errorf("expected error prefixed with verb 'delete:', got: %v", err)
 	}
 }
+
+func TestRequiresAuth_NoToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	err := requiresAuth("github.com")
+	if err == nil {
+		t.Fatal("expected error when no token stored, got nil")
+	}
+	if !strings.Contains(err.Error(), "gitcollect auth --host github.com") {
+		t.Errorf("error should contain auth hint, got: %v", err)
+	}
+}
+
+func TestRequiresAuth_TokenPresent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	if err := config.SaveToken("github.com", "tok-test"); err != nil {
+		t.Fatalf("SaveToken: %v", err)
+	}
+	if err := requiresAuth("github.com"); err != nil {
+		t.Errorf("expected nil when token stored, got: %v", err)
+	}
+}

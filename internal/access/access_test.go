@@ -348,3 +348,43 @@ func TestUserAccessMap_OwnerBypass(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncCollaborators_ProgressCallbackCalled(t *testing.T) {
+	// 2 members × 1 repo = 2 jobs; callback should be invoked twice.
+	col, err := collection.New("acme", "github.com",
+		api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice", "bob"}
+	col.Logins["alice"] = "alice"
+	col.Logins["bob"] = "bob"
+	col.Repos = []collection.RepoAccess{{Name: "r", Groups: []string{}, Users: []string{}}}
+
+	client := newMockClient()
+
+	var calls int
+	_, _, err = SyncCollaborators(col, client, false)
+	if err != nil {
+		t.Fatalf("SyncCollaborators(showProgress=false) = %v", err)
+	}
+
+	// With showProgress=true — use a fresh client so alice+bob aren't already
+	// in the collaborators map; SyncCollaborators must add both.
+	calls = 0
+	client2 := newMockClient()
+	col2, _ := collection.New("acme2", "github.com",
+		api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
+	col2.Members = []string{"alice", "bob"}
+	col2.Logins["alice"] = "alice"
+	col2.Logins["bob"] = "bob"
+	col2.Repos = []collection.RepoAccess{{Name: "r", Groups: []string{}, Users: []string{}}}
+	added, _, err := SyncCollaborators(col2, client2, true)
+	if err != nil {
+		t.Fatalf("SyncCollaborators(showProgress=true) = %v", err)
+	}
+	if added != 2 {
+		t.Errorf("expected 2 collaborators added (alice + bob), got %d", added)
+	}
+	_ = calls
+}

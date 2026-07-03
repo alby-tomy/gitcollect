@@ -152,7 +152,7 @@ func addOneRepo(col *collection.Collection, name, caller, callerID, repoName str
 
 	col.Repos = append(col.Repos, collection.RepoAccess{Name: repoName, Groups: []string{}, Users: []string{}})
 
-	added, _, syncErr := col.SyncCollaborators(client)
+	added, _, syncErr := col.SyncCollaborators(client, nil)
 	if syncErr != nil {
 		col.Repos = col.Repos[:len(col.Repos)-1]
 		recordAudit(audit.AuditEntry{
