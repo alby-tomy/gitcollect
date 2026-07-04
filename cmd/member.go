@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -25,7 +26,10 @@ var memberAddCmd = &cobra.Command{
 	RunE:  runMemberAdd,
 }
 
-var memberConfirmSelf bool
+var (
+	memberConfirmSelf  bool
+	memberRemoveDryRun bool
+)
 
 var memberRemoveCmd = &cobra.Command{
 	Use:   "remove <collection> <username>",
@@ -43,6 +47,7 @@ var memberListCmd = &cobra.Command{
 
 func init() {
 	memberRemoveCmd.Flags().BoolVar(&memberConfirmSelf, "confirm-self", false, "required to remove your own username")
+	memberRemoveCmd.Flags().BoolVar(&memberRemoveDryRun, "dry-run", false, "preview impact without removing")
 
 	memberCmd.AddCommand(memberAddCmd)
 	memberCmd.AddCommand(memberRemoveCmd)
@@ -185,6 +190,27 @@ func hasPendingInvite(col *collection.Collection, username string, granted []str
 	return false
 }
 
+// printRemovalImpact writes an impact preview for member remove, listing
+// which repos username can currently access in col.
+func printRemovalImpact(w io.Writer, col *collection.Collection, username string) {
+	id := col.IDForLogin(username)
+	if id == "" {
+		return
+	}
+	var accessible []string
+	for _, r := range col.Repos {
+		if col.CanAccessRepo(id, r.Name) {
+			accessible = append(accessible, r.Name)
+		}
+	}
+	if len(accessible) == 0 {
+		fmt.Fprintf(w, "  Removing %s will revoke no repo access (they cannot reach any repo).\n", username)
+		return
+	}
+	fmt.Fprintf(w, "  Removing %s will revoke access to %d repo(s): %s\n",
+		username, len(accessible), strings.Join(accessible, ", "))
+}
+
 func runMemberRemove(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	username := args[1]
@@ -204,6 +230,13 @@ func runMemberRemove(cmd *cobra.Command, args []string) error {
 
 	if id := col.IDForLogin(username); id == "" || !col.IsMember(id) {
 		return fmt.Errorf("member remove: %q is not a member of %q", username, name)
+	}
+
+	printRemovalImpact(os.Stderr, col, username)
+
+	if memberRemoveDryRun {
+		output.Info("[dry-run] Would remove %q from %q and revoke all their access", username, name)
+		return nil
 	}
 
 	prompt := fmt.Sprintf("Remove %q from %q and revoke their access to all repos?", username, name)

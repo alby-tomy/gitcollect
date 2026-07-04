@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -19,6 +21,13 @@ var visibilityCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(visibilityCmd)
+}
+
+// printVisibilityImpact writes an impact preview for private→public visibility change.
+func printVisibilityImpact(w io.Writer, col *collection.Collection) {
+	fmt.Fprintf(w, "  %q will become discoverable by any gitcollect user.\n", col.Name)
+	fmt.Fprintf(w, "  %d member(s) and %d repo name(s) will be visible to the public.\n",
+		len(col.Members), len(col.Repos))
 }
 
 func runVisibility(cmd *cobra.Command, args []string) error {
@@ -60,6 +69,7 @@ func runVisibility(cmd *cobra.Command, args []string) error {
 	}
 
 	if newVisibility == collection.VisibilityPublic {
+		printVisibilityImpact(os.Stderr, col)
 		prompt := fmt.Sprintf("This will make %q public — anyone can discover it exists", name)
 		if !output.Confirm(prompt) {
 			return fmt.Errorf("visibility: aborted")

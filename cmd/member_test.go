@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -257,5 +259,96 @@ func TestAddOneMember_BatchContinuesPastFailure(t *testing.T) {
 	}
 	if !col.IsMember("bob") {
 		t.Error("bob should be a member (processing continued past charlie's failure)")
+	}
+}
+
+// TestPrintRemovalImpact_ShowsAccessibleRepos verifies that printRemovalImpact
+// lists the repos the member can currently access.
+func TestPrintRemovalImpact_ShowsAccessibleRepos(t *testing.T) {
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice-id"}
+	col.Logins["alice-id"] = "alice"
+	col.Repos = []collection.RepoAccess{
+		{Name: "vuln-scanner", Groups: []string{}, Users: []string{}},
+		{Name: "pen-test-tools", Groups: []string{}, Users: []string{}},
+	}
+
+	var buf bytes.Buffer
+	printRemovalImpact(&buf, col, "alice")
+
+	out := buf.String()
+	if !strings.Contains(out, "vuln-scanner") {
+		t.Errorf("expected vuln-scanner in output, got: %q", out)
+	}
+	if !strings.Contains(out, "pen-test-tools") {
+		t.Errorf("expected pen-test-tools in output, got: %q", out)
+	}
+	if !strings.Contains(out, "2") {
+		t.Errorf("expected repo count (2) in output, got: %q", out)
+	}
+}
+
+// TestPrintRemovalImpact_NoAccessibleRepos verifies the message when the member
+// cannot reach any repo (e.g. all repos are group-restricted).
+func TestPrintRemovalImpact_NoAccessibleRepos(t *testing.T) {
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice-id"}
+	col.Logins["alice-id"] = "alice"
+	// Repo restricted to red-team group; alice is not in it.
+	col.Repos = []collection.RepoAccess{{Name: "secret-tool", Groups: []string{"red-team"}, Users: []string{}}}
+	col.Groups = map[string][]string{"red-team": {"bob-id"}}
+
+	var buf bytes.Buffer
+	printRemovalImpact(&buf, col, "alice")
+
+	out := buf.String()
+	if !strings.Contains(out, "no repo") {
+		t.Errorf("expected 'no repo' in output when member has no accessible repos, got: %q", out)
+	}
+}
+
+// TestMemberRemoveDryRun_ShowsImpactWithoutRemoving verifies that --dry-run
+// prints the impact preview and exits without modifying the collection.
+func TestMemberRemoveDryRun_ShowsImpactWithoutRemoving(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	col, err := collection.New("acme", "github.com", api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice-id"}
+	col.Logins["alice-id"] = "alice"
+	if err := col.Save(); err != nil {
+		t.Fatalf("col.Save: %v", err)
+	}
+
+	mock := newMultiAddMock()
+	cachedClient = mock
+	cachedUser = "owner"
+	cachedUserID = "owner-id"
+	t.Cleanup(func() { cachedClient = nil; cachedUser = ""; cachedUserID = "" })
+
+	old := memberRemoveDryRun
+	memberRemoveDryRun = true
+	defer func() { memberRemoveDryRun = old }()
+
+	if err := runMemberRemove(nil, []string{"acme", "alice"}); err != nil {
+		t.Fatalf("runMemberRemove --dry-run: %v", err)
+	}
+
+	loaded, err := collection.Load("acme")
+	if err != nil {
+		t.Fatalf("collection.Load: %v", err)
+	}
+	if id := loaded.IDForLogin("alice"); id == "" || !loaded.IsMember(id) {
+		t.Error("expected alice to still be a member after --dry-run")
 	}
 }

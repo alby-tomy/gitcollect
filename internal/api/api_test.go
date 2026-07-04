@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -872,6 +875,125 @@ func TestGitHubSearchRepos_Empty(t *testing.T) {
 	}
 	if len(repos) != 0 {
 		t.Errorf("expected empty slice, got %d repos", len(repos))
+	}
+}
+
+func TestDoWithRetry_SuccessOnFirstAttempt(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, server.URL+"/test", nil)
+	resp, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err != nil {
+		t.Fatalf("doWithRetry: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1 (no retry needed)", calls)
+	}
+}
+
+func TestDoWithRetry_Retries429ThenSucceeds(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 2 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	resp, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err != nil {
+		t.Fatalf("doWithRetry: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if calls != 3 {
+		t.Errorf("calls = %d, want 3 (2 rate-limited + 1 success)", calls)
+	}
+}
+
+func TestDoWithRetry_ExhaustsRetries(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	resp, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err != nil {
+		t.Fatalf("doWithRetry: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429 (retries exhausted)", resp.StatusCode)
+	}
+	wantCalls := retryMaxAttempts + 1
+	if calls != wantCalls {
+		t.Errorf("calls = %d, want %d (1 initial + %d retries)", calls, wantCalls, retryMaxAttempts)
+	}
+}
+
+func TestDoWithRetry_ResetsBodyOnRetry(t *testing.T) {
+	calls := 0
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		if calls == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, server.URL, bytes.NewReader([]byte("payload")))
+	resp, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err != nil {
+		t.Fatalf("doWithRetry: %v", err)
+	}
+	resp.Body.Close()
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2 (1 rate-limited + 1 success)", calls)
+	}
+	if len(bodies) < 2 || bodies[0] != "payload" || bodies[1] != "payload" {
+		t.Errorf("request bodies = %v, want [payload payload] (body must be reset on retry)", bodies)
+	}
+}
+
+func TestDoWithRetry_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the request
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	_, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
 	}
 }
 
