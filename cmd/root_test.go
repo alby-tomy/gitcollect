@@ -376,3 +376,59 @@ func TestRequiresAuth_TokenPresent(t *testing.T) {
 		t.Errorf("expected nil when token stored, got: %v", err)
 	}
 }
+
+func TestOfflineMode_IsOfflineDefaultFalse(t *testing.T) {
+	old := offlineMode
+	offlineMode = false
+	t.Cleanup(func() { offlineMode = old })
+
+	if IsOffline() {
+		t.Error("IsOffline() = true before any flag is set, want false")
+	}
+}
+
+func TestOfflineMode_IsOfflineTrueWhenFlagSet(t *testing.T) {
+	old := offlineMode
+	offlineMode = true
+	t.Cleanup(func() { offlineMode = old })
+
+	if !IsOffline() {
+		t.Error("IsOffline() = false after setting offlineMode = true, want true")
+	}
+}
+
+func TestOfflineMode_BlocksNetworkCommands(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	old := offlineMode
+	offlineMode = true
+	t.Cleanup(func() { offlineMode = old })
+
+	err := requiresAuth("github.com")
+	if err == nil {
+		t.Fatal("expected error from requiresAuth in offline mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "network connection") {
+		t.Errorf("expected offline message, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "gitcollect auth") {
+		t.Errorf("offline error should not mention auth command, got: %v", err)
+	}
+}
+
+func TestOfflineMode_AllowsLocalCommands(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	old := offlineMode
+	offlineMode = true
+	t.Cleanup(func() { offlineMode = old })
+
+	// list reads only local manifests — should succeed even offline.
+	if err := runList(nil, nil); err != nil {
+		t.Errorf("runList in offline mode returned error: %v", err)
+	}
+}
