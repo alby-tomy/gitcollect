@@ -64,6 +64,11 @@ type Client interface {
 	// GitLab: reads scope from /oauth/token/info endpoint.
 	// Used for pre-flight scope checking before import.
 	GetTokenScopes() ([]string, error)
+	// SearchRepos finds repos in org matching a name pattern or topic.
+	// pattern is a glob-style string (e.g. "payments-*"); empty = skip.
+	// topic is a GitHub topic name (e.g. "payments"); empty = skip.
+	// Returns up to limit repos (max 100). GitHub only; GitLab returns an error.
+	SearchRepos(org, pattern, topic string, limit int) ([]RepoInfo, error)
 	Host() string
 }
 

@@ -552,3 +552,7 @@ func (c *gitlabClient) GetTokenScopes() ([]string, error) {
 	}
 	return scopes, nil
 }
+
+func (c *gitlabClient) SearchRepos(org, pattern, topic string, limit int) ([]RepoInfo, error) {
+	return nil, fmt.Errorf("search is not supported for GitLab")
+}

@@ -151,3 +151,15 @@ func Push(dir string) error {
 func Status(dir string) (string, error) {
 	return run(dir, "status", "--short")
 }
+
+// HasUncommittedChanges returns true if the repo at dir has any uncommitted
+// changes (staged or unstaged). Runs git status --porcelain. Returns false
+// cleanly if dir is not a git repo or git is not installed — never an error
+// for those cases.
+func HasUncommittedChanges(dir string) (bool, error) {
+	out, err := run(dir, "status", "--porcelain")
+	if err != nil {
+		return false, nil
+	}
+	return out != "", nil
+}

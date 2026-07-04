@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -792,5 +793,118 @@ func TestClassifyStatus(t *testing.T) {
 	}
 	if err := classifyStatus(http.StatusTeapot); err == nil {
 		t.Error("expected an error for an unrecognised status code")
+	}
+}
+
+func TestGitHubSearchRepos_Pattern(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search/repositories" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		q := r.URL.Query().Get("q")
+		if !strings.Contains(q, "org:acme") {
+			t.Errorf("expected org:acme in query, got %q", q)
+		}
+		if !strings.Contains(q, "payments-") {
+			t.Errorf("expected pattern term in query, got %q", q)
+		}
+		if !strings.Contains(q, "in:name") {
+			t.Errorf("expected in:name qualifier in query, got %q", q)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 2,
+			"items": []map[string]any{
+				{"name": "payments-api", "clone_url": "https://github.com/acme/payments-api.git", "private": true},
+				{"name": "payments-db", "clone_url": "https://github.com/acme/payments-db.git", "private": true},
+			},
+		})
+	})
+
+	repos, err := client.SearchRepos("acme", "payments-*", "", 50)
+	if err != nil {
+		t.Fatalf("SearchRepos: %v", err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected 2 repos, got %d", len(repos))
+	}
+	if repos[0].Name != "payments-api" || repos[1].Name != "payments-db" {
+		t.Errorf("unexpected repo names: %v, %v", repos[0].Name, repos[1].Name)
+	}
+}
+
+func TestGitHubSearchRepos_Topic(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		if !strings.Contains(q, "org:acme") {
+			t.Errorf("expected org:acme in query, got %q", q)
+		}
+		if !strings.Contains(q, "topic:security") {
+			t.Errorf("expected topic:security in query, got %q", q)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 1,
+			"items": []map[string]any{
+				{"name": "vuln-scanner", "clone_url": "https://github.com/acme/vuln-scanner.git", "private": false},
+			},
+		})
+	})
+
+	repos, err := client.SearchRepos("acme", "", "security", 50)
+	if err != nil {
+		t.Fatalf("SearchRepos: %v", err)
+	}
+	if len(repos) != 1 || repos[0].Name != "vuln-scanner" {
+		t.Errorf("unexpected result: %+v", repos)
+	}
+}
+
+func TestGitHubSearchRepos_Empty(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 0,
+			"items":       []map[string]any{},
+		})
+	})
+
+	repos, err := client.SearchRepos("acme", "nonexistent-*", "", 50)
+	if err != nil {
+		t.Fatalf("SearchRepos: %v", err)
+	}
+	if len(repos) != 0 {
+		t.Errorf("expected empty slice, got %d repos", len(repos))
+	}
+}
+
+func TestGitHubSearchRepos_RateLimit(t *testing.T) {
+	// 429 → ErrRateLimit
+	client429 := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	_, err := client429.SearchRepos("acme", "payments-*", "", 50)
+	if !errors.Is(err, ErrRateLimit) {
+		t.Errorf("429: expected ErrRateLimit, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "30 req/min") {
+		t.Errorf("429: expected rate-limit hint in message, got %q", err.Error())
+	}
+
+	// 403 with rate-limit body → ErrRateLimit
+	client403rl := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"You have exceeded a secondary rate limit"}`))
+	})
+	_, err = client403rl.SearchRepos("acme", "payments-*", "", 50)
+	if !errors.Is(err, ErrRateLimit) {
+		t.Errorf("403 rate-limit body: expected ErrRateLimit, got %v", err)
+	}
+
+	// 403 without rate-limit body → ErrForbidden
+	client403forbidden := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"Repository access blocked"}`))
+	})
+	_, err = client403forbidden.SearchRepos("acme", "payments-*", "", 50)
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("403 non-rate-limit body: expected ErrForbidden, got %v", err)
 	}
 }

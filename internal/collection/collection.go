@@ -414,6 +414,13 @@ func (c *Collection) Save() error {
 // Empty string if the collection was constructed but never saved or loaded.
 func (c *Collection) Path() string { return c.path }
 
+// MemberIDs returns a copy of the member ID slice.
+func (c *Collection) MemberIDs() []string {
+	ids := make([]string, len(c.Members))
+	copy(ids, c.Members)
+	return ids
+}
+
 // SaveAs saves the collection under newName, writing a new manifest file
 // and updating c.Name and c.path in place. The original file is left
 // unchanged — rename semantics require the caller to remove it afterward.

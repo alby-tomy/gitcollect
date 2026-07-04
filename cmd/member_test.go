@@ -81,6 +81,9 @@ func (m *multiAddMock) ListTeamMembers(org, teamSlug, role string) ([]api.UserIn
 func (m *multiAddMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *multiAddMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+	return nil, nil
+}
 
 // pendingInviteMock is a minimal api.Client stub for exercising
 // hasPendingInvite without any network access — every method except
@@ -120,6 +123,9 @@ func (m *pendingInviteMock) ListOrgTeams(org string) ([]api.TeamInfo, error) {
 	return nil, nil
 }
 func (m *pendingInviteMock) ListTeamMembers(org, teamSlug, role string) ([]api.UserInfo, error) {
+	return nil, nil
+}
+func (m *pendingInviteMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
 func (m *pendingInviteMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {

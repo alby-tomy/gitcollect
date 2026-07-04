@@ -471,6 +471,89 @@ func (c *githubClient) GetTokenScopes() ([]string, error) {
 	return scopes, nil
 }
 
+// SearchRepos searches GitHub's /search/repositories endpoint.
+// pattern supports a trailing * glob (e.g. "payments-*"); it is converted to
+// a prefix term with in:name. topic is a GitHub topic name. limit is capped
+// at 100 (GitHub's per_page max for search). A single page is fetched.
+func (c *githubClient) SearchRepos(org, pattern, topic string, limit int) ([]RepoInfo, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Build the search query.
+	query := "org:" + org
+	if topic != "" {
+		query += " topic:" + topic
+	}
+	if pattern != "" {
+		// Strip trailing glob — GitHub prefix-matches natively.
+		term := strings.TrimSuffix(pattern, "*")
+		if term != "" {
+			query += " " + term + " in:name"
+		}
+	}
+
+	params := url.Values{
+		"q":        {query},
+		"per_page": {strconv.Itoa(limit)},
+	}
+	path := "/search/repositories?" + params.Encode()
+
+	resp, err := c.do(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	body, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("read search response: %w", readErr)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		return nil, fmt.Errorf("%w: Search API rate limit hit (30 req/min limit). Wait 60 seconds and retry, or use --limit to reduce the search.", ErrRateLimit)
+	case http.StatusForbidden:
+		lower := strings.ToLower(string(body))
+		if strings.Contains(lower, "rate limit") || strings.Contains(lower, "secondary rate") {
+			return nil, fmt.Errorf("%w: Search API rate limit hit (30 req/min limit). Wait 60 seconds and retry, or use --limit to reduce the search.", ErrRateLimit)
+		}
+		return nil, ErrForbidden
+	case http.StatusOK:
+		// handled below
+	default:
+		return nil, classifyStatus(resp.StatusCode)
+	}
+
+	var out struct {
+		Items []struct {
+			Name          string `json:"name"`
+			CloneURL      string `json:"clone_url"`
+			DefaultBranch string `json:"default_branch"`
+			Private       bool   `json:"private"`
+			Archived      bool   `json:"archived"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("could not parse search response: %w", err)
+	}
+
+	repos := make([]RepoInfo, 0, len(out.Items))
+	for _, item := range out.Items {
+		repos = append(repos, RepoInfo{
+			Name:          item.Name,
+			CloneURL:      item.CloneURL,
+			DefaultBranch: item.DefaultBranch,
+			Private:       item.Private,
+			Archived:      item.Archived,
+		})
+	}
+	return repos, nil
+}
+
 // GetPendingInvite checks GitHub's list of not-yet-accepted repository
 // invitations for owner/repo and reports whether username is among them.
 func (c *githubClient) GetPendingInvite(owner, repo, username string) (bool, error) {

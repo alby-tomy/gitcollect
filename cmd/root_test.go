@@ -112,6 +112,9 @@ func (m *rootMock) ListTeamMembers(org, teamSlug, role string) ([]api.UserInfo, 
 func (m *rootMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *rootMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+	return nil, nil
+}
 
 // resetCallerCache clears the package-level identity cache before a test and
 // restores it to empty afterward, so each test starts from a clean slate.

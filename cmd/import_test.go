@@ -60,6 +60,9 @@ func (m *importMock) ListTeamMembers(org, teamSlug, role string) ([]api.UserInfo
 func (m *importMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
 	return m.reposBySlug[teamSlug], nil
 }
+func (m *importMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+	return nil, nil
+}
 
 // Stubs for the rest of the Client interface.
 func (m *importMock) GetAuthenticatedUser() (api.UserInfo, error) {
