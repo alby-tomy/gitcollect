@@ -3,6 +3,9 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -15,6 +18,8 @@ import (
 
 const deleteMaxConcurrency = 4
 
+var deleteDryRun bool
+
 var deleteCmd = &cobra.Command{
 	Use:   "delete <collection>",
 	Short: "Delete a collection and revoke all access to its repos",
@@ -23,7 +28,25 @@ var deleteCmd = &cobra.Command{
 }
 
 func init() {
+	deleteCmd.Flags().BoolVar(&deleteDryRun, "dry-run", false, "preview impact without deleting")
 	rootCmd.AddCommand(deleteCmd)
+}
+
+// printDeletionImpact writes an impact preview for collection delete,
+// listing the members whose access will be revoked.
+func printDeletionImpact(w io.Writer, col *collection.Collection) {
+	if len(col.Members) == 0 {
+		return
+	}
+	logins := make([]string, 0, len(col.Members))
+	for _, id := range col.Members {
+		if login := col.Logins[id]; login != "" {
+			logins = append(logins, login)
+		} else {
+			logins = append(logins, id)
+		}
+	}
+	fmt.Fprintf(w, "  Members whose access will be revoked: %s\n", strings.Join(logins, ", "))
 }
 
 func runDelete(cmd *cobra.Command, args []string) error {
@@ -35,6 +58,14 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 	if !col.IsOwner(callerID) {
 		return fmt.Errorf("delete: only %s (the owner) can delete %q", col.Logins[col.Owner], name)
+	}
+
+	printDeletionImpact(os.Stderr, col)
+
+	if deleteDryRun {
+		output.Info("[dry-run] Would delete %q and revoke access for %d member(s) across %d repo(s)",
+			name, len(col.Members), len(col.Repos))
+		return nil
 	}
 
 	prompt := fmt.Sprintf("This will delete %q and revoke access for %d member(s) across %d repo(s)", name, len(col.Members), len(col.Repos))

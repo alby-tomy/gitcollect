@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -55,7 +56,7 @@ func (c *githubClient) do(method, path string, body any) (*http.Response, error)
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.retryDo(req)
 	if err != nil {
 		return nil, fmt.Errorf("request to %s failed: %w", c.host, err)
 	}
@@ -306,10 +307,65 @@ func (c *githubClient) CheckCollaborator(owner, repo, username string) (bool, er
 	}
 }
 
-// retryDo is a thin wrapper around c.httpClient.Do. The context timeout is
-// already on the request; no retry logic exists in this codebase.
+// retryDo executes r through the package-level doWithRetry helper.
 func (c *githubClient) retryDo(r *http.Request) (*http.Response, error) {
-	return c.httpClient.Do(r)
+	return doWithRetry(r, c.httpClient, c.host)
+}
+
+const retryMaxAttempts = 3
+
+// doWithRetry executes r and retries on HTTP 429 (Too Many Requests).
+// Before each retry it reads the Retry-After response header, prints a
+// warning to stderr, and waits. After retryMaxAttempts retries the final
+// 429 response is returned to the caller so it can be handled normally
+// (e.g. classified as ErrRateLimit by classifyStatus).
+func doWithRetry(r *http.Request, client *http.Client, host string) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		// Reset the request body for each retry — the previous attempt
+		// consumed it. GetBody is set automatically by http.NewRequest for
+		// *bytes.Reader bodies; GET requests have no body and skip this.
+		if attempt > 0 && r.GetBody != nil {
+			body, err := r.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("retry body reset: %w", err)
+			}
+			r.Body = body
+		}
+
+		resp, err := client.Do(r)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusTooManyRequests || attempt >= retryMaxAttempts {
+			return resp, nil
+		}
+
+		// 429: drain and close the body so the connection can be reused,
+		// then wait for the server's Retry-After interval.
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		wait := parseRetryAfter(resp.Header.Get("Retry-After"))
+		fmt.Fprintf(os.Stderr, "gitcollect: rate limited by %s — waiting %s before retry %d/%d\n",
+			host, wait, attempt+1, retryMaxAttempts)
+
+		select {
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
+// parseRetryAfter parses the Retry-After header value as whole seconds.
+// Returns 1 second for an absent or non-integer value.
+func parseRetryAfter(s string) time.Duration {
+	if s != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n >= 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return time.Second
 }
 
 // paginate calls startURL repeatedly, following Link: rel="next" headers,

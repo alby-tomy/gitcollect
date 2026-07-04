@@ -68,7 +68,7 @@ func (c *gitlabClient) do(method, path string, body any) (*http.Response, error)
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.retryDo(req)
 	if err != nil {
 		return nil, fmt.Errorf("request to %s failed: %w", c.host, err)
 	}
@@ -361,10 +361,10 @@ func (c *gitlabClient) GetPendingInvite(owner, repo, username string) (bool, err
 	return false, nil
 }
 
-// retryDo is a thin wrapper around c.httpClient.Do. The context timeout is
-// already on the request; no retry logic exists in this codebase.
+// retryDo executes r through the package-level doWithRetry helper
+// (defined in github.go — same package).
 func (c *gitlabClient) retryDo(r *http.Request) (*http.Response, error) {
-	return c.httpClient.Do(r)
+	return doWithRetry(r, c.httpClient, c.host)
 }
 
 // paginateGitLab calls startURL repeatedly following Link: rel="next" headers
