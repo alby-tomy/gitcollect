@@ -4,6 +4,10 @@ coverage.out
 *.exe
 .env
 
-# prompt
+# prompt / spec files — not for distribution
 PROMPT*
-*.md
+FEATURE_*.md
+DOCS_*.md
+AUDIT_SESSION.md
+PRE_SHIP_IMPROVEMENTS.md
+APPLY_SAMPLE_THEME.md
