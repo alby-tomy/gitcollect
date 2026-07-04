@@ -27,6 +27,17 @@ const (
 // appVersion holds the build version injected by main via SetVersion.
 var appVersion = "dev"
 
+// offlineMode disables all network calls when true. Set by --offline.
+var offlineMode bool
+
+func init() {
+	rootCmd.PersistentFlags().BoolVar(&offlineMode, "offline", false,
+		"disable all network calls (local commands only)")
+}
+
+// IsOffline reports whether --offline was passed on the command line.
+func IsOffline() bool { return offlineMode }
+
 // ranPersistentPreRun becomes true once cobra has resolved the command,
 // parsed its flags, and validated its arguments — i.e. once it actually
 // starts running command logic. Any error returned before that point
@@ -138,8 +149,15 @@ func currentClient(host string) (api.Client, error) {
 
 // requiresAuth verifies that a token is stored for host. Returns a
 // descriptive error with the exact command needed to fix it if no token
-// is found — callers should propagate this error directly to the user.
+// is found, or if --offline was passed — callers should propagate this
+// error directly to the user.
 func requiresAuth(host string) error {
+	if IsOffline() {
+		return fmt.Errorf(
+			"this command requires a network connection\n" +
+				"  Remove --offline to enable network access",
+		)
+	}
 	_, err := config.LoadToken(host)
 	if err != nil {
 		return fmt.Errorf(

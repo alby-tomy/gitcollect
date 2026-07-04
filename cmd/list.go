@@ -63,6 +63,10 @@ type listRow struct {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
+	if IsOffline() {
+		output.Info("offline mode: reading local manifests only")
+	}
+
 	names, err := collection.List()
 	if err != nil {
 		return fmt.Errorf("list: %w", err)
