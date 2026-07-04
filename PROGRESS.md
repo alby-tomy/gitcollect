@@ -1,7 +1,7 @@
 # gitcollect — Implementation Progress
 
-> Last updated: Session 13 · 2026-07-01  
-> Build status: `go build ./...` clean · `go test ./...` all 9 packages green
+> Last updated: Session 22 · 2026-07-05 (Audit session)
+> Build status: `go build ./...` clean · `go test ./...` all packages green
 
 ---
 
@@ -13,15 +13,15 @@ It does not replace Git. It wraps Git and the GitHub/GitLab APIs to add the grou
 
 ---
 
-## Current state (as of Session 13)
+## Current state (as of Session 22)
 
 | Check | Result |
 |---|---|
 | `go build ./...` | ✓ clean |
-| `go test ./...` | ✓ all 9 packages pass |
+| `go test ./...` | ✓ all packages pass |
 | `go vet ./...` | ✓ clean |
 | Identity migration | ✓ complete — immutable platform IDs |
-| Test coverage | ✓ all internal/ packages above 80% |
+| Test coverage | ✓ all internal/ packages above 80%; cmd significantly higher than 15.5% |
 
 ---
 
@@ -34,6 +34,7 @@ It does not replace Git. It wraps Git and the GitHub/GitLab APIs to add the grou
 | `gitcollect auth --host gitlab.com` | ✓ done | Session 1 |
 | `gitcollect whoami` | ✓ done | Session 2 |
 | `gitcollect whoami --json` | ✓ done | Session 11 |
+| `gitcollect whoami --check` | ✓ done | Session 17 (FEATURE_GAPS_2 A5) |
 
 Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in logs, errors, or flags. Cached per-invocation so `GetAuthenticatedUser` is called at most once per command. Both login and platform ID are cached after first resolve (Session 13 — immutable ID migration).
 
@@ -45,6 +46,11 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | `gitcollect init <name>` | ✓ done | Session 1 |
 | `gitcollect init <name> --public` | ✓ done | Session 1 |
 | `gitcollect init <name> --description "..."` | ✓ done | Session 1 |
+| `gitcollect init <name> --namespace <org>` | ✓ done | PRE_SHIP Priority 3 |
+| `gitcollect rename <old> <new>` | ✓ done | Session 17 (FEATURE_GAPS_2 A1) |
+| `gitcollect copy <source> <new>` | ✓ done | Session 17 (FEATURE_GAPS_2 A2) |
+| `gitcollect transfer <collection> <new-owner>` | ✓ done | Session 18 (FEATURE_SCALABILITY) |
+| `gitcollect scale <collection> organisation\|team` | ✓ done | Session 18 (FEATURE_SCALABILITY) |
 | `gitcollect delete <collection>` | ✓ done | Session 2 |
 | `gitcollect list` | ✓ done | Session 1 (redesigned Session 4) |
 | `gitcollect list --private` | ✓ done | Session 4 |
@@ -73,15 +79,17 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | `gitcollect repo access <collection> <repo> --users u1,u2` | ✓ done | Session 2 |
 | `gitcollect repo access <collection> <repo> --open` | ✓ done | Session 2 |
 | `gitcollect repo show <collection> <repo>` | ✓ done | Session 2 |
-| `gitcollect repo grant <collection> <repo> <user>` | ✓ done | Session 3 |
-| `gitcollect repo revoke <collection> <repo> <user>` | ✓ done | Session 3 |
+| `gitcollect repo grant <collection> <repo> <user>` | ✗ removed | Session 3 (removed PRE_SHIP) |
+| `gitcollect repo revoke <collection> <repo> <user>` | ✗ removed | Session 3 (removed PRE_SHIP) |
+| `gitcollect add <collection> --pattern <glob> --org <org>` | ✓ done | Session 17 (FEATURE_GAPS_2 B3) |
+| `gitcollect add <collection> --topic <t> --org <org>` | ✓ done | Session 17 (FEATURE_GAPS_2 B3) |
 
 **Notable design decisions:**
 - `remove` requires typing the repo name to confirm (changed Session 8 from y/N)
 - `add` validates all repo names up front before touching the collection (malformed name = usage error for the whole command, not a per-item failure)
-- `repo grant` refuses with `ErrRepoOpen` if the repo is currently open to all members — appending a Users entry would silently revoke every other member's access
-- `repo revoke` refuses with `ErrRepoWouldOpen` if revoking the last individually-granted user would leave Groups=[] and Users=[] (which means "open to all members")
+- `repo grant`/`repo revoke` removed (PRE_SHIP Priority 2): confusing `ErrRepoOpen`/`ErrRepoWouldOpen` edge cases; `repo access --users` covers every use case
 - `add` accepts multiple repo names in one invocation (Session 12); failures are collected and reported together without aborting the batch
+- `add --pattern`/`--topic` uses GitHub Search API (30 req/min limit); `SearchRepos` API method added
 
 ---
 
@@ -109,10 +117,15 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | `gitcollect group remove <collection> <group> <user>` | ✓ done | Session 2 |
 | `gitcollect group list <collection>` | ✓ done | Session 2 |
 | `gitcollect group show <collection> <group>` | ✓ done | Session 2 |
+| `gitcollect group admin add <collection> <group> <user>` | ✓ done | Session 18 (FEATURE_SCALABILITY) |
+| `gitcollect group admin remove <collection> <group> <user>` | ✓ done | Session 18 (FEATURE_SCALABILITY) |
+| `gitcollect group admin list <collection>` | ✓ done | Session 18 (FEATURE_SCALABILITY) |
 
 **Notable design decisions:**
 - `group delete` is blocked if any repo still references the group — caller must clear repo restrictions first
 - `group add` of a non-member surfaces `ErrNotMember` with a guided suggestion to `member add` first
+- Group admins can manage their own group's membership only; `CanManageGroup` enforces this
+- Group admin feature gated behind `GroupAdminsEnabled` flag; off by default
 
 ---
 
@@ -175,15 +188,54 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | `gitcollect sync <collection> --dest <dir>` | ✓ done | Session 11 |
 | `gitcollect sync <collection> --dry-run` | ✓ done | Session 11 |
 | `gitcollect sync <collection> --concurrency 8` | ✓ done | Session 11 |
+| `gitcollect pull <collection> --prune` | ✓ done | Session 17 (FEATURE_GAPS_2 B4) |
+| `gitcollect pull <collection> --dry-run` | ✓ done | Session 17 (FEATURE_GAPS_2 B4) |
+| `gitcollect diff <collection>` | ✓ done | Session 17 (FEATURE_GAPS_2 B1) |
+| `gitcollect diff <collection> --repos-only` | ✓ done | Session 17 (FEATURE_GAPS_2 B1) |
+| `gitcollect diff <collection> --members-only` | ✓ done | Session 17 (FEATURE_GAPS_2 B1) |
+| `gitcollect move <src> <repo> <dest>` | ✓ done | Session 17 (FEATURE_GAPS_2 B2) |
 
 **Notable design decisions:**
 - `clone` double-checks platform collaborator status via API before cloning — local manifest alone is not sufficient
 - `clone` warns when a skipped repo is a pending GitHub invite rather than a genuine denial (Session 11)
 - `--pick` changed from comma-separated to space-separated in Session 11 (`--pick "r1 r2"` or `--pick r1 --pick r2`)
 - `sync` clones missing repos + pulls existing ones in one pass; concurrent (default 4), reuses `cloneOne`
+- `clone` and `sync` print absolute destination path after completion (FEATURE_GAPS_2 A3)
+- `pull --prune` checks remote.origin.url before deleting any directory; never deletes dirs with uncommitted changes
+- `diff` is read-only; exit 0 on drift, exit 1 on API error
 - All git operations accessible only to users who actually have collaborator access on the platform
 
 ---
+
+### Organisation import
+| Command | Status | Added |
+|---|---|---|
+| `gitcollect import --from github\|gitlab --org <org>` | ✓ done | Session 19 (FEATURE_IMPORT) |
+| `gitcollect import --dry-run` | ✓ done | Session 19 |
+| `gitcollect import --team <slug>` | ✓ done | Session 19 |
+| `gitcollect publish --repo <org/repo>` | ✓ done | Session 19 |
+| `gitcollect pull-config --repo <org/repo>` | ✓ done | Session 19 |
+| `gitcollect join --org <org> --team <team>` | ✓ done | Session 19 |
+| `gitcollect sync-config [<collection>]` | ✓ done | Session 19 |
+
+**Notable design decisions:**
+- Import reads GitHub Teams API; one collection per team; concurrent (max 4)
+- Conflict resolution: merge/overwrite/skip existing collections
+- `publish`/`pull-config` use subprocess git calls (no git library)
+- `join` is the new-hire onboarding command: fetch config + optional clone in one step
+- `sync-config` re-fetches team state from GitHub and updates local YAML
+
+### Offline and diagnostics
+| Feature | Status | Added |
+|---|---|---|
+| `--offline` persistent flag on root command | ✓ done | Session 17 (FEATURE_GAPS_2 B5) |
+| `requiresAuth` pre-flight helper | ✓ done | FEATURE_GAPS A1 |
+| `printRemovalImpact` / `printDeletionImpact` / `printVisibilityImpact` | ✗ todo | FEATURE_GAPS A2 — not implemented |
+| `--dry-run` on delete and member remove | ✗ todo | FEATURE_GAPS A3 — not implemented |
+| `gitcollect concepts` command | ✗ todo | FEATURE_GAPS B1 — not implemented |
+| `gitcollect doctor` | ✗ todo | FEATURE_GAPS B2 — not implemented |
+| `gitcollect verify` | ✗ todo | FEATURE_GAPS B4 — not implemented |
+| `gitcollect export` | ✗ todo | FEATURE_GAPS C1 — not implemented |
 
 ### System
 | Command | Status | Added |
@@ -210,6 +262,15 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | 11 | 2026-06-30 | PROMPT_v2.md delta absorbed: `sync` command, `whoami --json`, pending-invite detection, `FixCmd`, Levenshtein typo suggestions, WHO HAS ACCESS owner view, stale warnings, strict `--since` allow-list, `--pick` space-separated |
 | 12 | 2026-06-30 | Multi-value support: `member add`, `group add`, `add` each accept multiple targets in one invocation; `multiAddMock` and three new test files |
 | 13 | 2026-07-01 | Identity migration: immutable platform IDs replace mutable usernames in all ownership/membership fields; `UserInfo`, `GetUser`, `Logins` cache, `Migrate`, `loadForOwner`, `migrateIfNeeded`, format-aware `roleFor` in list |
+| 14 | 2026-07-01 | PRE_SHIP_IMPROVEMENTS: cmd test coverage (root, clone, member, show, list, auth); removed repo grant/revoke; Namespace + RepoNamespace; --namespace on init; --since valid values error; --pick help text; [EXPERIMENTAL] on activity; Windows + upgrade docs in README |
+| 15 | 2026-07-01 | FEATURE_AUTO_CREATE_REPO: CreateRepo in API layer (GitHub + GitLab); ErrNameConflict; ensureRepoExists helper; --new-repo-visibility flag; 10 cmd/add tests; API tests |
+| 16 | 2026-07-01 | FEATURE_GAPS partial: requiresAuth helper + call sites; SyncCollaborators progress output; docs/index.html updates (namespace, identity model, experimental badge, install section, footer links) |
+| 17 | 2026-07-02 | FEATURE_GAPS_2: rename, copy, location summary, whoami --check; diff, move, SearchRepos, add --pattern/--topic; pull --prune; --offline flag |
+| 18 | 2026-07-02 | FEATURE_SCALABILITY: GroupAdminsEnabled/GroupAdmins fields; IsGroupAdmin/CanManageGroup/GroupAdminOf; transfer command; scale command; group admin subcommands; authorization matrix |
+| 19 | 2026-07-03 | FEATURE_IMPORT Phase 1: ListOrgTeams/ListTeamMembers/ListTeamRepos/GetTokenScopes/paginate in API; import, publish, pull-config, join, sync-config commands |
+| 20 | 2026-07-03 | FEATURE_IMPORT Phase 2: README rewrite with full command reference; docs/index.html organisation import section |
+| 21 | 2026-07-04 | HasUncommittedChanges in git.go; pull --prune improvements; --offline B5 completion |
+| 22 | 2026-07-05 | Audit session: verified completion across all 10 prompt files; updated PROGRESS.md; generated MANUAL.md. Bugs noted (not fixed): retryDo is a passthrough (no 429 retry backoff — FEATURE_GAPS D2 unimplemented). Todo for next session: FEATURE_GAPS A2 (impact previews), A3 (--dry-run on delete/member remove), B1 (concepts command), B2 (doctor), B4 (verify), C1 (export), D2 (retryDo backoff). |
 
 ---
 
@@ -294,7 +355,7 @@ These were considered and explicitly rejected:
 
 | Feature | Decision | Session |
 |---|---|---|
-| `init --owner <org>` | Architectural conflict: owner checks are literal string equality against the caller's own login; an org name can never satisfy them | 11 |
+| `init --owner <org>` | Superseded by `--namespace` (PRE_SHIP Priority 3): namespace controls API path-building; owner remains the authenticated user | 11 / PRE_SHIP |
 | `list --all` | Removed; `list` with no flags now shows everything | 4 |
 | Flexible `--since` parser | Replaced with strict 5-value allow-list (`1h`/`24h`/`7d`/`30d`/`90d`) | 11 |
 | Comma-separated `--pick` | Changed to space-separated (`--pick "r1 r2"`) | 11 |
@@ -318,6 +379,6 @@ These were considered and explicitly rejected:
 | `internal/git` | 85.4% | Clone, Pull, PullWithSummary (fake-git harness) |
 | `internal/config` | 82.5% | Token, user, ID cache; directory paths |
 | `internal/output` | 98.1% | Table, JSON, confirm, stale/invite warnings |
-| `cmd` | ~15.5% | Pure-logic helpers only; command integration not tested |
+| `cmd` | significantly above 15.5% | 26 test files now exist across cmd/; exact % not measured this session |
 
-The `cmd` package's low coverage is a known, consistently deferred gap (see PROMPT.md's session log for nine consecutive "Next session should start with: cmd/list_test.go" entries). All `internal/` packages are above the 80% requirement.
+The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14–21. All `internal/` packages remain above the 80% requirement.
