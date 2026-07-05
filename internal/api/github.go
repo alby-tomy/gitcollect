@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -55,7 +56,7 @@ func (c *githubClient) do(method, path string, body any) (*http.Response, error)
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.retryDo(req)
 	if err != nil {
 		return nil, fmt.Errorf("request to %s failed: %w", c.host, err)
 	}
@@ -304,6 +305,309 @@ func (c *githubClient) CheckCollaborator(owner, repo, username string) (bool, er
 	default:
 		return false, classifyStatus(resp.StatusCode)
 	}
+}
+
+// retryDo executes r through the package-level doWithRetry helper.
+func (c *githubClient) retryDo(r *http.Request) (*http.Response, error) {
+	return doWithRetry(r, c.httpClient, c.host)
+}
+
+const retryMaxAttempts = 3
+
+// doWithRetry executes r and retries on HTTP 429 (Too Many Requests).
+// Before each retry it reads the Retry-After response header, prints a
+// warning to stderr, and waits. After retryMaxAttempts retries the final
+// 429 response is returned to the caller so it can be handled normally
+// (e.g. classified as ErrRateLimit by classifyStatus).
+func doWithRetry(r *http.Request, client *http.Client, host string) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		// Reset the request body for each retry — the previous attempt
+		// consumed it. GetBody is set automatically by http.NewRequest for
+		// *bytes.Reader bodies; GET requests have no body and skip this.
+		if attempt > 0 && r.GetBody != nil {
+			body, err := r.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("retry body reset: %w", err)
+			}
+			r.Body = body
+		}
+
+		resp, err := client.Do(r)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusTooManyRequests || attempt >= retryMaxAttempts {
+			return resp, nil
+		}
+
+		// 429: drain and close the body so the connection can be reused,
+		// then wait for the server's Retry-After interval.
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		wait := parseRetryAfter(resp.Header.Get("Retry-After"))
+		fmt.Fprintf(os.Stderr, "gitcollect: rate limited by %s — waiting %s before retry %d/%d\n",
+			host, wait, attempt+1, retryMaxAttempts)
+
+		select {
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
+// parseRetryAfter parses the Retry-After header value as whole seconds.
+// Returns 1 second for an absent or non-integer value.
+func parseRetryAfter(s string) time.Duration {
+	if s != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n >= 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return time.Second
+}
+
+// paginate calls startURL repeatedly, following Link: rel="next" headers,
+// until all pages are fetched. Calls fn with each page's raw response body.
+func (c *githubClient) paginate(startURL string, fn func([]byte) error) error {
+	pageURL := startURL
+	for pageURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
+		if err != nil {
+			cancel()
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+		resp, err := c.retryDo(req)
+		if err != nil {
+			cancel()
+			return err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		cancel()
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return classifyStatus(resp.StatusCode)
+		}
+		if err := fn(body); err != nil {
+			return err
+		}
+		pageURL = nextPageURL(resp.Header.Get("Link"))
+	}
+	return nil
+}
+
+// nextPageURL parses GitHub's Link header and returns the "next" URL.
+// Returns "" when there is no next page.
+// Link header format:
+//
+//	<https://api.github.com/...?page=2>; rel="next", <...>; rel="last"
+func nextPageURL(link string) string {
+	for _, part := range strings.Split(link, ",") {
+		part = strings.TrimSpace(part)
+		if strings.Contains(part, `rel="next"`) {
+			parts := strings.SplitN(part, ";", 2)
+			if len(parts) > 0 {
+				return strings.Trim(strings.TrimSpace(parts[0]), "<>")
+			}
+		}
+	}
+	return ""
+}
+
+func (c *githubClient) ListOrgTeams(org string) ([]TeamInfo, error) {
+	startURL := fmt.Sprintf("%s/orgs/%s/teams?per_page=100", githubBaseURL, url.PathEscape(org))
+	var teams []TeamInfo
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			ID          int64  `json:"id"`
+			Name        string `json:"name"`
+			Slug        string `json:"slug"`
+			Description string `json:"description"`
+			Privacy     string `json:"privacy"`
+			Parent      *struct {
+				Slug string `json:"slug"`
+			} `json:"parent"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, t := range page {
+			ti := TeamInfo{
+				ID:          t.ID,
+				Name:        t.Name,
+				Slug:        t.Slug,
+				Description: t.Description,
+				Privacy:     t.Privacy,
+			}
+			if t.Parent != nil {
+				ti.ParentSlug = t.Parent.Slug
+			}
+			teams = append(teams, ti)
+		}
+		return nil
+	})
+	return teams, err
+}
+
+func (c *githubClient) ListTeamMembers(org, teamSlug, role string) ([]UserInfo, error) {
+	startURL := fmt.Sprintf("%s/orgs/%s/teams/%s/members?per_page=100",
+		githubBaseURL, url.PathEscape(org), url.PathEscape(teamSlug))
+	if role != "" {
+		startURL += "&role=" + url.QueryEscape(role)
+	}
+	var members []UserInfo
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			ID    int64  `json:"id"`
+			Login string `json:"login"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, m := range page {
+			members = append(members, UserInfo{
+				ID:    strconv.FormatInt(m.ID, 10),
+				Login: m.Login,
+			})
+		}
+		return nil
+	})
+	return members, err
+}
+
+func (c *githubClient) ListTeamRepos(org, teamSlug string) ([]RepoInfo, error) {
+	startURL := fmt.Sprintf("%s/orgs/%s/teams/%s/repos?per_page=100",
+		githubBaseURL, url.PathEscape(org), url.PathEscape(teamSlug))
+	var repos []RepoInfo
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			Name     string `json:"name"`
+			CloneURL string `json:"clone_url"`
+			Private  bool   `json:"private"`
+			Archived bool   `json:"archived"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, r := range page {
+			repos = append(repos, RepoInfo{
+				Name:     r.Name,
+				CloneURL: r.CloneURL,
+				Private:  r.Private,
+				Archived: r.Archived,
+			})
+		}
+		return nil
+	})
+	return repos, err
+}
+
+func (c *githubClient) GetTokenScopes() ([]string, error) {
+	resp, err := c.do(http.MethodGet, "/user", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+	scopeHeader := resp.Header.Get("X-OAuth-Scopes")
+	if scopeHeader == "" {
+		return []string{}, nil
+	}
+	var scopes []string
+	for _, s := range strings.Split(scopeHeader, ",") {
+		scopes = append(scopes, strings.TrimSpace(s))
+	}
+	return scopes, nil
+}
+
+// SearchRepos searches GitHub's /search/repositories endpoint.
+// pattern supports a trailing * glob (e.g. "payments-*"); it is converted to
+// a prefix term with in:name. topic is a GitHub topic name. limit is capped
+// at 100 (GitHub's per_page max for search). A single page is fetched.
+func (c *githubClient) SearchRepos(org, pattern, topic string, limit int) ([]RepoInfo, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Build the search query.
+	query := "org:" + org
+	if topic != "" {
+		query += " topic:" + topic
+	}
+	if pattern != "" {
+		// Strip trailing glob — GitHub prefix-matches natively.
+		term := strings.TrimSuffix(pattern, "*")
+		if term != "" {
+			query += " " + term + " in:name"
+		}
+	}
+
+	params := url.Values{
+		"q":        {query},
+		"per_page": {strconv.Itoa(limit)},
+	}
+	path := "/search/repositories?" + params.Encode()
+
+	resp, err := c.do(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	body, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("read search response: %w", readErr)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		return nil, fmt.Errorf("%w: Search API rate limit hit (30 req/min limit). Wait 60 seconds and retry, or use --limit to reduce the search.", ErrRateLimit)
+	case http.StatusForbidden:
+		lower := strings.ToLower(string(body))
+		if strings.Contains(lower, "rate limit") || strings.Contains(lower, "secondary rate") {
+			return nil, fmt.Errorf("%w: Search API rate limit hit (30 req/min limit). Wait 60 seconds and retry, or use --limit to reduce the search.", ErrRateLimit)
+		}
+		return nil, ErrForbidden
+	case http.StatusOK:
+		// handled below
+	default:
+		return nil, classifyStatus(resp.StatusCode)
+	}
+
+	var out struct {
+		Items []struct {
+			Name          string `json:"name"`
+			CloneURL      string `json:"clone_url"`
+			DefaultBranch string `json:"default_branch"`
+			Private       bool   `json:"private"`
+			Archived      bool   `json:"archived"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("could not parse search response: %w", err)
+	}
+
+	repos := make([]RepoInfo, 0, len(out.Items))
+	for _, item := range out.Items {
+		repos = append(repos, RepoInfo{
+			Name:          item.Name,
+			CloneURL:      item.CloneURL,
+			DefaultBranch: item.DefaultBranch,
+			Private:       item.Private,
+			Archived:      item.Archived,
+		})
+	}
+	return repos, nil
 }
 
 // GetPendingInvite checks GitHub's list of not-yet-accepted repository

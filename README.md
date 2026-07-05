@@ -23,6 +23,11 @@ maintains by hand and nobody trusts. GitHub's own team has said custom
 repo grouping isn't something they're building — which is reasonable, it's
 not really their problem to solve at the platform level. It's gitcollect's.
 
+And for orgs that already exist on GitHub or GitLab, setting up collections
+by hand would take days: 30 teams × 100 repos × 300 members, all entered
+one-by-one. The `import` command reads the existing structure from the
+platform API and creates collections automatically in under two minutes.
+
 ## Quick demo
 
 ```
@@ -30,26 +35,40 @@ $ gitcollect init cybersecurity
 ✓ Created collection "cybersecurity" (private) on github.com
 Run: gitcollect add cybersecurity <repo>
 
-$ gitcollect add cybersecurity pen-test-tools
+$ gitcollect add cybersecurity pen-test-tools vuln-scanner
 ✓ Added pen-test-tools to "cybersecurity" (open to all 0 members)
-Run: gitcollect repo access cybersecurity pen-test-tools --groups <g1,g2>
+✓ Added vuln-scanner to "cybersecurity" (open to all 0 members)
 
 $ gitcollect member add cybersecurity teammate-username
 ✓ Added teammate-username to cybersecurity
-
-  Granted access: pen-test-tools
+  Granted access: pen-test-tools, vuln-scanner
 
 $ gitcollect clone cybersecurity
 ✓ Access verified (teammate-username · no groups)
-  1 of 1 repos accessible
-[1/1] Cloning pen-test-tools...               ✓ done  (1.2s)
-✓ Cloned 1 repo(s) in 1.2s
+  1 of 2 repos accessible
+[1/2] Cloning pen-test-tools...               ✓ done  (1.2s)
+[2/2] Cloning vuln-scanner...                 ✓ done  (0.8s)
+✓ Cloned 2 repo(s) in 2.0s
 ```
 
-That's the whole loop: declare a collection, add repos to it, add a
-teammate, and the moment they run `clone`, gitcollect has already made them
-a real collaborator on exactly the repos they're entitled to — nothing
-more.
+For an existing org, skip the manual setup entirely:
+
+```
+$ gitcollect import --from github --org acme-corp
+
+Pre-flight checks...
+✓ Authenticated as alby-tomy (github.com)
+✓ Token scopes: read:org, repo
+✓ Organisation acme-corp found
+
+Importing collections (30):
+  [1/30]  payments-team      8 repos · 25 members · owner: payments-lead
+  [2/30]  mobile-team       12 repos · 18 members · owner: mobile-lead
+  ...
+
+✓ Imported 30 collections
+  312 unique members across all collections
+```
 
 ## How is this different from ghorg / gh repo list / etc?
 
@@ -95,8 +114,8 @@ The binary lands in `$GOBIN` (defaults to `$GOPATH/bin`, typically `~/go/bin`
 on Linux/macOS and `%USERPROFILE%\go\bin` on Windows). Make sure that directory
 is on your `PATH`.
 
-Requires `git` on your `PATH` for the `clone`, `pull`, `status`, and `sync`
-commands.
+Requires `git` on your `PATH` for the `clone`, `pull`, `status`, `sync`,
+`publish`, and `pull-config` commands.
 
 ### Download binary
 
@@ -208,95 +227,15 @@ You do not need to do anything if the tool is working correctly — upgrades
 happen transparently. This notice exists so you know what to expect if you
 see a one-line "Migrated collection to v2" message in the output.
 
-## Shell completion
-
-gitcollect's `completion` subcommand is provided automatically by
-[Cobra](https://github.com/spf13/cobra) and supports bash, zsh, fish, and
-PowerShell. No separate install step is needed.
-
-```
-gitcollect completion bash       # Bourne-again shell
-gitcollect completion zsh        # Z shell
-gitcollect completion fish       # fish shell
-gitcollect completion powershell # PowerShell
-```
-
-Each command prints a completion script to stdout. To activate completions:
-
-**bash** — add to `~/.bashrc`:
-```bash
-source <(gitcollect completion bash)
-```
-
-**zsh** — add to `~/.zshrc`:
-```bash
-source <(gitcollect completion zsh)
-```
-
-**fish** — write to fish's completions directory (permanent):
-```bash
-gitcollect completion fish > ~/.config/fish/completions/gitcollect.fish
-```
-
-**PowerShell** — add to `$PROFILE`:
-```powershell
-gitcollect completion powershell | Out-String | Invoke-Expression
-```
-
-## Sharing collections with teammates
-
-There is no `gitcollect fetch` command yet — sharing a collection today means
-copying the YAML file manually. This is the biggest UX gap in the current
-release; a fetch command is planned for a future version.
-
-### Current manual flow
-
-**Option A — commit your collections folder to a repo:**
-```bash
-# You:
-cp -r ~/.gitcollect/collections/ ./my-collections/
-git add . && git commit -m "share collections" && git push
-
-# Teammate:
-git clone https://github.com/you/my-collections
-mkdir -p ~/.gitcollect/collections
-cp my-collections/*.yaml ~/.gitcollect/collections/
-```
-
-**Option B — just send the file (chat, email, anything):**
-```
-# Teammate places it at:
-~/.gitcollect/collections/<collection-name>.yaml
-```
-
-### Why editing the YAML by hand doesn't grant access
-
-A teammate who receives a YAML file can only clone repos where **both of the
-following are true**: the local manifest says they should have access, *and*
-the platform has already made them a real collaborator on that repo via the
-API. Hand-editing the YAML changes the first thing but not the second — the
-platform never received an API call to add them. The collection owner must
-run `gitcollect member add <collection> <teammate>` to make the access real.
-
-### What is coming
-
-```bash
-# Coming in a future release — not available yet:
-gitcollect fetch github.com/you/cybersecurity
-```
-
-This command will download the collection manifest and let the owner grant
-access in one step. Until then, the manual copy flow above is the only option.
-
 ## Quickstart
 
 ```bash
-gitcollect auth                        # store a token, hidden prompt, verified live
-gitcollect init cybersecurity          # you become the owner
+gitcollect auth                                    # store a token, hidden prompt, verified live
+gitcollect init cybersecurity                      # you become the owner
 gitcollect add cybersecurity pen-test-tools vuln-scanner   # repos accept multiple names
-gitcollect member add cybersecurity teammate-username      # so do member add and group add
-gitcollect show cybersecurity          # see exactly who can reach what
-gitcollect clone cybersecurity         # clone everything you're entitled to
+gitcollect member add cybersecurity teammate       # so do member add and group add
+gitcollect show cybersecurity                      # see exactly who can reach what
+gitcollect clone cybersecurity                     # clone everything you're entitled to
 ```
 
 ```
@@ -310,7 +249,7 @@ Groups:      0
 Repos:       2
 
 MEMBER
-teammate-username
+teammate
 
 REPO            ACCESS RULE          YOU
 pen-test-tools  open to all members  ✓ yes
@@ -322,14 +261,19 @@ single command — `gitcollect member add cybersecurity alice bob charlie`
 adds all three, continuing past any one failure and reporting every
 failure together at the end rather than aborting the whole batch.
 
-The `YOU` column in `show` is the same access decision `clone` uses to pick
-what it fetches — they can never disagree. Run `gitcollect <command>
---help` for the live version of anything below.
+## Shell completion
+
+gitcollect's `completion` subcommand supports bash, zsh, fish, and
+PowerShell. No separate install step is needed.
+
+```bash
+source <(gitcollect completion bash)         # add to ~/.bashrc
+source <(gitcollect completion zsh)          # add to ~/.zshrc
+gitcollect completion fish > ~/.config/fish/completions/gitcollect.fish
+gitcollect completion powershell | Out-String | Invoke-Expression  # add to $PROFILE
+```
 
 ## Full command reference
-
-The same reference below, browsable, is at
-[alby-tomy.github.io/gitcollect](https://alby-tomy.github.io/gitcollect/).
 
 <details open>
 <summary><strong>Authentication</strong></summary>
@@ -346,11 +290,13 @@ The same reference below, browsable, is at
 
 | Command | Description |
 |---|---|
-| `gitcollect init <name> [--host h] [--description d] [--public]` | Create a collection. Private by default — being the owner does not automatically make you a member. |
+| `gitcollect init <name> [--host h] [--description d] [--namespace org] [--public]` | Create a collection. Private by default. `--namespace` sets the org whose repos this collection tracks (used by `import` and `sync-config`). |
 | `gitcollect delete <collection>` | Delete a collection and revoke every member's access to every repo first. Requires typing the collection's name to confirm. |
 | `gitcollect list [--private\|--public] [--json]` | List collections you own or belong to, from local manifests only — no network calls. |
 | `gitcollect show <collection> [--json]` | Summary: members, groups, repos, and a per-repo access column (`YOU` for a regular caller, `WHO HAS ACCESS` if you're the owner). Warns if the local file is >30 days stale. |
-| `gitcollect visibility <collection> <public\|private>` | Change visibility. Switching to public asks for confirmation — it makes the collection's existence discoverable. |
+| `gitcollect visibility <collection> <public\|private>` | Change visibility. Switching to public asks for confirmation. |
+| `gitcollect transfer <collection> <new-owner>` | Transfer ownership to another member. Requires typing the new owner's username to confirm. Previous owner stays as a member. |
+| `gitcollect scale <collection> <organisation\|team>` | Switch a collection between org tier (group admins enabled) and team tier. Org tier lets group admins manage their own groups without full collection ownership. |
 
 </details>
 
@@ -359,7 +305,7 @@ The same reference below, browsable, is at
 
 | Command | Description |
 |---|---|
-| `gitcollect add <collection> <repo> [repo...]` | Add one or more repos, open to all members by default. Repo names are validated up front; per-repo failures (already added, sync error) don't abort the rest of the batch. |
+| `gitcollect add <collection> <repo> [repo...]` | Add one or more repos, open to all members by default. Repo names are validated up front; per-repo failures don't abort the rest of the batch. Prompts to create the repo if it doesn't exist on the platform (on a TTY). |
 | `gitcollect remove <collection> <repo>` | Remove a repo and revoke everyone's collaborator access to it first. Requires typing the repo's name to confirm. |
 | `gitcollect repo access <collection> <repo> --groups g1,g2 \| --users u1,u2 \| --open` | Replace a repo's whole access rule. Groups and users are unioned — either satisfies access. |
 | `gitcollect repo show <collection> <repo>` | A repo's current rule plus a per-member access table. |
@@ -380,7 +326,7 @@ Run: gitcollect inspect cybersecurity --repo vuln-scanner
 
 | Command | Description |
 |---|---|
-| `gitcollect member add <collection> <username> [username...]` | Add one or more members, syncing each one's access across every repo they're now entitled to. On GitHub, warns if a grant leaves someone with a pending, unaccepted collaborator invite (GitLab has no such state). |
+| `gitcollect member add <collection> <username> [username...]` | Add one or more members, syncing each one's access across every repo they're entitled to. On GitHub, warns if a grant leaves someone with a pending, unaccepted collaborator invite (GitLab has no such state). |
 | `gitcollect member remove <collection> <username> [--confirm-self]` | Remove a member and revoke all their access. Removing yourself additionally requires `--confirm-self`. |
 | `gitcollect member list <collection>` | Members and which groups each belongs to. |
 
@@ -391,10 +337,11 @@ Run: gitcollect inspect cybersecurity --repo vuln-scanner
 
 | Command | Description |
 |---|---|
-| `gitcollect group create/delete <collection> <group>` | Create or delete a group. Delete is blocked, with the list of blockers, if any repo still restricts access to it. |
-| `gitcollect group add <collection> <group> <username> [username...]` | Add one or more members to a group, syncing their repo access. Guides you to `member add` first for anyone who isn't a collection member yet. |
+| `gitcollect group create/delete <collection> <group>` | Create or delete a group. Delete is blocked if any repo still restricts access to it. |
+| `gitcollect group add <collection> <group> <username> [username...]` | Add one or more members to a group, syncing their repo access. |
 | `gitcollect group remove <collection> <group> <username>` | Remove a member from a group and re-sync their access. |
 | `gitcollect group list/show <collection> [group]` | List every group, or show one group's members and the repos restricted to it. |
+| `gitcollect group admin add/remove/list <collection> <group> [username]` | Manage group admins (org tier only). Group admins can manage their own group's membership without full collection ownership. |
 
 </details>
 
@@ -411,16 +358,16 @@ red-team  2        alice, bob
 |---|---|
 | `gitcollect inspect <collection> [--user u \| --repo r] [--json]` | No flags: the full member × repo matrix. `--user`: one person's full access map with the reason for each decision. `--repo`: who can reach one repo and why. Denied rows get a "To fix:" footer with the exact command to grant access. |
 | `gitcollect audit <collection> [--user u] [--since 1h\|24h\|7d\|30d\|90d] [--json]` | The access change log — every mutation gitcollect ever attempted, including failures, newest first. `--since` only accepts those five exact values. |
-| `gitcollect activity <collection> [--repo r] [--since ...] [--limit n] [--json]` | **[experimental]** Code changes, not access changes: live commits per accessible repo's default branch, recorded to `~/.gitcollect/activity/<collection>.log`. > **Note:** This command is marked experimental. The output format and flag names may change in future versions. |
+| `gitcollect activity <collection> [--repo r] [--since ...] [--limit n] [--json]` | **[experimental]** Code changes, not access changes: live commits per accessible repo's default branch. |
 
 </details>
 
 ```
 $ gitcollect audit cybersecurity --since 7d
 
-2026-01-20 14:32  alice       member.add            bob                   Added member
-2026-01-19 09:10  alice       repo.access.set       vuln-scanner          open to all members → groups: red-team
-2026-01-15 10:00  alice       init                  cybersecurity         Collection created (private)
+2026-01-20 14:32  alice  member.add   bob           Added member
+2026-01-19 09:10  alice  repo.access  vuln-scanner  open → groups: red-team
+2026-01-15 10:00  alice  init         cybersecurity Collection created (private)
 ```
 
 <details>
@@ -435,6 +382,19 @@ $ gitcollect audit cybersecurity --since 7d
 
 </details>
 
+<details open>
+<summary><strong>Organisation import</strong></summary>
+
+| Command | Description |
+|---|---|
+| `gitcollect import --from github\|gitlab --org <org> [--team t] [--dry-run] [--flatten] [--owner-from-maintainer] [--namespace n] [--merge\|--overwrite\|--skip-existing]` | Read an org's team structure from GitHub or GitLab and create one collection per team. Concurrent fetching (max 4 parallel). Maintainers become collection owners by default. |
+| `gitcollect publish --repo <org/repo> [--collection c] [--branch b] [--path p] [--message m]` | Push collection YAML files into a shared git repository so teammates can fetch them. |
+| `gitcollect pull-config --repo <org/repo> [--collection c] [--branch b] [--path p] [--overwrite]` | Fetch collection files from a shared git repository into `~/.gitcollect/collections/`. |
+| `gitcollect join --org <org> --team <team> [--repo r] [--clone] [--dest d] [--from github\|gitlab]` | New-hire onboarding in one command: fetch the team's collection and optionally clone all accessible repos. |
+| `gitcollect sync-config [<collection>] [--all] [--from github\|gitlab] [--org o] [--dry-run]` | Re-fetch the current team state from the platform, show what changed, and update local collections. |
+
+</details>
+
 <details>
 <summary><strong>System</strong></summary>
 
@@ -444,6 +404,99 @@ $ gitcollect audit cybersecurity --since 7d
 | `gitcollect completion <bash\|zsh\|fish\|powershell>` | Shell autocompletion script, courtesy of Cobra. |
 
 </details>
+
+## Organisation import
+
+For teams that already exist on GitHub or GitLab, the import commands remove
+the manual setup burden entirely.
+
+### The enterprise onboarding flow
+
+**Admin setup (once):**
+
+```bash
+# 1. Import the whole org — creates one collection per team
+gitcollect import --from github --org acme-corp
+
+# 2. Publish collections to a shared repo for teammates to fetch
+gitcollect publish --repo acme-corp/gitcollect-config
+```
+
+**New employee setup (once per person):**
+
+```bash
+# One command to configure and clone in a single step
+gitcollect join --org acme-corp --team payments-team --clone
+```
+
+**Keeping collections in sync (ongoing):**
+
+```bash
+# After team membership or repo list changes on GitHub
+gitcollect sync-config payments-team
+```
+
+### Single-team import
+
+```
+$ gitcollect import --from github --org acme-corp --team payments-team
+
+✓ Imported payments-team
+  8 repos · 25 members · owner: payments-lead
+  Written to ~/.gitcollect/collections/acme-corp-payments-team.yaml
+```
+
+### Conflict handling
+
+If a collection already exists locally and a new import brings different data:
+
+```
+⚠ Collection "payments-team" already exists locally.
+  Local:  8 repos · 25 members
+  Import: 9 repos · 26 members (platform current state)
+
+  [o] Overwrite local with imported data
+  [s] Skip this collection
+  [m] Merge — add new repos/members, keep existing ones
+  Choice [o/s/m]: m
+```
+
+Use `--merge`, `--overwrite`, or `--skip-existing` to set the default for
+non-interactive runs (CI, scripts).
+
+### Dry-run
+
+```
+$ gitcollect import --from github --org acme-corp --dry-run
+
+[dry-run] Would create 30 collections:
+  payments-team      8 repos · 25 members · owner: payments-lead
+  mobile-team       12 repos · 18 members · owner: mobile-lead
+  ...
+
+[dry-run] No files written.
+Run without --dry-run to apply.
+```
+
+### Sharing collections with teammates
+
+The publish + pull-config pair replaces the old manual YAML copy workflow:
+
+```bash
+# Admin publishes once:
+gitcollect publish --repo acme-corp/gitcollect-config
+
+# Each teammate fetches once:
+gitcollect pull-config --repo acme-corp/gitcollect-config
+```
+
+The shared repo (e.g. `acme-corp/gitcollect-config`) is a regular GitHub
+repository — private is fine, team members only need read access.
+
+> **Important:** receiving a collection file does not automatically grant
+> platform collaborator access. The collection owner must run
+> `gitcollect member add` to make access real — only then will
+> `gitcollect clone` succeed for that member.
 
 ## How access control works
 
@@ -474,8 +527,7 @@ gitcollect member add cybersecurity \
                                               → YOU: ✓ yes
                                             gitcollect clone cybersecurity
                                               → succeeds: clone only ever
-                                                fetches what show already
-                                                said yes to
+                                                fetches what show said yes to
 ```
 
 Per-repo access is a **union**, not an intersection, of groups and users —
@@ -487,17 +539,13 @@ repo "vuln-scanner":
   users:  [eve]              ├─ OR  →  access granted to anyone in
                              ─┘        red-team, OR eve specifically
 
-alice (in red-team)     → ✓ access (via group)
+alice (in red-team)      → ✓ access (via group)
 eve   (not in any group) → ✓ access (via individual grant)
-bob   (in neither)        → ✗ no access — group red-team or
-                                         individual grant required
+bob   (in neither)       → ✗ no access
 ```
 
-An empty `groups: []` *and* empty `users: []` on a repo means "open to
-every collection member" — that's the explicit empty-list convention, not
-an oversight. To update individual users without changing group restrictions,
-use `gitcollect repo access <collection> <repo> --users alice bob` to set
-the complete users list.
+An empty `groups: []` and empty `users: []` on a repo means "open to every
+collection member" — the explicit empty-list convention, not an oversight.
 
 Every mutation follows the same shape — validate locally, call the
 platform API, only then write the YAML, then append to the audit log:
@@ -515,11 +563,9 @@ platform API, only then write the YAML, then append to the audit log:
   rejects any clone URL that isn't `https://` before invoking `git`.
 - **Input validation**: collection, repo, username, and group names are
   all checked against explicit allowlist regexes before anything touches
-  disk or the network — e.g. repo names also reject `../`, `/`, `\`, and
-  NUL bytes outright, not just a format mismatch.
+  disk or the network.
 - **Private collection non-disclosure**: a non-member hitting a private
-  collection gets the exact same generic error
-  (`collection not found or access denied`) whether the collection
+  collection gets the exact same generic error whether the collection
   doesn't exist at all or simply isn't theirs to see — there's no way to
   fingerprint a private collection's existence by probing names.
 - **Dual enforcement on every clone/pull**: access requires both the local
@@ -527,28 +573,31 @@ platform API, only then write the YAML, then append to the audit log:
   platform API — passing only one is not enough.
 - **Atomic YAML writes**: every collection manifest is written via
   temp-file-then-rename at `0600`, the same pattern as the token store.
-- **No encryption of collection YAML**: membership lists are plaintext by
-  design — a collection's member/group/repo structure isn't a secret the
-  way a token is; only the token store gets restrictive permissions.
+- **Immutable IDs**: collections store platform user IDs (not mutable
+  usernames) internally. A username rename can't break ownership checks.
 
 ## Architecture
 
-`cmd/` holds one file per command/command-group (21 non-test files, one
-cobra `Command` each); `internal/` holds the actual logic, kept
-deliberately separate from any CLI framework concern:
+`cmd/` holds one file per command or command-group (28 non-test files);
+`internal/` holds the actual logic, kept deliberately separate from any
+CLI framework concern:
 
 ```
 gitcollect/
 ├── main.go
-├── cmd/               # 21 commands: auth, init, add, member, group, repo,
+├── cmd/               # 28 files: auth, init, add, member, group, repo,
 │                      # inspect, audit, activity, clone, pull, status,
-│                      # sync, show, list, ...
+│                      # sync, show, list, delete, visibility, whoami,
+│                      # version, transfer, scale, import, publish,
+│                      # pull_config, join, sync_config, ...
 └── internal/
     ├── collection/    # the YAML manifest itself — load/save/validate,
     │                  # IsMember/CanAccessRepo (pure, no network)
     ├── access/        # bridges collection + api: enforces, syncs
     │                  # platform state, builds inspect's matrices
     ├── api/           # GitHub + GitLab clients behind one interface
+    │                  # (ListOrgTeams, ListTeamMembers, GetTokenScopes,
+    │                  # paginate helpers for multi-page API responses)
     ├── git/           # thin wrappers around the git subprocess
     ├── audit/         # access-change log (newline-delimited JSON)
     ├── activity/      # commit-activity log (separate from audit —
@@ -573,15 +622,19 @@ Not committed, just being considered for a future version:
 - **Bitbucket support** — GitHub and GitLab only today; the `api.Client`
   interface was kept platform-agnostic on purpose so a third
   implementation wouldn't require touching `cmd/` or `internal/access`.
-- **`gitcollect fetch`** — pulling a collection's YAML from somewhere
-  other than a manual file copy/commit; today sharing a collection means
-  literally sending the teammate the YAML file (see Installation/Security
-  above — there's no server, so there's nothing to fetch from yet).
+- **`gitcollect fetch`** — pulling a *single* collection's YAML from a
+  URL (e.g. `gitcollect fetch github.com/you/cybersecurity`) rather than
+  cloning a whole shared config repo. The publish/pull-config flow covers
+  the team-wide case; per-collection URL fetch is still missing.
 - **A dashboard or web UI** — a read-only view of `inspect`'s access
   matrix, for teams who'd rather glance at a page than run a CLI command.
-- **Stabilise `gitcollect activity`** — remove the experimental flag in
-  v1.1 after real-world usage confirms the design (output format, flag
-  names, cache behaviour).
+- **Shared audit log** — a way for all collection members to see the
+  same audit trail, not just the one stored locally on the owner's machine.
+- **Stabilise `gitcollect activity`** — remove the experimental flag
+  after real-world usage confirms the design (output format, flag names,
+  cache behaviour).
+- **Homebrew tap and Winget/Scoop packages** — binary installs without
+  needing Go.
 
 Explicitly *not* planned, by design rather than by omission: a GUI/TUI, a
 daemon or web server, a database (YAML + newline-delimited JSON audit log
@@ -590,16 +643,16 @@ mode that bypasses each user's own platform token.
 
 ## Contributing
 
-Issues and pull requests welcome — open one [here](../../issues). Before
-sending a PR: `go build ./...`, `go vet ./...`, and `go test ./... -cover`
-should all be clean (`make test` runs the race-enabled, coverage-tracked
-version). In the interest of being upfront about how this project is
-built: gitcollect's implementation has been developed through an
-AI-assisted process driven by a structured specification,
-[PROMPT.md](PROMPT.md), which doubles as the project's design rationale
-and session-by-session build log — worth reading before a non-trivial
-change, since it records *why* a lot of non-obvious decisions were made,
-not just what the code does.
+Issues and pull requests welcome — open one [here](https://github.com/alby-tomy/gitcollect/issues).
+Before sending a PR: `go build ./...`, `go vet ./...`, and
+`go test ./... -cover` should all be clean (`make test` runs the
+race-enabled, coverage-tracked version). In the interest of being upfront
+about how this project is built: gitcollect's implementation has been
+developed through an AI-assisted process driven by a structured
+specification, [PROMPT.md](PROMPT.md), which doubles as the project's
+design rationale and session-by-session build log — worth reading before a
+non-trivial change, since it records *why* a lot of non-obvious decisions
+were made, not just what the code does.
 
 ## License
 

@@ -648,7 +648,9 @@
       <li><a href="#group-cmds">Groups</a></li>
       <li><a href="#inspect-cmds">Inspect, audit &amp; activity</a></li>
       <li><a href="#git-cmds">Git ops</a></li>
+      <li><a href="#import-cmds">Org import</a></li>
       <li><a href="#system-cmds">System</a></li>
+      <li><a href="#org-import-walkthrough">Org import walkthrough</a></li>
     </ul>
   </div>
 </nav>
@@ -942,22 +944,31 @@ alice is already a member of "research"
         <div class="step-num">3</div>
         <div class="step-body">
           <h3>Get the collection file to your teammate (you)</h3>
-          <p>gitcollect has no server, no database, and no <code>fetch</code> command —
-          a collection is nothing but that one YAML file on your disk. Your teammate
-          needs an exact copy of it at <code>~/.gitcollect/collections/cybersecurity.yaml</code>
+          <p>A collection is just one YAML file on your disk. Your teammate needs
+          an exact copy at <code>~/.gitcollect/collections/cybersecurity.yaml</code>
           on <strong>their</strong> machine before any of their commands will find it.
-          Two ways to get it there:</p>
-          <div class="code-block"><pre><span class="comment"># Option A — commit it to a repo they can pull from</span>
+          Three ways:</p>
+          <div class="code-block"><pre><span class="comment"># Option A — publish to a shared git repo, teammate pulls it</span>
+gitcollect publish --repo acme-corp/gitcollect-config
+<span class="comment"># teammate:</span>
+gitcollect pull-config --repo acme-corp/gitcollect-config</pre></div>
+          <p><code>publish</code> shallow-clones the target repo, copies collection YAMLs
+          into <code>collections/</code>, commits, and pushes.
+          <code>pull-config</code> does the reverse — fetches from the shared repo and drops
+          the files into <code>~/.gitcollect/collections/</code> automatically.
+          This is the recommended approach for teams — you only need to run
+          <code>publish</code> once after each import or config change.</p>
+          <div class="code-block"><pre><span class="comment"># Option B — commit and send the file directly</span>
 git add cybersecurity.yaml &amp;&amp; git commit -m "share cybersecurity collection" &amp;&amp; git push
 <span class="comment"># teammate:</span>
 git pull
 cp cybersecurity.yaml ~/.gitcollect/collections/
 
-<span class="comment"># Option B — just send them the file (chat, email, anything)</span>
+<span class="comment"># Option C — just send them the file (chat, email, anything)</span>
 <span class="comment"># teammate places it at ~/.gitcollect/collections/cybersecurity.yaml</span></pre></div>
-          <p class="note">A <code>gitcollect fetch</code> command for sharing collections directly by URL is planned for a future release — this will eliminate the manual file-copy step.</p>
-          <p class="dim">Hand-editing that file to add yourself as a member doesn't grant
-          you anything — see the guarantee below.</p>
+          <p class="warn">Hand-editing the YAML to add yourself as a member doesn't
+          actually grant you anything — the platform is the enforcement point, not the
+          file. See the security note in Step 6 below.</p>
         </div>
       </div>
 
@@ -1040,6 +1051,139 @@ exploit-db  ✗ no    no access — group red-team required</pre></div>
             second, because the platform — not the file — is the actual enforcement
             point.</p>
           </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── ORG IMPORT WALKTHROUGH ── -->
+<section id="org-import-walkthrough" class="section">
+  <div class="container">
+    <div class="section-label">Organisation import</div>
+    <h2 class="section-title">Walkthrough: enterprise onboarding with import</h2>
+    <p class="section-sub">For teams that already exist on GitHub or GitLab, the import commands
+    remove the manual setup burden entirely. This shows the complete admin → employee flow.</p>
+
+    <div class="setup-steps">
+
+      <div class="setup-step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>Admin: import the whole org (runs once)</h3>
+          <p>Read the org's existing team structure — teams, members, repos — and
+          create one collection per team. Uses the GitHub/GitLab Teams API, so
+          a token with <code>read:org</code> and <code>repo</code> scopes is required.</p>
+          <div class="code-block"><pre><span class="prompt">$ </span>gitcollect import <span class="flag">--from</span> github <span class="flag">--org</span> acme-corp
+
+<span class="out">Pre-flight checks...
+✓ Authenticated as alby-tomy (github.com)
+✓ Token scopes: read:org, repo
+✓ Organisation acme-corp found
+
+Importing collections (30):
+  [1/30]  payments-team      8 repos · 25 members · owner: payments-lead
+  [2/30]  mobile-team       12 repos · 18 members · owner: mobile-lead
+  ...
+
+✓ Imported 30 collections
+  312 unique members across all collections</span></pre></div>
+          <p>Each team becomes a YAML file at
+          <code>~/.gitcollect/collections/acme-corp-{team-slug}.yaml</code>.
+          Use <code>--dry-run</code> to preview without writing anything.
+          Use <code>--team payments-team</code> to import a single team.</p>
+          <p>If a collection already exists, import will prompt:
+          <code>[o] overwrite</code>, <code>[s] skip</code>, or
+          <code>[m] merge</code> (add new repos/members, keep existing ones).
+          Pass <code>--merge</code>, <code>--overwrite</code>, or <code>--skip-existing</code>
+          for non-interactive runs.</p>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>Admin: publish to a shared config repo (runs once, then after each update)</h3>
+          <p>Push all collection YAMLs to a regular GitHub repo so teammates can
+          fetch them without needing <code>read:org</code> themselves. The target
+          repo can be private — team members only need read access.</p>
+          <div class="code-block"><pre><span class="prompt">$ </span>gitcollect publish <span class="flag">--repo</span> acme-corp/gitcollect-config
+
+<span class="out">Publishing 30 collections to acme-corp/gitcollect-config...
+  ✓ acme-corp-payments-team.yaml
+  ✓ acme-corp-mobile-team.yaml
+  ✓ acme-corp-devops-team.yaml
+  ... 27 more
+
+✓ Published 30 collections to acme-corp/gitcollect-config (main)
+  Commit: "update gitcollect collections"
+
+Share this with your team:
+  gitcollect pull-config --repo acme-corp/gitcollect-config</span></pre></div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>Employee: join the team (runs once per new hire)</h3>
+          <p>One command that fetches the team's collection and optionally clones
+          all repos the new hire can access. Replaces the old
+          <code>pull-config</code> + <code>clone</code> two-step.</p>
+          <div class="code-block"><pre><span class="prompt">$ </span>gitcollect join <span class="flag">--org</span> acme-corp <span class="flag">--team</span> payments-team <span class="flag">--clone</span>
+
+<span class="out">Setting up gitcollect for acme-corp/payments-team...
+
+✓ Authenticated as new-hire (github.com)
+
+Fetching payments-team configuration...
+✓ payments-team fetched (8 repos · 25 members)
+  Written to ~/.gitcollect/collections/acme-corp-payments-team.yaml
+
+Cloning repos...
+[1/8] Cloning payments-api...               ✓ done (2.1s)
+[2/8] Cloning payments-frontend...          ✓ done (1.4s)
+[3/8] Cloning payments-db-migrations...     ✓ done (0.8s)
+...
+
+✓ Joined acme-corp/payments-team
+  8 repos cloned to ./
+
+Welcome to the team. Next steps:
+  gitcollect show acme-corp-payments-team    see your full repo access
+  gitcollect pull acme-corp-payments-team    pull updates any time</span></pre></div>
+          <p>Pass <code>--repo acme-corp/gitcollect-config</code> to pull the config from
+          the shared repo instead of calling the GitHub Teams API directly.
+          This is the recommended path for employees — they don't need
+          <code>read:org</code>, only read access to the config repo.</p>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <h3>Ongoing: sync when the org changes</h3>
+          <p>After team membership or repo list changes on GitHub, re-fetch the
+          current state and update the local collection. Shows exactly what
+          changed before applying.</p>
+          <div class="code-block"><pre><span class="prompt">$ </span>gitcollect sync-config payments-team
+
+<span class="out">Syncing acme-corp-payments-team from github.com/acme-corp...
+
+Changes detected:
+  + new member: new-hire (id: 9988776)
+  + new repo:   payments-notifications
+  - removed member: former-employee (no longer in GitHub team)
+
+Applying changes...
+✓ acme-corp-payments-team synced
+
+Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull existing</span></pre></div>
+          <p>Use <code>--dry-run</code> to see the diff without writing.
+          Use <code>--all</code> to sync every collection that has a namespace set.</p>
+          <p>After syncing, re-publish so teammates can pull the updated config:</p>
+          <div class="code-block"><pre><span class="prompt">$ </span>gitcollect publish <span class="flag">--repo</span> acme-corp/gitcollect-config</pre></div>
         </div>
       </div>
 
@@ -1307,6 +1451,101 @@ exploit-db  ✗ no    no access — group red-team required</pre></div>
           <tr><td class="flagname">--concurrency N</td><td class="flagdesc">max repos to sync in parallel (default 4)</td></tr>
         </table>
       </div>
+    </div>
+
+    <div class="group" id="import-cmds">
+      <h3>Organisation import</h3>
+
+      <div class="cmd-block">
+        <p class="sig"><span class="prog">gitcollect</span> import</p>
+        <p class="desc">Read a GitHub or GitLab org's team structure — teams, members, repos — and
+        create one local collection per team. Runs API calls concurrently (max 4 parallel)
+        and prints a progress line for each team. Maintainers of a team become the collection
+        owner by default; falls back to the authenticated caller when no maintainer is found.
+        Requires a token with <code>read:org</code> and <code>repo</code> (or <code>public_repo</code>)
+        scopes on GitHub. Files are written as <code>~/.gitcollect/collections/{org}-{team}.yaml</code>.</p>
+        <table class="flags">
+          <tr><td class="flagname">--from github|gitlab</td><td class="flagdesc">platform to import from (required)</td></tr>
+          <tr><td class="flagname">--org &lt;org&gt;</td><td class="flagdesc">GitHub org or GitLab group to import (required)</td></tr>
+          <tr><td class="flagname">--team &lt;slug&gt;</td><td class="flagdesc">import only this team instead of all teams in the org</td></tr>
+          <tr><td class="flagname">--dry-run</td><td class="flagdesc">show what would be created without writing any files</td></tr>
+          <tr><td class="flagname">--flatten</td><td class="flagdesc">use the team slug as the collection name directly, ignoring parent-team nesting</td></tr>
+          <tr><td class="flagname">--owner-from-maintainer</td><td class="flagdesc">set the first maintainer as collection owner (default: true)</td></tr>
+          <tr><td class="flagname">--namespace &lt;ns&gt;</td><td class="flagdesc">set the collection namespace (default: the org name)</td></tr>
+          <tr><td class="flagname">--merge</td><td class="flagdesc">when a collection already exists locally, merge new repos/members into it</td></tr>
+          <tr><td class="flagname">--overwrite</td><td class="flagdesc">when a collection already exists locally, replace it with the imported version</td></tr>
+          <tr><td class="flagname">--skip-existing</td><td class="flagdesc">when a collection already exists locally, skip it without prompting</td></tr>
+        </table>
+      </div>
+
+      <div class="cmd-block">
+        <p class="sig"><span class="prog">gitcollect</span> publish</p>
+        <p class="desc">Push local collection YAML files to a shared git repository so teammates
+        can fetch them with <code>pull-config</code>. Shallow-clones the target repo,
+        copies collection files into <code>collections/</code> (or the directory set by
+        <code>--path</code>), commits, and pushes. Uses whatever git credentials are already
+        configured on the system. The target repo can be private — team members only need
+        read access to pull from it.</p>
+        <table class="flags">
+          <tr><td class="flagname">--repo &lt;org/repo&gt;</td><td class="flagdesc">GitHub/GitLab repository to publish to (required)</td></tr>
+          <tr><td class="flagname">--collection &lt;name&gt;</td><td class="flagdesc">publish only this one collection (default: all local collections)</td></tr>
+          <tr><td class="flagname">--branch &lt;name&gt;</td><td class="flagdesc">branch to push to (default <code>main</code>)</td></tr>
+          <tr><td class="flagname">--path &lt;dir&gt;</td><td class="flagdesc">subdirectory in the repo to copy files into (default <code>collections/</code>)</td></tr>
+          <tr><td class="flagname">--message &lt;msg&gt;</td><td class="flagdesc">commit message (default <code>update gitcollect collections</code>)</td></tr>
+        </table>
+      </div>
+
+      <div class="cmd-block">
+        <p class="sig"><span class="prog">gitcollect</span> pull-config</p>
+        <p class="desc">Fetch collection YAML files from a shared git repository (published with
+        <code>gitcollect publish</code>) and copy them into
+        <code>~/.gitcollect/collections/</code>. Skips existing local files unless
+        <code>--overwrite</code> is set. Does not require <code>read:org</code> scope —
+        only read access to the config repo.</p>
+        <table class="flags">
+          <tr><td class="flagname">--repo &lt;org/repo&gt;</td><td class="flagdesc">shared config repository to fetch from (required)</td></tr>
+          <tr><td class="flagname">--collection &lt;name&gt;</td><td class="flagdesc">fetch only this collection (default: all YAML files in the remote path)</td></tr>
+          <tr><td class="flagname">--branch &lt;name&gt;</td><td class="flagdesc">branch to fetch from (default <code>main</code>)</td></tr>
+          <tr><td class="flagname">--path &lt;dir&gt;</td><td class="flagdesc">subdirectory in the repo to look for files (default <code>collections/</code>)</td></tr>
+          <tr><td class="flagname">--overwrite</td><td class="flagdesc">overwrite existing local collections (default: skip them)</td></tr>
+        </table>
+      </div>
+
+      <div class="cmd-block">
+        <p class="sig"><span class="prog">gitcollect</span> join</p>
+        <p class="desc">New-hire onboarding in one command: fetch the collection for your team,
+        then optionally clone all repos you have access to. Two fetch paths:
+        (1) <code>--repo</code> set — shallow-clones the shared config repo and copies
+        the team's YAML (does not need <code>read:org</code>);
+        (2) <code>--repo</code> not set — calls <code>import</code> directly against the
+        GitHub/GitLab API (requires <code>read:org</code>).</p>
+        <table class="flags">
+          <tr><td class="flagname">--org &lt;org&gt;</td><td class="flagdesc">GitHub org or GitLab group (required)</td></tr>
+          <tr><td class="flagname">--team &lt;slug&gt;</td><td class="flagdesc">team slug to join (required)</td></tr>
+          <tr><td class="flagname">--repo &lt;org/repo&gt;</td><td class="flagdesc">shared config repo to fetch the collection from; if omitted, imports directly from the platform API</td></tr>
+          <tr><td class="flagname">--clone</td><td class="flagdesc">clone all accessible repos immediately after joining (default: false)</td></tr>
+          <tr><td class="flagname">--dest &lt;dir&gt;</td><td class="flagdesc">directory to clone repos into (default: current directory)</td></tr>
+          <tr><td class="flagname">--from github|gitlab</td><td class="flagdesc">platform (default <code>github</code>)</td></tr>
+        </table>
+      </div>
+
+      <div class="cmd-block">
+        <p class="sig"><span class="prog">gitcollect</span> sync-config</p>
+        <p class="desc">Re-fetch the current team state from GitHub or GitLab, compare with the
+        local collection, show what changed (new members, removed members, new repos, removed
+        repos), and update the local YAML. The collection must have a <code>namespace</code>
+        set (done automatically by <code>import</code>; set manually with
+        <code>gitcollect init --namespace &lt;org&gt;</code>). The team slug is derived from
+        the collection name by stripping the <code>{org}-</code> prefix. Use after the org's
+        team membership or repo list has changed on the platform.</p>
+        <table class="flags">
+          <tr><td class="flagname">--all</td><td class="flagdesc">sync every local collection that has a namespace set (default when no collection name is given)</td></tr>
+          <tr><td class="flagname">--from github|gitlab</td><td class="flagdesc">platform to sync from (default: the collection's stored host)</td></tr>
+          <tr><td class="flagname">--org &lt;org&gt;</td><td class="flagdesc">org to sync from (default: the collection's stored namespace)</td></tr>
+          <tr><td class="flagname">--dry-run</td><td class="flagdesc">show the diff without writing any changes to disk</td></tr>
+        </table>
+      </div>
+
     </div>
 
     <div class="group" id="system-cmds">

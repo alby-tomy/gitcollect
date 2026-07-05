@@ -93,6 +93,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		output.Success("Synced %d repo(s)", len(synced))
+		if absPath, err := filepath.Abs(syncDest); err == nil {
+			output.Dim("  Location: %s", absPath)
+		}
 	}
 
 	if len(skipped) > 0 {

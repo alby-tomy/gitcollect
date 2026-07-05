@@ -69,6 +69,12 @@ func Progress(current, total int, label string) {
 	}
 }
 
+// ClearProgress erases the current progress line written by Progress, so the
+// next output starts on a clean line. Must be called on stderr.
+func ClearProgress() {
+	fmt.Fprint(os.Stderr, "\r\033[K")
+}
+
 // Table prints headers and rows as aligned, space-padded columns to stdout.
 func Table(headers []string, rows [][]string) {
 	widths := make([]int, len(headers))

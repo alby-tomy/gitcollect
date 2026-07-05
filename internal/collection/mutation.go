@@ -211,7 +211,7 @@ func (c *Collection) Migrate(client api.Client) error {
 // some member is treated as a per-job error, not a panic — see the
 // memberLogin == "" check below — purely as a defensive backstop, since
 // it should not be reachable given the precondition.
-func (c *Collection) SyncCollaborators(client api.Client) (added, removed int, err error) {
+func (c *Collection) SyncCollaborators(client api.Client, onProgress func(current, total int)) (added, removed int, err error) {
 	type job struct {
 		member     string
 		repo       string
@@ -227,13 +227,16 @@ func (c *Collection) SyncCollaborators(client api.Client) (added, removed int, e
 		}
 	}
 
+	total := len(jobs)
+
 	var (
-		mu       sync.Mutex
-		errs     []error
-		addedN   int
-		removedN int
-		sem      = make(chan struct{}, maxConcurrentSyncs)
-		wg       sync.WaitGroup
+		mu        sync.Mutex
+		errs      []error
+		addedN    int
+		removedN  int
+		completed int
+		sem       = make(chan struct{}, maxConcurrentSyncs)
+		wg        sync.WaitGroup
 	)
 
 	for _, j := range jobs {
@@ -280,6 +283,14 @@ func (c *Collection) SyncCollaborators(client api.Client) (added, removed int, e
 				mu.Lock()
 				removedN++
 				mu.Unlock()
+			}
+
+			if onProgress != nil {
+				mu.Lock()
+				completed++
+				current := completed
+				mu.Unlock()
+				onProgress(current, total)
 			}
 		}(j)
 	}
@@ -353,7 +364,7 @@ func (c *Collection) AddMember(username string, client api.Client) error {
 	c.Logins = cloneLogins(c.Logins)
 	c.Logins[user.ID] = user.Login
 
-	if _, _, err := c.SyncCollaborators(client); err != nil {
+	if _, _, err := c.SyncCollaborators(client, nil); err != nil {
 		c.Members = originalMembers
 		c.Logins = originalLogins
 		return fmt.Errorf("could not sync access for %s: %w", username, err)
@@ -426,7 +437,7 @@ func (c *Collection) AddToGroup(username, group string, client api.Client) error
 	original := append([]string{}, c.Groups[group]...)
 	c.Groups[group] = append(append([]string{}, c.Groups[group]...), user.ID)
 
-	if _, _, err := c.SyncCollaborators(client); err != nil {
+	if _, _, err := c.SyncCollaborators(client, nil); err != nil {
 		c.Groups[group] = original
 		return fmt.Errorf("could not sync access for %s: %w", username, err)
 	}
@@ -455,7 +466,7 @@ func (c *Collection) RemoveFromGroup(username, group string, client api.Client) 
 	original := append([]string{}, c.Groups[group]...)
 	c.Groups[group] = removeString(c.Groups[group], id)
 
-	if _, _, err := c.SyncCollaborators(client); err != nil {
+	if _, _, err := c.SyncCollaborators(client, nil); err != nil {
 		c.Groups[group] = original
 		return fmt.Errorf("could not sync access for %s: %w", username, err)
 	}
@@ -512,7 +523,7 @@ func (c *Collection) SetRepoAccess(repoName string, groups, users []string, clie
 	c.Repos[idx].Groups = append([]string{}, groups...)
 	c.Repos[idx].Users = userIDs
 
-	if _, _, err := c.SyncCollaborators(client); err != nil {
+	if _, _, err := c.SyncCollaborators(client, nil); err != nil {
 		c.Repos[idx] = original
 		return fmt.Errorf("could not sync access for repo %s: %w", repoName, err)
 	}

@@ -19,12 +19,21 @@ import (
 var (
 	newRepoVisibility string
 	errSkipped        = errors.New("skipped by user")
+
+	addPattern string
+	addTopic   string
+	addOrg     string
+	addDryRun  bool
+	addLimit   int
+
+	// addConfirmFn is injectable so tests can control the y/N prompt.
+	addConfirmFn = func(msg string) bool { return output.Confirm(msg) }
 )
 
 var addCmd = &cobra.Command{
-	Use:   "add <collection> <repo> [repo...]",
-	Short: "Add one or more repos to a collection, open to all members by default",
-	Args:  cobra.MinimumNArgs(2),
+	Use:   "add <collection> [repo...] [--pattern glob | --topic name]",
+	Short: "Add repos to a collection, open to all members by default",
+	Args:  cobra.MinimumNArgs(1),
 	RunE:  runAdd,
 }
 
@@ -36,11 +45,25 @@ func init() {
 		"private",
 		`visibility for auto-created repos: "public" or "private" (default "private")`,
 	)
+	addCmd.Flags().StringVar(&addPattern, "pattern", "", "add all repos matching this name pattern (supports * wildcard)")
+	addCmd.Flags().StringVar(&addTopic, "topic", "", "add all repos with this GitHub topic")
+	addCmd.Flags().StringVar(&addOrg, "org", "", "org to search in (default: collection's namespace)")
+	addCmd.Flags().BoolVar(&addDryRun, "dry-run", false, "show which repos would be added without adding them")
+	addCmd.Flags().IntVar(&addLimit, "limit", 50, "max repos to add via search (default 50, max 100)")
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	repoNames := args[1:]
+
+	useSearch := addPattern != "" || addTopic != ""
+
+	if useSearch && len(repoNames) > 0 {
+		return NewUsageError(fmt.Errorf("add: cannot combine positional repo names with --pattern or --topic"))
+	}
+	if !useSearch && len(repoNames) == 0 {
+		return NewUsageError(fmt.Errorf("add: provide at least one repo name, or use --pattern/--topic to search"))
+	}
 
 	for _, repoName := range repoNames {
 		if err := collection.ValidateRepoName(repoName); err != nil {
@@ -58,6 +81,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	}
 	if !col.IsOwner(callerID) {
 		return fmt.Errorf("add: only %s (the owner) can add repos to %q", col.Logins[col.Owner], name)
+	}
+
+	if useSearch {
+		return runAddSearch(col, name, caller, callerID, client)
 	}
 
 	private := newRepoVisibility == "private"
@@ -79,6 +106,73 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if len(failed) > 0 {
 		return fmt.Errorf("add: %d of %d failed: %s", len(failed), len(repoNames), strings.Join(failed, "; "))
 	}
+	return nil
+}
+
+func runAddSearch(col *collection.Collection, collectionName, caller, callerID string, client api.Client) error {
+	org := addOrg
+	if org == "" {
+		org = col.RepoNamespace()
+	}
+
+	limit := addLimit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	if addPattern != "" {
+		fmt.Printf("Searching %s for repos matching %q...\n", org, addPattern)
+	} else {
+		fmt.Printf("Searching %s for repos with topic %q...\n", org, addTopic)
+	}
+
+	repos, err := client.SearchRepos(org, addPattern, addTopic, limit)
+	if err != nil {
+		return fmt.Errorf("add: search: %w", err)
+	}
+
+	if len(repos) == 0 {
+		fmt.Println("No repos found matching the search criteria.")
+		return nil
+	}
+
+	names := make([]string, len(repos))
+	for i, r := range repos {
+		names[i] = r.Name
+	}
+
+	if addDryRun {
+		fmt.Printf("[dry-run] Would add %d repos to %s:\n  %s\n\nRun without --dry-run to apply.\n",
+			len(repos), collectionName, strings.Join(names, ", "))
+		return nil
+	}
+
+	fmt.Printf("Found %d repos:\n  %s\n\n", len(repos), strings.Join(names, ", "))
+
+	if !addConfirmFn(fmt.Sprintf("Add all %d to %s?", len(repos), collectionName)) {
+		output.Info("Aborted.")
+		return nil
+	}
+
+	private := newRepoVisibility == "private"
+	var failed []string
+	for i, r := range repos {
+		fmt.Printf("[%d/%d] Adding %s...\n", i+1, len(repos), r.Name)
+		if err := addOneRepo(col, collectionName, caller, callerID, r.Name, client, private); err != nil {
+			if errors.Is(err, errSkipped) {
+				continue
+			}
+			failed = append(failed, fmt.Sprintf("%s (%v)", r.Name, err))
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("add: %d of %d failed: %s", len(failed), len(repos), strings.Join(failed, "; "))
+	}
+	output.Success("Added %d repos to %s", len(repos), collectionName)
 	return nil
 }
 
@@ -152,7 +246,7 @@ func addOneRepo(col *collection.Collection, name, caller, callerID, repoName str
 
 	col.Repos = append(col.Repos, collection.RepoAccess{Name: repoName, Groups: []string{}, Users: []string{}})
 
-	added, _, syncErr := col.SyncCollaborators(client)
+	added, _, syncErr := col.SyncCollaborators(client, nil)
 	if syncErr != nil {
 		col.Repos = col.Repos[:len(col.Repos)-1]
 		recordAudit(audit.AuditEntry{

@@ -335,6 +335,17 @@ func (c *Collection) Validate() error {
 	return nil
 }
 
+// SetPath sets the internal file path for this collection.
+// Called during import to specify where the YAML should be written.
+// name is the base name only (without directory or extension),
+// e.g. "acme-corp-payments-team". manifestPath resolves it to the
+// full absolute path so Save() works correctly without further resolution.
+func (c *Collection) SetPath(name string) {
+	if p, err := manifestPath(name); err == nil {
+		c.path = p
+	}
+}
+
 // RepoNamespace returns the namespace used for API path building
 // (e.g. GET /repos/{namespace}/{repo}). Falls back to the owner's
 // cached login when no explicit namespace is set — the common case
@@ -395,6 +406,44 @@ func (c *Collection) Save() error {
 	}
 	if err := os.Rename(tmpPath, c.path); err != nil {
 		return fmt.Errorf("could not save collection %q: %w", c.Name, err)
+	}
+	return nil
+}
+
+// Path returns the absolute path of the collection's manifest file on disk.
+// Empty string if the collection was constructed but never saved or loaded.
+func (c *Collection) Path() string { return c.path }
+
+// MemberIDs returns a copy of the member ID slice.
+func (c *Collection) MemberIDs() []string {
+	ids := make([]string, len(c.Members))
+	copy(ids, c.Members)
+	return ids
+}
+
+// SaveAs saves the collection under newName, writing a new manifest file
+// and updating c.Name and c.path in place. The original file is left
+// unchanged — rename semantics require the caller to remove it afterward.
+// Returns ErrAlreadyExists if a collection named newName already exists.
+func (c *Collection) SaveAs(newName string) error {
+	if err := ValidateCollectionName(newName); err != nil {
+		return err
+	}
+	if ok, err := Exists(newName); err != nil {
+		return err
+	} else if ok {
+		return fmt.Errorf("%w: collection %q already exists", ErrAlreadyExists, newName)
+	}
+	newPath, err := manifestPath(newName)
+	if err != nil {
+		return err
+	}
+	origName, origPath := c.Name, c.path
+	c.Name = newName
+	c.path = newPath
+	if err := c.Save(); err != nil {
+		c.Name, c.path = origName, origPath
+		return err
 	}
 	return nil
 }

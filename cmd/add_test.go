@@ -3,18 +3,20 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 )
 
-// addTestMock extends multiAddMock with an optional createRepoFunc so
-// individual tests can control CreateRepo behaviour.
+// addTestMock extends multiAddMock with optional overrides for CreateRepo,
+// GetRepo, and SearchRepos so individual tests can control API behaviour.
 type addTestMock struct {
 	*multiAddMock
-	createRepoFunc func(owner, name string, private bool, description string) (api.RepoInfo, error)
-	getRepoErr     error // override GetRepo to return this error (nil means use parent)
+	createRepoFunc  func(owner, name string, private bool, description string) (api.RepoInfo, error)
+	getRepoErr      error // override GetRepo to return this error (nil means use parent)
+	searchReposFunc func(org, pattern, topic string, limit int) ([]api.RepoInfo, error)
 }
 
 func (m *addTestMock) GetRepo(owner, repo string) (api.RepoInfo, error) {
@@ -22,6 +24,13 @@ func (m *addTestMock) GetRepo(owner, repo string) (api.RepoInfo, error) {
 		return api.RepoInfo{}, m.getRepoErr
 	}
 	return m.multiAddMock.GetRepo(owner, repo)
+}
+
+func (m *addTestMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+	if m.searchReposFunc != nil {
+		return m.searchReposFunc(org, pattern, topic, limit)
+	}
+	return nil, nil
 }
 
 func (m *addTestMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
@@ -251,5 +260,253 @@ func TestErrSkippedSentinel(t *testing.T) {
 	wrapped := fmt.Errorf("wrapped: %w", errSkipped)
 	if !errors.Is(wrapped, errSkipped) {
 		t.Error("errors.Is(wrapped, errSkipped) = false, want true")
+	}
+}
+
+// ── B3 search-flag tests ──────────────────────────────────────────────────────
+
+// setupAddSearchTest creates a saved collection and wires the mock client,
+// mirroring the pattern used by setupMoveTest.
+func setupAddSearchTest(t *testing.T, collName string, mock *addTestMock) *collection.Collection {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	cachedClient = mock
+	cachedUser = "owner"
+	cachedUserID = "owner-id"
+	t.Cleanup(func() {
+		cachedClient = nil
+		cachedUser = ""
+		cachedUserID = ""
+	})
+
+	col, err := collection.New(collName, "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	if err := col.Save(); err != nil {
+		t.Fatalf("col.Save: %v", err)
+	}
+	return col
+}
+
+// resetAddFlags saves the current search-flag state and restores it on cleanup.
+func resetAddFlags(t *testing.T) {
+	t.Helper()
+	oPattern, oTopic, oOrg, oDryRun, oLimit, oConfirm :=
+		addPattern, addTopic, addOrg, addDryRun, addLimit, addConfirmFn
+	t.Cleanup(func() {
+		addPattern = oPattern
+		addTopic = oTopic
+		addOrg = oOrg
+		addDryRun = oDryRun
+		addLimit = oLimit
+		addConfirmFn = oConfirm
+	})
+}
+
+func TestAdd_PatternFlag_FindsRepos(t *testing.T) {
+	var searchedPattern string
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		searchReposFunc: func(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+			searchedPattern = pattern
+			return []api.RepoInfo{
+				{Name: "payments-api"},
+				{Name: "payments-db"},
+			}, nil
+		},
+	}
+	setupAddSearchTest(t, "search-col", mock)
+	resetAddFlags(t)
+	addPattern = "payments-*"
+	addConfirmFn = func(msg string) bool { return true }
+
+	captureStdout(func() {
+		if err := runAdd(nil, []string{"search-col"}); err != nil {
+			t.Fatalf("runAdd = %v", err)
+		}
+	})
+
+	if searchedPattern != "payments-*" {
+		t.Errorf("SearchRepos called with pattern %q, want %q", searchedPattern, "payments-*")
+	}
+	reloaded, _ := collection.Load("search-col")
+	if !collectionHasRepo(reloaded, "payments-api") {
+		t.Error("expected payments-api in collection after pattern add")
+	}
+	if !collectionHasRepo(reloaded, "payments-db") {
+		t.Error("expected payments-db in collection after pattern add")
+	}
+}
+
+func TestAdd_TopicFlag_FindsRepos(t *testing.T) {
+	var searchedTopic string
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		searchReposFunc: func(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+			searchedTopic = topic
+			return []api.RepoInfo{{Name: "vuln-scanner"}}, nil
+		},
+	}
+	setupAddSearchTest(t, "topic-col", mock)
+	resetAddFlags(t)
+	addTopic = "security"
+	addConfirmFn = func(msg string) bool { return true }
+
+	captureStdout(func() {
+		if err := runAdd(nil, []string{"topic-col"}); err != nil {
+			t.Fatalf("runAdd = %v", err)
+		}
+	})
+
+	if searchedTopic != "security" {
+		t.Errorf("SearchRepos called with topic %q, want %q", searchedTopic, "security")
+	}
+	reloaded, _ := collection.Load("topic-col")
+	if !collectionHasRepo(reloaded, "vuln-scanner") {
+		t.Error("expected vuln-scanner in collection after topic add")
+	}
+}
+
+func TestAdd_PatternAndPositionalArg(t *testing.T) {
+	mock := &addTestMock{multiAddMock: newMultiAddMock()}
+	setupAddSearchTest(t, "mixed-col", mock)
+	resetAddFlags(t)
+	addPattern = "payments-*"
+
+	err := runAdd(nil, []string{"mixed-col", "explicit-repo"})
+	if err == nil {
+		t.Fatal("expected error when mixing positional args with --pattern, got nil")
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Errorf("expected UsageError, got %T: %v", err, err)
+	}
+}
+
+func TestAdd_PatternDryRun(t *testing.T) {
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		searchReposFunc: func(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+			return []api.RepoInfo{{Name: "dry-repo-a"}, {Name: "dry-repo-b"}}, nil
+		},
+	}
+	setupAddSearchTest(t, "dry-col", mock)
+	resetAddFlags(t)
+	addPattern = "dry-*"
+	addDryRun = true
+
+	out := captureStdout(func() {
+		if err := runAdd(nil, []string{"dry-col"}); err != nil {
+			t.Fatalf("runAdd dry-run = %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "dry-repo-a") || !strings.Contains(out, "dry-repo-b") {
+		t.Errorf("expected repo names in dry-run output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "dry-run") {
+		t.Errorf("expected [dry-run] in output, got:\n%s", out)
+	}
+
+	// Reload confirms nothing was written.
+	reloaded, _ := collection.Load("dry-col")
+	if collectionHasRepo(reloaded, "dry-repo-a") {
+		t.Error("dry-run: dry-repo-a must not have been added")
+	}
+}
+
+func TestAdd_PatternLimitRespected(t *testing.T) {
+	var calledLimit int
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		searchReposFunc: func(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+			calledLimit = limit
+			// Simulate: API returns exactly `limit` repos.
+			repos := make([]api.RepoInfo, limit)
+			for i := range repos {
+				repos[i] = api.RepoInfo{Name: fmt.Sprintf("repo-%d", i)}
+			}
+			return repos, nil
+		},
+	}
+	setupAddSearchTest(t, "limit-col", mock)
+	resetAddFlags(t)
+	addPattern = "repo-*"
+	addLimit = 3
+	addConfirmFn = func(msg string) bool { return true }
+
+	captureStdout(func() {
+		if err := runAdd(nil, []string{"limit-col"}); err != nil {
+			t.Fatalf("runAdd = %v", err)
+		}
+	})
+
+	if calledLimit != 3 {
+		t.Errorf("SearchRepos called with limit %d, want 3", calledLimit)
+	}
+	reloaded, _ := collection.Load("limit-col")
+	if len(reloaded.Repos) != 3 {
+		t.Errorf("expected 3 repos in collection, got %d", len(reloaded.Repos))
+	}
+}
+
+func TestAdd_PatternNoResults(t *testing.T) {
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		searchReposFunc: func(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+			return nil, nil
+		},
+	}
+	setupAddSearchTest(t, "empty-col", mock)
+	resetAddFlags(t)
+	addPattern = "nonexistent-*"
+
+	out := captureStdout(func() {
+		if err := runAdd(nil, []string{"empty-col"}); err != nil {
+			t.Fatalf("runAdd = %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "No repos found") {
+		t.Errorf("expected 'No repos found' message, got:\n%s", out)
+	}
+	reloaded, _ := collection.Load("empty-col")
+	if len(reloaded.Repos) != 0 {
+		t.Errorf("expected no repos in collection, got %d", len(reloaded.Repos))
+	}
+}
+
+func TestAdd_PatternConfirmationRequired(t *testing.T) {
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		searchReposFunc: func(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+			return []api.RepoInfo{{Name: "confirm-repo"}}, nil
+		},
+	}
+	setupAddSearchTest(t, "confirm-col", mock)
+	resetAddFlags(t)
+	addPattern = "confirm-*"
+	// Do NOT override addConfirmFn — let it decline (returns false in non-TTY).
+	addConfirmFn = func(msg string) bool { return false }
+
+	out := captureStdout(func() {
+		if err := runAdd(nil, []string{"confirm-col"}); err != nil {
+			t.Fatalf("runAdd = %v", err)
+		}
+	})
+
+	// The list must have been shown before asking.
+	if !strings.Contains(out, "confirm-repo") {
+		t.Errorf("expected repo list in output before confirmation, got:\n%s", out)
+	}
+	// No repos should have been added since confirmation was declined.
+	reloaded, _ := collection.Load("confirm-col")
+	if collectionHasRepo(reloaded, "confirm-repo") {
+		t.Error("repo must not be added when confirmation is declined")
 	}
 }

@@ -100,7 +100,66 @@ func PullWithSummary(dir string) (newCommits int, err error) {
 	return n, nil
 }
 
+// ShallowClone clones cloneURL into dest with depth 1 (only the latest
+// commit). Faster than a full clone for the publish/pull-config flow where
+// only the file tree matters and full history is not needed.
+func ShallowClone(cloneURL, dest string) error {
+	if !strings.HasPrefix(cloneURL, "https://") {
+		return fmt.Errorf("refusing to clone non-HTTPS URL: %s", cloneURL)
+	}
+	if _, err := run("", "clone", "--depth=1", cloneURL, dest); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Checkout switches the working tree inside dir to branch.
+func Checkout(dir, branch string) error {
+	if _, err := run(dir, "checkout", branch); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Add stages all files under path inside dir.
+func Add(dir, path string) error {
+	if _, err := run(dir, "add", path); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Commit creates a commit inside dir with message. Returns no error if
+// there is nothing to commit (git exits 1 with "nothing to commit").
+func Commit(dir, message string) error {
+	_, err := run(dir, "commit", "-m", message)
+	if err != nil && strings.Contains(err.Error(), "nothing to commit") {
+		return nil
+	}
+	return err
+}
+
+// Push pushes the current branch inside dir to its upstream remote.
+func Push(dir string) error {
+	if _, err := run(dir, "push"); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Status returns the output of "git status --short" for dir.
 func Status(dir string) (string, error) {
 	return run(dir, "status", "--short")
+}
+
+// HasUncommittedChanges returns true if the repo at dir has any uncommitted
+// changes (staged or unstaged). Runs git status --porcelain. Returns false
+// cleanly if dir is not a git repo or git is not installed — never an error
+// for those cases.
+func HasUncommittedChanges(dir string) (bool, error) {
+	out, err := run(dir, "status", "--porcelain")
+	if err != nil {
+		return false, nil
+	}
+	return out != "", nil
 }

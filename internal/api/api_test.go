@@ -1,10 +1,14 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -792,5 +796,237 @@ func TestClassifyStatus(t *testing.T) {
 	}
 	if err := classifyStatus(http.StatusTeapot); err == nil {
 		t.Error("expected an error for an unrecognised status code")
+	}
+}
+
+func TestGitHubSearchRepos_Pattern(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search/repositories" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		q := r.URL.Query().Get("q")
+		if !strings.Contains(q, "org:acme") {
+			t.Errorf("expected org:acme in query, got %q", q)
+		}
+		if !strings.Contains(q, "payments-") {
+			t.Errorf("expected pattern term in query, got %q", q)
+		}
+		if !strings.Contains(q, "in:name") {
+			t.Errorf("expected in:name qualifier in query, got %q", q)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 2,
+			"items": []map[string]any{
+				{"name": "payments-api", "clone_url": "https://github.com/acme/payments-api.git", "private": true},
+				{"name": "payments-db", "clone_url": "https://github.com/acme/payments-db.git", "private": true},
+			},
+		})
+	})
+
+	repos, err := client.SearchRepos("acme", "payments-*", "", 50)
+	if err != nil {
+		t.Fatalf("SearchRepos: %v", err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected 2 repos, got %d", len(repos))
+	}
+	if repos[0].Name != "payments-api" || repos[1].Name != "payments-db" {
+		t.Errorf("unexpected repo names: %v, %v", repos[0].Name, repos[1].Name)
+	}
+}
+
+func TestGitHubSearchRepos_Topic(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		if !strings.Contains(q, "org:acme") {
+			t.Errorf("expected org:acme in query, got %q", q)
+		}
+		if !strings.Contains(q, "topic:security") {
+			t.Errorf("expected topic:security in query, got %q", q)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 1,
+			"items": []map[string]any{
+				{"name": "vuln-scanner", "clone_url": "https://github.com/acme/vuln-scanner.git", "private": false},
+			},
+		})
+	})
+
+	repos, err := client.SearchRepos("acme", "", "security", 50)
+	if err != nil {
+		t.Fatalf("SearchRepos: %v", err)
+	}
+	if len(repos) != 1 || repos[0].Name != "vuln-scanner" {
+		t.Errorf("unexpected result: %+v", repos)
+	}
+}
+
+func TestGitHubSearchRepos_Empty(t *testing.T) {
+	client := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 0,
+			"items":       []map[string]any{},
+		})
+	})
+
+	repos, err := client.SearchRepos("acme", "nonexistent-*", "", 50)
+	if err != nil {
+		t.Fatalf("SearchRepos: %v", err)
+	}
+	if len(repos) != 0 {
+		t.Errorf("expected empty slice, got %d repos", len(repos))
+	}
+}
+
+func TestDoWithRetry_SuccessOnFirstAttempt(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, server.URL+"/test", nil)
+	resp, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err != nil {
+		t.Fatalf("doWithRetry: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1 (no retry needed)", calls)
+	}
+}
+
+func TestDoWithRetry_Retries429ThenSucceeds(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 2 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	resp, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err != nil {
+		t.Fatalf("doWithRetry: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if calls != 3 {
+		t.Errorf("calls = %d, want 3 (2 rate-limited + 1 success)", calls)
+	}
+}
+
+func TestDoWithRetry_ExhaustsRetries(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+	resp, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err != nil {
+		t.Fatalf("doWithRetry: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429 (retries exhausted)", resp.StatusCode)
+	}
+	wantCalls := retryMaxAttempts + 1
+	if calls != wantCalls {
+		t.Errorf("calls = %d, want %d (1 initial + %d retries)", calls, wantCalls, retryMaxAttempts)
+	}
+}
+
+func TestDoWithRetry_ResetsBodyOnRetry(t *testing.T) {
+	calls := 0
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		if calls == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, server.URL, bytes.NewReader([]byte("payload")))
+	resp, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err != nil {
+		t.Fatalf("doWithRetry: %v", err)
+	}
+	resp.Body.Close()
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2 (1 rate-limited + 1 success)", calls)
+	}
+	if len(bodies) < 2 || bodies[0] != "payload" || bodies[1] != "payload" {
+		t.Errorf("request bodies = %v, want [payload payload] (body must be reset on retry)", bodies)
+	}
+}
+
+func TestDoWithRetry_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the request
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	_, err := doWithRetry(req, &http.Client{}, "test.host")
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+}
+
+func TestGitHubSearchRepos_RateLimit(t *testing.T) {
+	// 429 → ErrRateLimit
+	client429 := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	_, err := client429.SearchRepos("acme", "payments-*", "", 50)
+	if !errors.Is(err, ErrRateLimit) {
+		t.Errorf("429: expected ErrRateLimit, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "30 req/min") {
+		t.Errorf("429: expected rate-limit hint in message, got %q", err.Error())
+	}
+
+	// 403 with rate-limit body → ErrRateLimit
+	client403rl := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"You have exceeded a secondary rate limit"}`))
+	})
+	_, err = client403rl.SearchRepos("acme", "payments-*", "", 50)
+	if !errors.Is(err, ErrRateLimit) {
+		t.Errorf("403 rate-limit body: expected ErrRateLimit, got %v", err)
+	}
+
+	// 403 without rate-limit body → ErrForbidden
+	client403forbidden := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"Repository access blocked"}`))
+	})
+	_, err = client403forbidden.SearchRepos("acme", "payments-*", "", 50)
+	if !errors.Is(err, ErrForbidden) {
+		t.Errorf("403 non-rate-limit body: expected ErrForbidden, got %v", err)
 	}
 }
