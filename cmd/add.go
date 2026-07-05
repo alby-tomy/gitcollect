@@ -197,12 +197,12 @@ func ensureRepoExists(col *collection.Collection, repoName string, client api.Cl
 		return false, fmt.Errorf("checking repo %q: %w", repoName, gerr)
 	}
 
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
+	if !addIsTerminalFn() {
 		return false, fmt.Errorf("repo %q not found under %s (running non-interactively — create it manually first)", repoName, namespace)
 	}
 
 	output.Warn("repo %q does not exist under %s", repoName, namespace)
-	if !output.Confirm(fmt.Sprintf("Create %s/%s as a %s repository?", namespace, repoName, visibilityWord(private))) {
+	if !addConfirmFn(fmt.Sprintf("Create %s/%s as a %s repository?", namespace, repoName, visibilityWord(private))) {
 		return false, errSkipped
 	}
 
