@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -16,14 +19,30 @@ type addTestMock struct {
 	*multiAddMock
 	createRepoFunc  func(owner, name string, private bool, description string) (api.RepoInfo, error)
 	getRepoErr      error // override GetRepo to return this error (nil means use parent)
+	getRepoFunc     func(owner, repo string) (api.RepoInfo, error) // override full GetRepo behaviour
 	searchReposFunc func(org, pattern, topic string, limit int) ([]api.RepoInfo, error)
 }
 
 func (m *addTestMock) GetRepo(owner, repo string) (api.RepoInfo, error) {
+	if m.getRepoFunc != nil {
+		return m.getRepoFunc(owner, repo)
+	}
 	if m.getRepoErr != nil {
 		return api.RepoInfo{}, m.getRepoErr
 	}
 	return m.multiAddMock.GetRepo(owner, repo)
+}
+
+func captureStderr(fn func()) string {
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
 }
 
 func (m *addTestMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
@@ -99,7 +118,7 @@ func TestEnsureRepoExists_ExistingRepo(t *testing.T) {
 	caller := api.UserInfo{ID: "owner", Login: "owner"}
 
 	// GetRepo succeeds by default — repo "exists"
-	if err := ensureRepoExists(col, "my-repo", client, caller, true); err != nil {
+	if _, err := ensureRepoExists(col, "my-repo", client, caller, true); err != nil {
 		t.Fatalf("expected nil for existing repo, got %v", err)
 	}
 }
@@ -110,7 +129,7 @@ func TestEnsureRepoExists_MissingNonInteractive(t *testing.T) {
 	caller := api.UserInfo{ID: "owner", Login: "owner"}
 
 	// stdout is not a TTY in tests — should return hard error, not prompt
-	err := ensureRepoExists(col, "new-repo", client, caller, true)
+	_, err := ensureRepoExists(col, "new-repo", client, caller, true)
 	if err == nil {
 		t.Fatal("expected error for missing repo in non-interactive context, got nil")
 	}
@@ -125,7 +144,7 @@ func TestEnsureRepoExists_OtherGetRepoError(t *testing.T) {
 	client := &addTestMock{multiAddMock: newMultiAddMock(), getRepoErr: sentinel}
 	caller := api.UserInfo{ID: "owner", Login: "owner"}
 
-	err := ensureRepoExists(col, "repo", client, caller, true)
+	_, err := ensureRepoExists(col, "repo", client, caller, true)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected sentinel error to propagate, got %v", err)
 	}
@@ -156,7 +175,7 @@ func TestEnsureRepoExists_RaceCondition(t *testing.T) {
 	//
 	// We simulate a TTY context by using os.Stdout which is not a TTY in
 	// tests — so this test verifies the non-interactive branch only.
-	err := ensureRepoExists(col, "repo", client, caller, true)
+	_, err := ensureRepoExists(col, "repo", client, caller, true)
 	if err == nil {
 		t.Fatal("expected non-interactive hard error, not nil")
 	}
@@ -228,7 +247,7 @@ func TestAdd_NonInteractive_MissingRepo(t *testing.T) {
 	caller := api.UserInfo{ID: "owner", Login: "owner"}
 
 	// In test (non-TTY), a missing repo must return a hard error.
-	err := ensureRepoExists(col, "ghost-repo", client, caller, true)
+	_, err := ensureRepoExists(col, "ghost-repo", client, caller, true)
 	if err == nil {
 		t.Fatal("expected error for missing repo in non-interactive context")
 	}
@@ -293,11 +312,12 @@ func setupAddSearchTest(t *testing.T, collName string, mock *addTestMock) *colle
 	return col
 }
 
-// resetAddFlags saves the current search-flag state and restores it on cleanup.
+// resetAddFlags saves the current search-flag and injectable-fn state and
+// restores it on cleanup.
 func resetAddFlags(t *testing.T) {
 	t.Helper()
-	oPattern, oTopic, oOrg, oDryRun, oLimit, oConfirm :=
-		addPattern, addTopic, addOrg, addDryRun, addLimit, addConfirmFn
+	oPattern, oTopic, oOrg, oDryRun, oLimit, oConfirm, oIsTerminal :=
+		addPattern, addTopic, addOrg, addDryRun, addLimit, addConfirmFn, addIsTerminalFn
 	t.Cleanup(func() {
 		addPattern = oPattern
 		addTopic = oTopic
@@ -305,7 +325,26 @@ func resetAddFlags(t *testing.T) {
 		addDryRun = oDryRun
 		addLimit = oLimit
 		addConfirmFn = oConfirm
+		addIsTerminalFn = oIsTerminal
 	})
+}
+
+// setupArchivedTest creates a saved collection in a temp HOME, wired for
+// direct calls to addOneRepo.
+func setupArchivedTest(t *testing.T, collName string) *collection.Collection {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	col, err := collection.New(collName, "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	if err := col.Save(); err != nil {
+		t.Fatalf("col.Save: %v", err)
+	}
+	return col
 }
 
 func TestAdd_PatternFlag_FindsRepos(t *testing.T) {
@@ -508,5 +547,153 @@ func TestAdd_PatternConfirmationRequired(t *testing.T) {
 	reloaded, _ := collection.Load("confirm-col")
 	if collectionHasRepo(reloaded, "confirm-repo") {
 		t.Error("repo must not be added when confirmation is declined")
+	}
+}
+
+// ── A2 archived repo tests ────────────────────────────────────────────────────
+
+func TestAdd_ArchivedRepo_PromptsUser(t *testing.T) {
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		getRepoFunc: func(owner, repo string) (api.RepoInfo, error) {
+			return api.RepoInfo{Name: repo, Archived: true}, nil
+		},
+	}
+	col := setupArchivedTest(t, "arch-prompt-col")
+
+	oldIsTerminal, oldConfirm := addIsTerminalFn, addConfirmFn
+	t.Cleanup(func() { addIsTerminalFn = oldIsTerminal; addConfirmFn = oldConfirm })
+	addIsTerminalFn = func() bool { return true }
+	confirmCalled := false
+	addConfirmFn = func(msg string) bool { confirmCalled = true; return true }
+
+	stderr := captureStderr(func() {
+		captureStdout(func() {
+			if err := addOneRepo(col, "arch-prompt-col", "owner", "owner-id", "vuln-scanner", mock, true); err != nil {
+				t.Errorf("addOneRepo = %v, want nil", err)
+			}
+		})
+	})
+
+	if !confirmCalled {
+		t.Error("expected confirmation prompt for archived repo")
+	}
+	if !strings.Contains(stderr, "archived") {
+		t.Errorf("expected archived warning in stderr, got: %q", stderr)
+	}
+}
+
+func TestAdd_ArchivedRepo_Declined(t *testing.T) {
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		getRepoFunc: func(owner, repo string) (api.RepoInfo, error) {
+			return api.RepoInfo{Name: repo, Archived: true}, nil
+		},
+	}
+	col := setupArchivedTest(t, "arch-declined-col")
+
+	oldIsTerminal, oldConfirm := addIsTerminalFn, addConfirmFn
+	t.Cleanup(func() { addIsTerminalFn = oldIsTerminal; addConfirmFn = oldConfirm })
+	addIsTerminalFn = func() bool { return true }
+	addConfirmFn = func(msg string) bool { return false }
+
+	captureStderr(func() {
+		captureStdout(func() {
+			err := addOneRepo(col, "arch-declined-col", "owner", "owner-id", "archived-repo", mock, true)
+			if !errors.Is(err, errSkipped) {
+				t.Errorf("expected errSkipped when user declines archived repo, got %v", err)
+			}
+		})
+	})
+
+	reloaded, _ := collection.Load("arch-declined-col")
+	if collectionHasRepo(reloaded, "archived-repo") {
+		t.Error("declined archived repo must not be added to collection")
+	}
+}
+
+func TestAdd_ArchivedRepo_NonInteractive(t *testing.T) {
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		getRepoFunc: func(owner, repo string) (api.RepoInfo, error) {
+			return api.RepoInfo{Name: repo, Archived: true}, nil
+		},
+	}
+	col := setupArchivedTest(t, "arch-noninteractive-col")
+
+	// addIsTerminalFn returns false by default in tests (no TTY) — no need to override.
+	var warningShown bool
+	stderr := captureStderr(func() {
+		captureStdout(func() {
+			if err := addOneRepo(col, "arch-noninteractive-col", "owner", "owner-id", "readonly-repo", mock, true); err != nil {
+				t.Errorf("addOneRepo = %v, want nil (non-interactive must not block)", err)
+			}
+		})
+	})
+	warningShown = strings.Contains(stderr, "archived")
+
+	if !warningShown {
+		t.Errorf("expected archived warning in stderr even for non-interactive, got: %q", stderr)
+	}
+	reloaded, _ := collection.Load("arch-noninteractive-col")
+	if !collectionHasRepo(reloaded, "readonly-repo") {
+		t.Error("non-interactive mode must add archived repo without prompting")
+	}
+}
+
+func TestAdd_ArchivedRepo_SuccessNote(t *testing.T) {
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		getRepoFunc: func(owner, repo string) (api.RepoInfo, error) {
+			return api.RepoInfo{Name: repo, Archived: true}, nil
+		},
+	}
+	col := setupArchivedTest(t, "arch-success-col")
+
+	oldIsTerminal, oldConfirm := addIsTerminalFn, addConfirmFn
+	t.Cleanup(func() { addIsTerminalFn = oldIsTerminal; addConfirmFn = oldConfirm })
+	addIsTerminalFn = func() bool { return true }
+	addConfirmFn = func(msg string) bool { return true }
+
+	var stdout string
+	captureStderr(func() {
+		stdout = captureStdout(func() {
+			if err := addOneRepo(col, "arch-success-col", "owner", "owner-id", "frozen-lib", mock, true); err != nil {
+				t.Errorf("addOneRepo = %v, want nil", err)
+			}
+		})
+	})
+
+	if !strings.Contains(stdout, "archived") {
+		t.Errorf("success output should contain archived note, got: %q", stdout)
+	}
+	if strings.Contains(stdout, "open to all") {
+		t.Errorf("archived success must not say 'open to all members', got: %q", stdout)
+	}
+}
+
+func TestAdd_NonArchivedRepo_NoPrompt(t *testing.T) {
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		// getRepoFunc not set — multiAddMock.GetRepo returns Archived: false
+	}
+	col := setupArchivedTest(t, "normal-col")
+
+	oldIsTerminal, oldConfirm := addIsTerminalFn, addConfirmFn
+	t.Cleanup(func() { addIsTerminalFn = oldIsTerminal; addConfirmFn = oldConfirm })
+	addIsTerminalFn = func() bool { return true }
+	confirmCalled := false
+	addConfirmFn = func(msg string) bool { confirmCalled = true; return true }
+
+	captureStderr(func() {
+		captureStdout(func() {
+			if err := addOneRepo(col, "normal-col", "owner", "owner-id", "active-repo", mock, true); err != nil {
+				t.Errorf("addOneRepo = %v, want nil", err)
+			}
+		})
+	})
+
+	if confirmCalled {
+		t.Error("non-archived repo must not trigger the archived confirmation prompt")
 	}
 }

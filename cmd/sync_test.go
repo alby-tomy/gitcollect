@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alby-tomy/gitcollect/internal/api"
+	"github.com/alby-tomy/gitcollect/internal/collection"
 )
 
 func TestFormatSyncLine(t *testing.T) {
@@ -57,5 +60,48 @@ func TestFormatSyncLine(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSyncAll_RunsOnAllCollections(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	mock := newMultiAddMock()
+	cachedClient = mock
+	cachedUser = "owner"
+	cachedUserID = "owner-id"
+	t.Cleanup(func() {
+		cachedClient = nil
+		cachedUser = ""
+		cachedUserID = ""
+	})
+
+	for _, name := range []string{"sync-all-a", "sync-all-b"} {
+		col, err := collection.New(name, "github.com",
+			api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+		if err != nil {
+			t.Fatalf("collection.New(%s): %v", name, err)
+		}
+		col.Repos = []collection.RepoAccess{{Name: "repo1", Groups: []string{}, Users: []string{}}}
+		if err := col.Save(); err != nil {
+			t.Fatalf("col.Save(%s): %v", name, err)
+		}
+	}
+
+	dest := t.TempDir()
+
+	// dryRun=true: no real git operations, no repo dirs needed
+	stderr := captureStderr(func() {
+		captureStdout(func() {
+			if err := runSyncAll(dest, true, 1); err != nil {
+				t.Fatalf("runSyncAll: %v", err)
+			}
+		})
+	})
+
+	if !strings.Contains(stderr, "sync-all-a") || !strings.Contains(stderr, "sync-all-b") {
+		t.Errorf("expected both collection names in output, got: %q", stderr)
 	}
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -89,7 +90,12 @@ func runClone(cmd *cobra.Command, args []string) error {
 
 	var cloned, failed []string
 	var totalDur time.Duration
+	var skippedCount int
 	for _, r := range results {
+		if r.skipped {
+			skippedCount++
+			continue
+		}
 		totalDur += r.duration
 		if r.err != nil {
 			failed = append(failed, fmt.Sprintf("%s (%v)", r.name, r.err))
@@ -109,9 +115,17 @@ func runClone(cmd *cobra.Command, args []string) error {
 			output.Dim("  ✗ %s", f)
 		}
 	} else {
-		output.Success("Cloned %d repo(s) in %.1fs", len(cloned), totalDur.Seconds())
+		if skippedCount > 0 {
+			output.Success("Cloned %d repos · %d already present (skipped) · in %.1fs",
+				len(cloned), skippedCount, totalDur.Seconds())
+		} else {
+			output.Success("Cloned %d repo(s) in %.1fs", len(cloned), totalDur.Seconds())
+		}
 		if absPath, err := filepath.Abs(cloneDest); err == nil {
 			output.Dim("  Location: %s", absPath)
+		}
+		if skippedCount > 0 {
+			output.Suggestion(fmt.Sprintf("gitcollect sync %s", name))
 		}
 	}
 
@@ -204,6 +218,7 @@ type cloneResult struct {
 	name     string
 	duration time.Duration
 	err      error
+	skipped  bool // true when the destination directory already existed
 }
 
 // cloneAll clones targets into dest, at most concurrency at a time, and
@@ -225,6 +240,16 @@ func cloneAll(col *collection.Collection, client api.Client, targets []collectio
 		go func(i int, repo collection.RepoAccess) {
 			defer wg.Done()
 			defer func() { <-sem }()
+
+			destPath := filepath.Join(dest, repo.Name)
+			if _, statErr := os.Stat(destPath); statErr == nil {
+				mu.Lock()
+				done++
+				output.Dim("[%d/%d] %s already cloned — skipped", done, len(targets), repo.Name)
+				results[i] = cloneResult{name: repo.Name, skipped: true}
+				mu.Unlock()
+				return
+			}
 
 			start := time.Now()
 			err := cloneOne(col, client, repo.Name, dest, dryRun)

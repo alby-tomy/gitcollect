@@ -21,6 +21,7 @@ var (
 	pullDest   string
 	pullPrune  bool
 	pullDryRun bool
+	pullAll    bool
 
 	// pruneHasUncommittedChangesFn is injectable so tests can control dirty-repo detection.
 	pruneHasUncommittedChangesFn = func(dir string) (bool, error) {
@@ -37,9 +38,9 @@ var (
 )
 
 var pullCmd = &cobra.Command{
-	Use:   "pull <collection>",
+	Use:   "pull [collection]",
 	Short: "git pull inside every accessible repo that's already cloned",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runPull,
 }
 
@@ -47,10 +48,20 @@ func init() {
 	pullCmd.Flags().StringVar(&pullDest, "dest", ".", "directory repos were cloned into")
 	pullCmd.Flags().BoolVar(&pullPrune, "prune", false, "prompt to delete local clones of repos no longer in this collection")
 	pullCmd.Flags().BoolVar(&pullDryRun, "dry-run", false, "preview prune operations without executing")
+	pullCmd.Flags().BoolVar(&pullAll, "all", false, "run across all collections you own or belong to")
 	rootCmd.AddCommand(pullCmd)
 }
 
 func runPull(cmd *cobra.Command, args []string) error {
+	if pullAll && len(args) > 0 {
+		return NewUsageError(fmt.Errorf("pull: use either <collection> or --all, not both"))
+	}
+	if !pullAll && len(args) == 0 {
+		return NewUsageError(fmt.Errorf("pull: provide a collection name or use --all"))
+	}
+	if pullAll {
+		return runPullAll(pullDest)
+	}
 	name := args[0]
 
 	if err := git.CheckInstalled(); err != nil {
@@ -105,6 +116,65 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	return pullErr
+}
+
+// runPullAll iterates every collection the caller can reach (determined by
+// whether credentials exist for its host) and runs a pull on each.
+func runPullAll(destDir string) error {
+	names, err := collection.List()
+	if err != nil {
+		return fmt.Errorf("pull --all: %w", err)
+	}
+	if len(names) == 0 {
+		output.Info("no collections found")
+		return nil
+	}
+
+	var anyFailed bool
+	for _, name := range names {
+		col, caller, callerID, client, err := loadForGit(name)
+		if err != nil {
+			output.Dim("Skipping %s: %v", name, err)
+			continue
+		}
+		output.Info("── %s ──", name)
+
+		accessible, err := access.FilterAccessible(col, callerID, client)
+		if err != nil {
+			output.Warn("  %s: %v", name, err)
+			anyFailed = true
+			continue
+		}
+		printAccessSummary(col, caller, callerID, len(accessible), len(col.Repos))
+
+		var pulled, missing, failed []string
+		for _, repo := range accessible {
+			dir := filepath.Join(destDir, repo.Name)
+			if !isDir(dir) {
+				missing = append(missing, repo.Name)
+				continue
+			}
+			if err := git.Pull(dir); err != nil {
+				failed = append(failed, fmt.Sprintf("%s (%v)", repo.Name, err))
+				continue
+			}
+			pulled = append(pulled, repo.Name)
+		}
+
+		output.Success("  Pulled %d repo(s)", len(pulled))
+		if len(missing) > 0 {
+			output.Info("  %d not cloned locally, skipped", len(missing))
+		}
+		if len(failed) > 0 {
+			anyFailed = true
+			output.Error("  %d failed", len(failed))
+		}
+	}
+
+	if anyFailed {
+		return fmt.Errorf("pull --all: some collections had failures")
+	}
+	return nil
 }
 
 // runPrune scans destDir for directories that look like stale clones of col

@@ -1,6 +1,6 @@
 # gitcollect — Implementation Progress
 
-> Last updated: Session 24 · 2026-07-05 (Audit confirmed — PROGRESS.md rewritten from ground truth)
+> Last updated: Session 25 · 2026-07-05 (FEATURE_GAPS_3.md complete — all A0–B5 items done)
 > Build status: `go build ./...` clean · `go test ./...` all packages green
 
 ---
@@ -13,7 +13,7 @@ It does not replace Git. It wraps Git and the GitHub/GitLab APIs to add the grou
 
 ---
 
-## Current state (as of Session 24)
+## Current state (as of Session 25)
 
 | Check | Result |
 |---|---|
@@ -21,9 +21,9 @@ It does not replace Git. It wraps Git and the GitHub/GitLab APIs to add the grou
 | `go build ./...` | ✓ clean |
 | `go test ./...` | ✓ all packages pass |
 | `go vet ./...` | ✓ clean |
-| `go test -cover ./cmd/...` | ✓ 56.5% |
+| `go test -cover ./cmd/...` | ✓ 62.8% |
 | Identity migration | ✓ complete — immutable platform IDs |
-| cmd test files | 27 / 32 command files have a test file |
+| cmd test files | 29 / 34 command files have a test file |
 
 ---
 
@@ -151,9 +151,14 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | `gitcollect audit <collection> --user <u>` | ✓ done | Session 2 |
 | `gitcollect audit <collection> --since <dur>` | ✓ done | Session 2 (strict allow-list Session 11) |
 | `gitcollect audit <collection> --json` | ✓ done | Session 2 |
+| `gitcollect audit <collection> --from <YYYY-MM-DD>` | ✓ done | Session 25 (FEATURE_GAPS_3 B5) |
+| `gitcollect audit <collection> --to <YYYY-MM-DD>` | ✓ done | Session 25 (FEATURE_GAPS_3 B5) |
+| `gitcollect audit <collection> --action <action>` | ✓ done | Session 25 (FEATURE_GAPS_3 B5) |
 
 **Notable design decisions:**
 - `--since` accepts only five exact values: `1h`, `24h`, `7d`, `30d`, `90d` (changed from flexible parser in Session 11)
+- `--from`/`--to` are mutually exclusive with `--since`; dates parsed as YYYY-MM-DD; `--to` is inclusive through end-of-day
+- `--action` filter is case-insensitive; implemented in `audit.FilterByAction`
 - Audit log is newline-delimited JSON at `~/.gitcollect/audit/<collection>.log`
 - Failed operations are logged too (`result: "error: ..."`) — auditability requires seeing what was attempted
 - `audit.go` received zero changes in Session 13 — Actor/Target stay login strings, populated by callers
@@ -196,6 +201,10 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | `gitcollect diff <collection> --repos-only` | ✓ done | Session 17 (FEATURE_GAPS_2 B1) |
 | `gitcollect diff <collection> --members-only` | ✓ done | Session 17 (FEATURE_GAPS_2 B1) |
 | `gitcollect move <src> <repo> <dest>` | ✓ done | Session 17 (FEATURE_GAPS_2 B2) |
+| `gitcollect status <collection> --verbose` | ✓ done | Session 25 (FEATURE_GAPS_3 B3) |
+| `gitcollect status --all` | ✓ done | Session 25 (FEATURE_GAPS_3 B4) |
+| `gitcollect pull --all` | ✓ done | Session 25 (FEATURE_GAPS_3 B4) |
+| `gitcollect sync --all` | ✓ done | Session 25 (FEATURE_GAPS_3 B4) |
 
 **Notable design decisions:**
 - `clone` double-checks platform collaborator status via API before cloning — local manifest alone is not sufficient
@@ -206,6 +215,8 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 - `pull --prune` checks remote.origin.url before deleting any directory; never deletes dirs with uncommitted changes
 - `diff` is read-only; exit 0 on drift, exit 1 on API error
 - All git operations accessible only to users who actually have collaborator access on the platform
+- `status` default mode shows REPO/STATUS/BEHIND table; `--verbose` shows raw `git status --short` per repo; `git.CommitsBehind` returns 0 (not error) when no remote
+- `--all` on pull/status/sync iterates `collection.List()`, skips collections without valid credentials, runs operation sequentially with per-collection header; `syncAll()` function renamed `syncTargets()` to avoid name conflict with the `--all` bool flag
 
 ---
 
@@ -244,29 +255,26 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | GitLab walkthrough section in docs | partial | FEATURE_GAPS D1 — one note at docs/index.html:717 only, no full walkthrough subsection |
 | `retryDo` with 429 backoff | ✓ done | FEATURE_GAPS D2 — internal/api/github.go:322 (doWithRetry with Retry-After, backoff, context cancel, 5 tests) |
 
-### List improvements (FEATURE_GAPS_3 Group A — in progress)
+### List and CLI improvements (FEATURE_GAPS_3 — complete)
 | Feature | Status | Added |
 |---|---|---|
 | `gitcollect list` shows description column | ✓ done | Session 23 (FEATURE_GAPS_3 A1) — cmd/list.go:listRow.Description, truncateDesc helper |
-| Archived repo warning on `gitcollect add` | ✗ todo | FEATURE_GAPS_3 A2 |
-| `gitcollect clone` skips already-cloned dirs | ✗ todo | FEATURE_GAPS_3 A3 |
-| `gitcollect version --json` | ✗ todo | FEATURE_GAPS_3 A4 |
-| Completion activation hint | ✗ todo | FEATURE_GAPS_3 A5 |
-
-### New small commands (FEATURE_GAPS_3 Group B — not started)
-| Command | Status |
-|---|---|
-| `gitcollect find <repo>` | ✗ todo |
-| `gitcollect describe <collection> "<desc>"` | ✗ todo |
-| `gitcollect status` summary mode + `--verbose` | ✗ todo |
-| `--all` on pull / status / sync | ✗ todo |
-| `gitcollect audit --from/--to/--action` | ✗ todo |
+| Archived repo warning on `gitcollect add` | ✓ done | Session 25 (FEATURE_GAPS_3 A2) — ensureRepoExists returns archived bool; addIsTerminalFn injectable |
+| `gitcollect clone` skips already-cloned dirs | ✓ done | Session 25 (FEATURE_GAPS_3 A3) — os.Stat destPath check; skippedCount; sync suggestion |
+| `gitcollect version --json` | ✓ done | Session 25 (FEATURE_GAPS_3 A4) — versionInfo struct; versionJSON flag |
+| Completion activation hint | ✓ done | Session 25 (FEATURE_GAPS_3 A5) — cmd/completion.go; TTY vs piped hint to stderr |
+| `gitcollect find <repo>` | ✓ done | Session 25 (FEATURE_GAPS_3 B1) — offline search across all collections; --json |
+| `gitcollect describe <collection> [desc]` | ✓ done | Session 25 (FEATURE_GAPS_3 B2) — owner-only; empty arg clears; audit entry |
+| `gitcollect status` summary mode + `--verbose` | ✓ done | Session 25 (FEATURE_GAPS_3 B3) — REPO/STATUS/BEHIND table; git.CommitsBehind |
+| `--all` on pull / status / sync | ✓ done | Session 25 (FEATURE_GAPS_3 B4) — iterates collection.List(); skips inaccessible |
+| `gitcollect audit --from/--to/--action` | ✓ done | Session 25 (FEATURE_GAPS_3 B5) — FilterByDate; FilterByAction; --since mutual exclusion |
 
 ### System
 | Command | Status | Added |
 |---|---|---|
 | `gitcollect version` | ✓ done | Session 2 |
-| `gitcollect completion bash\|zsh\|fish\|powershell` | ✓ done | Session 2 (cobra built-in) |
+| `gitcollect version --json` | ✓ done | Session 25 (FEATURE_GAPS_3 A4) |
+| `gitcollect completion bash\|zsh\|fish\|powershell` | ✓ done | Session 25 (FEATURE_GAPS_3 A5 — custom cmd/completion.go with TTY hint) |
 
 ---
 
@@ -298,6 +306,7 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | 22 | 2026-07-05 | Audit session: verified completion across prompt files; updated PROGRESS.md; generated MANUAL.md. Session 22 incorrectly stated A2/A3 were not implemented and D2 was a passthrough — all three were already done. |
 | 23 | 2026-07-05 | Full codebase audit — discovered structure from filesystem and binary. Cross-referenced all 10 prompt files against actual codebase. Corrected 3 stale Session 22 entries (A2, A3, D2). Completed FEATURE_GAPS_3 A1 (list description column). Rewrote PROGRESS.md from ground truth. Completed: 30 / Partial: 3 / Todo: 14. Agent additions found: 5. |
 | 24 | 2026-07-05 | Confirmed Session 23 audit findings as accurate and complete. Rewrote PROGRESS.md with priority-ordered remaining work and annotated agent additions (all 7 kept). Completed: 30 / Partial: 3 / Todo: 14. Agent additions kept: 7. Next session: continue FEATURE_GAPS_3.md Group A item A2. |
+| 25 | 2026-07-05 | FEATURE_GAPS_3.md complete — A0: output.Dim confirmed + test · A1: list description column · A2: add archived repo warning · A3: clone skip existing directories · A4: version --json flag · A5: completion hint (TTY detection) · B1: gitcollect find command · B2: gitcollect describe command · B3: status summary mode + CommitsBehind · B4: --all flag on pull/status/sync · B5: audit --from/--to/--action filters. cmd coverage: 62.8%. Next session: FEATURE_AUTO_CREATE_REPO.md |
 
 ---
 
@@ -401,34 +410,23 @@ These were considered and explicitly rejected:
 | `internal/collection` | 83.8% | All mutations, access logic, rollback paths |
 | `internal/access` | 93.9% | Full access matrix, owner bypass, inspect views |
 | `internal/api` | 85.5% | GitHub + GitLab against `httptest.Server` |
-| `internal/audit` | 82.8% | Append, read, filter |
+| `internal/audit` | 82.8% | Append, read, Filter, FilterByDate, FilterByAction |
 | `internal/activity` | 84.4% | Append, read, filter, dedup |
-| `internal/git` | 85.4% | Clone, Pull, PullWithSummary (fake-git harness) |
+| `internal/git` | 85.4% | Clone, Pull, PullWithSummary, CommitsBehind (fake-git harness) |
 | `internal/config` | 82.5% | Token, user, ID cache; directory paths |
 | `internal/output` | 98.1% | Table, JSON, confirm, stale/invite warnings |
-| `cmd` | 56.5% | 27 of 32 command files have test files; 5 untested: inspect, remove, repo, status, version |
+| `cmd` | 62.8% | 29 of 34 command files have test files; 3 untested: inspect, remove, repo |
 
-The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14–23. All `internal/` packages remain above the 80% requirement.
+The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14–25. All `internal/` packages remain above the 80% requirement.
 
 ---
 
 ## Remaining work
 
 ### Currently in progress
-FEATURE_GAPS_3.md — Group A items A2 through A5, then Group B
+**FEATURE_AUTO_CREATE_REPO.md** — one focused session
 
-- **A2** — archived repo warning in cmd/add.go (check `repoInfo.Archived`, confirm prompt in interactive mode, 5 tests)
-- **A3** — cmd/clone.go skip existing directories (`os.Stat(destPath)`, `output.Dim` skip message, sync tip, 4 tests)
-- **A4** — cmd/version.go `--json` flag (`versionInfo` struct, 3 tests, new version_test.go)
-- **A5** — completion activation hint (cmd/completion.go wrapper, 3 tests)
-- **B1** — cmd/find.go + cmd/find_test.go (7 tests)
-- **B2** — cmd/describe.go + cmd/describe_test.go (5 tests)
-- **B3** — status summary mode + `CommitsBehind` in internal/git/git.go + cmd/status_test.go (7+2 tests)
-- **B4** — `--all` flag on pull, status, sync (6 tests across 3 files)
-- **B5** — internal/audit/audit.go `FilterByDate`/`FilterByAction` + cmd/audit.go `--from`/`--to`/`--action` (7+4 tests)
-
-### Next after FEATURE_GAPS_3 completes
-- **FEATURE_AUTO_CREATE_REPO.md** — one focused session
+### Next
 - **FEATURE_GAPS.md** — doctor, verify, export, concepts, Long fields
   - todo: B1 — `gitcollect concepts` command (cmd/help_concepts.go)
   - todo: B1 — Enrich Long fields on 22 commands (add, audit, clone, copy, delete, diff, group, init, inspect, member, move, remove, rename, root, scale, show, status, transfer, version, visibility, whoami)
@@ -448,8 +446,6 @@ FEATURE_GAPS_3.md — Group A items A2 through A5, then Group B
 - cmd/inspect.go — no inspect_test.go
 - cmd/remove.go — no remove_test.go
 - cmd/repo.go — no repo_test.go
-- cmd/status.go — no status_test.go (will be created for FEATURE_GAPS_3 B3)
-- cmd/version.go — no version_test.go (will be created for FEATURE_GAPS_3 A4)
 
 ---
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/alby-tomy/gitcollect/internal/config"
@@ -107,6 +108,38 @@ func Read(collection string) ([]AuditEntry, error) {
 		entries[i], entries[j] = entries[j], entries[i]
 	}
 	return entries, nil
+}
+
+// FilterByDate keeps entries whose Timestamp falls within [from, to].
+// A zero from means no lower bound; a zero to means no upper bound.
+func FilterByDate(entries []AuditEntry, from, to time.Time) []AuditEntry {
+	filtered := make([]AuditEntry, 0, len(entries))
+	for _, e := range entries {
+		if !from.IsZero() && e.Timestamp.Before(from) {
+			continue
+		}
+		if !to.IsZero() && e.Timestamp.After(to) {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	return filtered
+}
+
+// FilterByAction keeps entries whose Action matches action (case-insensitive).
+// An empty action means no filter.
+func FilterByAction(entries []AuditEntry, action string) []AuditEntry {
+	if action == "" {
+		return entries
+	}
+	lower := strings.ToLower(action)
+	filtered := make([]AuditEntry, 0, len(entries))
+	for _, e := range entries {
+		if strings.ToLower(e.Action) == lower {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }
 
 // Filter keeps entries where user matches Actor or Target (if user is

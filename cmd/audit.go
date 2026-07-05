@@ -12,9 +12,12 @@ import (
 )
 
 var (
-	auditUser  string
-	auditSince string
-	auditJSON  bool
+	auditUser   string
+	auditSince  string
+	auditFrom   string
+	auditTo     string
+	auditAction string
+	auditJSON   bool
 )
 
 var auditCmd = &cobra.Command{
@@ -27,6 +30,9 @@ var auditCmd = &cobra.Command{
 func init() {
 	auditCmd.Flags().StringVar(&auditUser, "user", "", "filter the log to entries involving this user")
 	auditCmd.Flags().StringVar(&auditSince, "since", "", "filter the log to entries within this duration: 1h, 24h, 7d, 30d, or 90d")
+	auditCmd.Flags().StringVar(&auditFrom, "from", "", "filter to entries on or after this date (YYYY-MM-DD); mutually exclusive with --since")
+	auditCmd.Flags().StringVar(&auditTo, "to", "", "filter to entries on or before this date (YYYY-MM-DD); mutually exclusive with --since")
+	auditCmd.Flags().StringVar(&auditAction, "action", "", "filter to entries matching this action (case-insensitive, e.g. member.add)")
 	auditCmd.Flags().BoolVar(&auditJSON, "json", false, "machine-readable output")
 	rootCmd.AddCommand(auditCmd)
 }
@@ -61,12 +67,41 @@ func parseSince(s string) (time.Duration, error) {
 	return 0, fmt.Errorf("invalid --since value %q\n  Valid values: %s", s, strings.Join(sinceDurationsOrdered, ", "))
 }
 
+func parseAuditDate(s, flag string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid --%s value %q: expected YYYY-MM-DD (e.g. 2024-01-31)", flag, s)
+	}
+	return t, nil
+}
+
 func runAudit(cmd *cobra.Command, args []string) error {
 	name := args[0]
+
+	// --since and --from/--to are mutually exclusive.
+	if auditSince != "" && (auditFrom != "" || auditTo != "") {
+		return NewUsageError(fmt.Errorf("audit: --since and --from/--to are mutually exclusive"))
+	}
 
 	since, err := parseSince(auditSince)
 	if err != nil {
 		return NewUsageError(fmt.Errorf("audit: %w", err))
+	}
+
+	from, err := parseAuditDate(auditFrom, "from")
+	if err != nil {
+		return NewUsageError(fmt.Errorf("audit: %w", err))
+	}
+	to, err := parseAuditDate(auditTo, "to")
+	if err != nil {
+		return NewUsageError(fmt.Errorf("audit: %w", err))
+	}
+	// --to is inclusive through end-of-day.
+	if !to.IsZero() {
+		to = to.Add(24*time.Hour - time.Nanosecond)
 	}
 
 	if _, _, _, err := loadForRead(name); err != nil {
@@ -78,6 +113,8 @@ func runAudit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("audit: %w", err)
 	}
 	entries = audit.Filter(entries, auditUser, since)
+	entries = audit.FilterByDate(entries, from, to)
+	entries = audit.FilterByAction(entries, auditAction)
 
 	if auditJSON {
 		return output.JSON(entries)

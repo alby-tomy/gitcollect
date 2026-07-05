@@ -130,3 +130,93 @@ func TestFilterBySince(t *testing.T) {
 		t.Fatalf("expected since=0 to mean no time filter, got %d", len(got))
 	}
 }
+
+func TestFilterByDate_From(t *testing.T) {
+	base := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	entries := []AuditEntry{
+		{Actor: "alice", Timestamp: base.AddDate(0, 0, -1)}, // before
+		{Actor: "alice", Timestamp: base},                   // exact from
+		{Actor: "alice", Timestamp: base.AddDate(0, 0, 1)},  // after
+	}
+	got := FilterByDate(entries, base, time.Time{})
+	if len(got) != 2 {
+		t.Fatalf("expected 2 entries on or after from, got %d: %+v", len(got), got)
+	}
+}
+
+func TestFilterByDate_To(t *testing.T) {
+	base := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	entries := []AuditEntry{
+		{Actor: "alice", Timestamp: base.AddDate(0, 0, -1)}, // before
+		{Actor: "alice", Timestamp: base},                   // exact to
+		{Actor: "alice", Timestamp: base.AddDate(0, 0, 1)},  // after
+	}
+	got := FilterByDate(entries, time.Time{}, base)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 entries on or before to, got %d: %+v", len(got), got)
+	}
+}
+
+func TestFilterByDate_Range(t *testing.T) {
+	from := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2024, 6, 30, 23, 59, 59, 0, time.UTC)
+	entries := []AuditEntry{
+		{Actor: "alice", Timestamp: from.AddDate(0, 0, -1)}, // before range
+		{Actor: "alice", Timestamp: from},                   // start
+		{Actor: "alice", Timestamp: from.AddDate(0, 0, 15)}, // middle
+		{Actor: "alice", Timestamp: to},                     // end
+		{Actor: "alice", Timestamp: to.AddDate(0, 0, 1)},    // after range
+	}
+	got := FilterByDate(entries, from, to)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 entries in range, got %d: %+v", len(got), got)
+	}
+}
+
+func TestFilterByDate_ZeroFrom_NoLower(t *testing.T) {
+	old := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	entries := []AuditEntry{
+		{Actor: "alice", Timestamp: old},
+		{Actor: "alice", Timestamp: to.AddDate(0, 0, 1)}, // after to
+	}
+	got := FilterByDate(entries, time.Time{}, to)
+	if len(got) != 1 || got[0].Timestamp != old {
+		t.Fatalf("expected only old entry (zero from = no lower bound), got %+v", got)
+	}
+}
+
+func TestFilterByDate_ZeroBoth_NoFilter(t *testing.T) {
+	entries := []AuditEntry{
+		{Actor: "alice", Timestamp: time.Now()},
+		{Actor: "bob", Timestamp: time.Now()},
+	}
+	got := FilterByDate(entries, time.Time{}, time.Time{})
+	if len(got) != 2 {
+		t.Fatalf("expected no filter when both zero, got %d", len(got))
+	}
+}
+
+func TestFilterByAction_CaseInsensitive(t *testing.T) {
+	entries := []AuditEntry{
+		{Action: "member.add"},
+		{Action: "MEMBER.ADD"},
+		{Action: "Member.Add"},
+		{Action: "repo.create"},
+	}
+	got := FilterByAction(entries, "member.add")
+	if len(got) != 3 {
+		t.Fatalf("expected 3 case-insensitive matches for member.add, got %d: %+v", len(got), got)
+	}
+}
+
+func TestFilterByAction_Empty_NoFilter(t *testing.T) {
+	entries := []AuditEntry{
+		{Action: "member.add"},
+		{Action: "repo.create"},
+	}
+	got := FilterByAction(entries, "")
+	if len(got) != 2 {
+		t.Fatalf("expected no filter for empty action, got %d", len(got))
+	}
+}
