@@ -232,6 +232,25 @@ func TestInviteWarning(t *testing.T) {
 	}
 }
 
+func TestDim_WritesToStderr(t *testing.T) {
+	// Dim must write to stderr, not stdout.
+	stdout := captureStdout(t, func() {
+		_ = captureStderr(t, func() {
+			Dim("muted %s", "message")
+		})
+	})
+	if stdout != "" {
+		t.Errorf("Dim wrote to stdout, want stderr only: %q", stdout)
+	}
+
+	stderr := captureStderr(t, func() {
+		Dim("muted %s", "message")
+	})
+	if !strings.Contains(stderr, "muted message") {
+		t.Errorf("Dim output = %q, want it to contain %q", stderr, "muted message")
+	}
+}
+
 func TestClearProgress_WritesEscapeSequence(t *testing.T) {
 	out := captureStderr(t, func() {
 		ClearProgress()

@@ -1,14 +1,37 @@
 package cmd
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 	"github.com/alby-tomy/gitcollect/internal/config"
 )
+
+// captureListStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it.
+func captureListStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	fn()
+
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
 
 // writeV1Collection writes a legacy-format YAML (version "1") into the
 // collections directory so tests can exercise roleFor's legacy code path.
@@ -224,5 +247,92 @@ func TestRoleFor_V1_V2_SameHost(t *testing.T) {
 	v2role, ok := roleFor(v2col)
 	if !ok || v2role != "owner" {
 		t.Errorf("v2 collection: role=%q ok=%v, want owner/true", v2role, ok)
+	}
+}
+
+func TestList_ShowsDescription(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Cleanup(func() { listJSON = false; listPrivate = false; listPublic = false })
+
+	if err := config.SaveUserID("github.com", "owner-id"); err != nil {
+		t.Fatalf("SaveUserID: %v", err)
+	}
+	col, err := collection.New("mycol", "github.com", api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Description = "My collection description"
+	if err := col.Save(); err != nil {
+		t.Fatalf("col.Save: %v", err)
+	}
+
+	out := captureListStdout(t, func() {
+		if err := runList(listCmd, nil); err != nil {
+			t.Errorf("runList: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, `"My collection description"`) {
+		t.Errorf("output = %q, want quoted description", out)
+	}
+}
+
+func TestList_ShowsNoDescriptionFallback(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Cleanup(func() { listJSON = false; listPrivate = false; listPublic = false })
+
+	if err := config.SaveUserID("github.com", "owner-id"); err != nil {
+		t.Fatalf("SaveUserID: %v", err)
+	}
+	col, err := collection.New("nodesc", "github.com", api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	if err := col.Save(); err != nil {
+		t.Fatalf("col.Save: %v", err)
+	}
+
+	out := captureListStdout(t, func() {
+		if err := runList(listCmd, nil); err != nil {
+			t.Errorf("runList: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "(no description)") {
+		t.Errorf("output = %q, want (no description) fallback", out)
+	}
+}
+
+func TestList_JSON_IncludesDescription(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Cleanup(func() { listJSON = false; listPrivate = false; listPublic = false })
+
+	if err := config.SaveUserID("github.com", "owner-id"); err != nil {
+		t.Fatalf("SaveUserID: %v", err)
+	}
+	col, err := collection.New("jsoncol", "github.com", api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Description = "json desc"
+	if err := col.Save(); err != nil {
+		t.Fatalf("col.Save: %v", err)
+	}
+
+	listJSON = true
+	out := captureListStdout(t, func() {
+		if err := runList(listCmd, nil); err != nil {
+			t.Errorf("runList: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, `"description"`) || !strings.Contains(out, `"json desc"`) {
+		t.Errorf("JSON output = %q, want description field with value", out)
 	}
 }
