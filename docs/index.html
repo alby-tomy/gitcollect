@@ -643,6 +643,7 @@
       <li><a href="#commands">Commands</a></li>
       <li><a href="#auth-cmds">Auth</a></li>
       <li><a href="#collection-cmds">Collections</a></li>
+      <li><a href="#collection-tools">Col. tools</a></li>
       <li><a href="#repo-cmds">Repos</a></li>
       <li><a href="#member-cmds">Members</a></li>
       <li><a href="#group-cmds">Groups</a></li>
@@ -713,6 +714,7 @@
       <tr><td><strong>Audit log</strong></td><td>Every mutation — success or failure — is appended to <code>~/.gitcollect/audit/&lt;collection&gt;.log</code> as newline-delimited JSON.</td></tr>
     </table>
     <p class="note"><strong>Windows:</strong> <code>~/.gitcollect/</code> maps to <code>%USERPROFILE%\.gitcollect\</code></p>
+    <p class="note"><strong>GitHub vs GitLab:</strong> On GitHub, adding a collaborator sends an invite email that must be accepted before access is active. On GitLab, API-granted project membership is immediate — there is no invite step. gitcollect warns you when a GitHub repo is in the pending-invite state.</p>
   </div>
 </section>
 
@@ -966,6 +968,7 @@ cp cybersecurity.yaml ~/.gitcollect/collections/
 
 <span class="comment"># Option C — just send them the file (chat, email, anything)</span>
 <span class="comment"># teammate places it at ~/.gitcollect/collections/cybersecurity.yaml</span></pre></div>
+          <p class="note">A <code>gitcollect fetch</code> command for sharing collections directly by URL is planned for a future release. Until then, use Option A (publish/pull-config) for teams.</p>
           <p class="warn">Hand-editing the YAML to add yourself as a member doesn't
           actually grant you anything — the platform is the enforcement point, not the
           file. See the security note in Step 6 below.</p>
@@ -1197,6 +1200,7 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
     <div class="section-label">Reference</div>
     <h2 class="section-title">Command reference</h2>
     <p class="section-sub">Every command gitcollect ships, grouped the way the CLI itself groups them. Run <code>gitcollect &lt;command&gt; --help</code> for the live version of any of this.</p>
+    <p class="note"><strong>Global flag:</strong> <code>--offline</code> disables all network calls and limits gitcollect to local-only operations. Available on every command — useful for inspecting local state without touching the platform API.</p>
 
     <div class="group" id="auth-cmds">
       <h3>Authentication</h3>
@@ -1213,6 +1217,7 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
         <p class="sig"><span class="prog">gitcollect</span> whoami</p>
         <p class="desc">Show the authenticated user for every host you've run <code>auth</code> on. If a stored token has been rejected (expired/revoked), that host's row shows the error inline instead of hiding the others' valid status, plus a hint to re-run <code>auth</code>.</p>
         <table class="flags">
+          <tr><td class="flagname">--check</td><td class="flagdesc">make a live API call to verify each stored token is still valid — exits with code 1 if any token is rejected</td></tr>
           <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
         </table>
       </div>
@@ -1235,7 +1240,10 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
 
       <div class="cmd-block">
         <p class="sig"><span class="prog">gitcollect</span> delete &lt;collection&gt;</p>
-        <p class="desc">Delete a collection and revoke every member's access to every repo in it before removing the manifest. Requires typing the collection's name to confirm.</p>
+        <p class="desc">Delete a collection and revoke every member's access to every repo in it before removing the manifest. Requires typing the collection's name to confirm. Use <code>--dry-run</code> first to preview which members will lose access.</p>
+        <table class="flags">
+          <tr><td class="flagname">--dry-run</td><td class="flagdesc">show which members would have access revoked without deleting anything</td></tr>
+        </table>
       </div>
 
       <div class="cmd-block">
@@ -1272,14 +1280,52 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
       </div>
     </div>
 
+    <div class="group" id="collection-tools">
+      <h3>Collection tools</h3>
+
+      <div class="cmd-block">
+        <p class="sig"><span class="prog">gitcollect</span> rename &lt;collection&gt; &lt;new-name&gt;</p>
+        <p class="desc">Rename a collection. Pure local operation — no platform API calls are made. Members, repos, and groups are preserved exactly as-is. The new name must not already exist.</p>
+      </div>
+
+      <div class="cmd-block">
+        <p class="sig"><span class="prog">gitcollect</span> copy &lt;collection&gt; &lt;new-name&gt;</p>
+        <p class="desc">Copy a collection to a new name. The authenticated user becomes the owner of the copy. The new collection is always private regardless of the source's visibility. Platform collaborator access is not synced automatically — the copy starts with the same members and repos as the source, but live access is not re-granted until you run a write command against it.</p>
+      </div>
+
+      <div class="cmd-block">
+        <p class="sig"><span class="prog">gitcollect</span> diff &lt;collection&gt;</p>
+        <p class="desc">Compare a local collection against GitHub/GitLab reality. Reports repos present in the manifest but missing from the platform, repos on the platform not in the manifest, and members no longer holding collaborator status. Read-only — no changes are made. Use <code>gitcollect sync-config</code> to pull the platform's current state back into the local collection.</p>
+        <table class="flags">
+          <tr><td class="flagname">--repos-only</td><td class="flagdesc">only compare repos, skip member check</td></tr>
+          <tr><td class="flagname">--members-only</td><td class="flagdesc">only compare members, skip repo check</td></tr>
+          <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable JSON output</td></tr>
+        </table>
+      </div>
+
+      <div class="cmd-block">
+        <p class="sig"><span class="prog">gitcollect</span> move &lt;source-collection&gt; &lt;repo&gt; &lt;dest-collection&gt;</p>
+        <p class="desc">Move a repo from one collection to another atomically. Grants access to members of the destination collection; revokes access from members of the source collection who are not also in the destination. Always shows the access diff before executing. Caller must own both collections.</p>
+        <table class="flags">
+          <tr><td class="flagname">--dry-run</td><td class="flagdesc">preview access changes without executing</td></tr>
+        </table>
+      </div>
+
+    </div>
+
     <div class="group" id="repo-cmds">
       <h3>Repo management</h3>
 
       <div class="cmd-block">
         <p class="sig"><span class="prog">gitcollect</span> add &lt;collection&gt; &lt;repo&gt; [repo...]</p>
-        <p class="desc">Add one or more repos to a collection, each open to all members by default. Syncs collaborator access on the platform and saves the manifest after each repo, so if a later repo in the batch fails, every repo before it is still kept. Repos are validated up front (a malformed name anywhere in the batch fails the whole command before anything is added); each remaining failure (already in the collection, not found, sync error) is reported per-repo and the command exits non-zero listing exactly which repos failed and why, without rolling back the ones that succeeded. On an interactive terminal, if a repo doesn't exist on the platform yet, <code>add</code> offers to create it — the new repo's visibility is set by <code>--new-repo-visibility</code>.</p>
+        <p class="desc">Add one or more repos to a collection, each open to all members by default. Supports individual repo names, bulk name-pattern search (<code>--pattern</code>), or topic search (<code>--topic</code>). Syncs collaborator access on the platform and saves the manifest after each repo, so if a later repo in the batch fails, every repo before it is still kept. On an interactive terminal, if a repo doesn't exist on the platform yet, <code>add</code> offers to create it — the new repo's visibility is set by <code>--new-repo-visibility</code>.</p>
         <table class="flags">
+          <tr><td class="flagname">--pattern &lt;glob&gt;</td><td class="flagdesc">add all repos whose name matches this pattern (supports <code>*</code> wildcard) — uses the platform search API</td></tr>
+          <tr><td class="flagname">--topic &lt;name&gt;</td><td class="flagdesc">add all repos tagged with this GitHub topic</td></tr>
+          <tr><td class="flagname">--org &lt;name&gt;</td><td class="flagdesc">org to search in when using <code>--pattern</code> or <code>--topic</code> (default: collection's namespace)</td></tr>
+          <tr><td class="flagname">--limit &lt;n&gt;</td><td class="flagdesc">max repos to add via search (default 50, max 100)</td></tr>
           <tr><td class="flagname">--new-repo-visibility</td><td class="flagdesc">visibility for any repo created by this command — <code>private</code> (default) or <code>public</code></td></tr>
+          <tr><td class="flagname">--dry-run</td><td class="flagdesc">show which repos would be added without adding them</td></tr>
         </table>
       </div>
 
@@ -1315,9 +1361,10 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
 
       <div class="cmd-block">
         <p class="sig"><span class="prog">gitcollect</span> member remove &lt;collection&gt; &lt;username&gt;</p>
-        <p class="desc">Remove a member from a collection and every group, revoking their collaborator access across every repo first. Prompts for confirmation; removing yourself additionally requires <code>--confirm-self</code>.</p>
+        <p class="desc">Remove a member from a collection and every group, revoking their collaborator access across every repo first. Prompts for confirmation; removing yourself additionally requires <code>--confirm-self</code>. Use <code>--dry-run</code> to preview which repos the member can currently reach before committing to the removal.</p>
         <table class="flags">
           <tr><td class="flagname">--confirm-self</td><td class="flagdesc">required if the username being removed is your own</td></tr>
+          <tr><td class="flagname">--dry-run</td><td class="flagdesc">preview which repos access would be revoked from, without removing the member</td></tr>
         </table>
       </div>
 
@@ -1428,9 +1475,11 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
 
       <div class="cmd-block">
         <p class="sig"><span class="prog">gitcollect</span> pull &lt;collection&gt;</p>
-        <p class="desc"><code>git pull</code> inside every accessible repo that's already cloned locally. Repos that exist in the collection but aren't cloned yet are reported, not treated as errors.</p>
+        <p class="desc"><code>git pull</code> inside every accessible repo that's already cloned locally. Repos that exist in the collection but aren't cloned yet are reported, not treated as errors. Use <code>--prune</code> to clean up local clones of repos that are no longer in the collection — never deletes a repo with uncommitted changes.</p>
         <table class="flags">
           <tr><td class="flagname">--dest &lt;dir&gt;</td><td class="flagdesc">directory repos were cloned into (default current directory)</td></tr>
+          <tr><td class="flagname">--prune</td><td class="flagdesc">prompt to delete local clones of repos no longer in this collection</td></tr>
+          <tr><td class="flagname">--dry-run</td><td class="flagdesc">preview prune operations without executing (use with <code>--prune</code>)</td></tr>
         </table>
       </div>
 
