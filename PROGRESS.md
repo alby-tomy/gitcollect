@@ -1,6 +1,6 @@
 # gitcollect — Implementation Progress
 
-> Last updated: Session 22 · 2026-07-05 (Audit session)
+> Last updated: Session 23 · 2026-07-05 (Full codebase audit — ground truth rewrite)
 > Build status: `go build ./...` clean · `go test ./...` all packages green
 
 ---
@@ -13,15 +13,17 @@ It does not replace Git. It wraps Git and the GitHub/GitLab APIs to add the grou
 
 ---
 
-## Current state (as of Session 22)
+## Current state (as of Session 23)
 
 | Check | Result |
 |---|---|
+| `go build -o bin/gitcollect .` | ✓ clean |
 | `go build ./...` | ✓ clean |
 | `go test ./...` | ✓ all packages pass |
 | `go vet ./...` | ✓ clean |
+| `go test -cover ./cmd/...` | ✓ 56.5% |
 | Identity migration | ✓ complete — immutable platform IDs |
-| Test coverage | ✓ all internal/ packages above 80%; cmd significantly higher than 15.5% |
+| cmd test files | 27 / 32 command files have a test file |
 
 ---
 
@@ -230,12 +232,35 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 |---|---|---|
 | `--offline` persistent flag on root command | ✓ done | Session 17 (FEATURE_GAPS_2 B5) |
 | `requiresAuth` pre-flight helper | ✓ done | FEATURE_GAPS A1 |
-| `printRemovalImpact` / `printDeletionImpact` / `printVisibilityImpact` | ✗ todo | FEATURE_GAPS A2 — not implemented |
-| `--dry-run` on delete and member remove | ✗ todo | FEATURE_GAPS A3 — not implemented |
+| `printRemovalImpact` / `printDeletionImpact` / `printVisibilityImpact` | ✓ done | FEATURE_GAPS A2 — cmd/member.go:195, cmd/delete.go:37, cmd/visibility.go:27 |
+| `--dry-run` on delete | ✓ done | FEATURE_GAPS A3 — cmd/delete.go:31 (deleteDryRun) |
+| `--dry-run` on member remove | ✓ done | FEATURE_GAPS A3 — cmd/member.go:50 (memberRemoveDryRun) |
 | `gitcollect concepts` command | ✗ todo | FEATURE_GAPS B1 — not implemented |
 | `gitcollect doctor` | ✗ todo | FEATURE_GAPS B2 — not implemented |
+| Sync suggestion after partial clone failure | ✗ todo | FEATURE_GAPS B3 — no Suggestion() call for failed[] in clone.go |
 | `gitcollect verify` | ✗ todo | FEATURE_GAPS B4 — not implemented |
 | `gitcollect export` | ✗ todo | FEATURE_GAPS C1 — not implemented |
+| Audit Long field portability note | ✗ todo | FEATURE_GAPS C2 — not in cmd/audit.go Long or docs/index.html |
+| GitLab walkthrough section in docs | partial | FEATURE_GAPS D1 — one note at docs/index.html:717 only, no full walkthrough subsection |
+| `retryDo` with 429 backoff | ✓ done | FEATURE_GAPS D2 — internal/api/github.go:322 (doWithRetry with Retry-After, backoff, context cancel, 5 tests) |
+
+### List improvements (FEATURE_GAPS_3 Group A — in progress)
+| Feature | Status | Added |
+|---|---|---|
+| `gitcollect list` shows description column | ✓ done | Session 23 (FEATURE_GAPS_3 A1) — cmd/list.go:listRow.Description, truncateDesc helper |
+| Archived repo warning on `gitcollect add` | ✗ todo | FEATURE_GAPS_3 A2 |
+| `gitcollect clone` skips already-cloned dirs | ✗ todo | FEATURE_GAPS_3 A3 |
+| `gitcollect version --json` | ✗ todo | FEATURE_GAPS_3 A4 |
+| Completion activation hint | ✗ todo | FEATURE_GAPS_3 A5 |
+
+### New small commands (FEATURE_GAPS_3 Group B — not started)
+| Command | Status |
+|---|---|
+| `gitcollect find <repo>` | ✗ todo |
+| `gitcollect describe <collection> "<desc>"` | ✗ todo |
+| `gitcollect status` summary mode + `--verbose` | ✗ todo |
+| `--all` on pull / status / sync | ✗ todo |
+| `gitcollect audit --from/--to/--action` | ✗ todo |
 
 ### System
 | Command | Status | Added |
@@ -270,7 +295,8 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | 19 | 2026-07-03 | FEATURE_IMPORT Phase 1: ListOrgTeams/ListTeamMembers/ListTeamRepos/GetTokenScopes/paginate in API; import, publish, pull-config, join, sync-config commands |
 | 20 | 2026-07-03 | FEATURE_IMPORT Phase 2: README rewrite with full command reference; docs/index.html organisation import section |
 | 21 | 2026-07-04 | HasUncommittedChanges in git.go; pull --prune improvements; --offline B5 completion |
-| 22 | 2026-07-05 | Audit session: verified completion across all 10 prompt files; updated PROGRESS.md; generated MANUAL.md. Bugs noted (not fixed): retryDo is a passthrough (no 429 retry backoff — FEATURE_GAPS D2 unimplemented). Todo for next session: FEATURE_GAPS A2 (impact previews), A3 (--dry-run on delete/member remove), B1 (concepts command), B2 (doctor), B4 (verify), C1 (export), D2 (retryDo backoff). |
+| 22 | 2026-07-05 | Audit session: verified completion across prompt files; updated PROGRESS.md; generated MANUAL.md. Session 22 incorrectly stated A2/A3 were not implemented and D2 was a passthrough — all three were already done. |
+| 23 | 2026-07-05 | Full codebase audit — discovered structure from filesystem and binary. Cross-referenced all 10 prompt files against actual codebase. Corrected 3 stale Session 22 entries (A2, A3, D2). Completed FEATURE_GAPS_3 A1 (list description column). Rewrote PROGRESS.md from ground truth. Completed: 30 / Partial: 3 / Todo: 14. Agent additions found: 5. |
 
 ---
 
@@ -379,6 +405,52 @@ These were considered and explicitly rejected:
 | `internal/git` | 85.4% | Clone, Pull, PullWithSummary (fake-git harness) |
 | `internal/config` | 82.5% | Token, user, ID cache; directory paths |
 | `internal/output` | 98.1% | Table, JSON, confirm, stale/invite warnings |
-| `cmd` | significantly above 15.5% | 26 test files now exist across cmd/; exact % not measured this session |
+| `cmd` | 56.5% | 27 of 32 command files have test files; 5 untested: inspect, remove, repo, status, version |
 
-The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14–21. All `internal/` packages remain above the 80% requirement.
+The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14–23. All `internal/` packages remain above the 80% requirement.
+
+---
+
+## Remaining work
+
+### FEATURE_GAPS.md
+- todo: B1 — `gitcollect concepts` command (cmd/help_concepts.go)
+- todo: B1 — Enrich Long fields on 22 commands missing them (add, audit, clone, copy, delete, diff, group, init, inspect, member, move, remove, rename, root, scale, show, status, transfer, version, visibility, whoami, and root QUICK START section)
+- todo: B2 — `gitcollect doctor` (cmd/doctor.go)
+- todo: B3 — sync suggestion after partial clone failure (one Suggestion() call in clone.go's failed-block)
+- todo: B4 — `gitcollect verify` (cmd/verify.go)
+- todo: C1 — `gitcollect export` (cmd/export.go)
+- todo: C2 — audit Long field portability note; docs/index.html audit section portability note
+- partial: D1 — GitLab walkthrough subsection in docs/index.html (currently only a one-line note at line 717)
+
+### FEATURE_GAPS_3.md
+- todo: A2 — archived repo warning in cmd/add.go (check repoInfo.Archived, confirm prompt, 5 tests)
+- todo: A3 — cmd/clone.go skip existing directories (os.Stat(destPath), skipped count in summary, 4 tests)
+- todo: A4 — cmd/version.go --json flag (versionInfo struct, 3 tests, new version_test.go)
+- todo: A5 — completion activation hint (cmd/completion.go wrapper or PersistentPostRunE, 3 tests)
+- todo: B1 — cmd/find.go + cmd/find_test.go (7 tests)
+- todo: B2 — cmd/describe.go + cmd/describe_test.go (5 tests)
+- todo: B3 — cmd/status.go summary mode + CommitsBehind in internal/git/git.go + cmd/status_test.go (7+2 tests)
+- todo: B4 — --all flag on pull, status, sync (6 tests across 3 files)
+- todo: B5 — internal/audit/audit.go FilterByDate/FilterByAction + cmd/audit.go --from/--to/--action (7+4 tests)
+
+### Uncovered command files (no test file)
+- cmd/inspect.go — no inspect_test.go
+- cmd/remove.go — no remove_test.go
+- cmd/repo.go — no repo_test.go
+- cmd/status.go — no status_test.go (will be created for FEATURE_GAPS_3 B3)
+- cmd/version.go — no version_test.go (will be created for FEATURE_GAPS_3 A4)
+
+---
+
+## Agent additions (built but not specified in any prompt)
+
+These are implementation choices the agent made independently. Listed for review — keep or remove as appropriate.
+
+| Location | What | Assessment |
+|---|---|---|
+| cmd/location_test.go | Standalone test file for clone/sync Location output; no corresponding location.go | Tests valid; unconventional filename — tests cover code in clone.go and sync.go |
+| internal/git/git.go:106 | `ShallowClone(cloneURL, dest string)` | Supports pull-config; named exported function not specified in FEATURE_IMPORT.md |
+| internal/git/git.go:117–150 | `Checkout`, `Add`, `Commit`, `Push` | Support publish's subprocess git flow; behavior was specified, specific named helpers were agent choices |
+| internal/git/git.go:159 | `HasUncommittedChanges(dir string)` | Supports pull --prune; spec said to call git status --porcelain inline, not via exported function |
+| internal/git/git.go:72 | `PullWithSummary(dir string) (int, error)` | Used by sync command's commit count display; not in original sync spec |
