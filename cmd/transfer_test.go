@@ -37,7 +37,20 @@ func (m *transferMock) ListCommits(owner, repo, branch string, limit int) ([]api
 func (m *transferMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{}, nil
 }
-func (m *transferMock) Host() string { return "github.com" }
+func (m *transferMock) Host() string                    { return "github.com" }
+func (m *transferMock) GetTokenScopes() ([]string, error) { return []string{}, nil }
+func (m *transferMock) ListOrgTeams(org string) ([]api.TeamInfo, error) {
+	return nil, nil
+}
+func (m *transferMock) ListTeamMembers(org, teamSlug, role string) ([]api.UserInfo, error) {
+	return nil, nil
+}
+func (m *transferMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
+	return nil, nil
+}
+func (m *transferMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+	return nil, nil
+}
 
 // setupTransferTest creates a saved collection and injects a mock client so
 // runTransfer can be called directly without a real token file.

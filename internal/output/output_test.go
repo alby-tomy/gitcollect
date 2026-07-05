@@ -231,3 +231,14 @@ func TestInviteWarning(t *testing.T) {
 		t.Errorf("expected a retry line when retryCmd is set, got %q", out)
 	}
 }
+
+func TestClearProgress_WritesEscapeSequence(t *testing.T) {
+	out := captureStderr(t, func() {
+		ClearProgress()
+	})
+	// \r moves to column 0; \033[K clears to end of line.
+	if out != "\r\033[K" {
+		t.Errorf("ClearProgress() = %q, want %q", out, "\r\033[K")
+	}
+}
+

@@ -78,7 +78,20 @@ func (m *mockClient) GetPendingInvite(owner, repo, username string) (bool, error
 func (m *mockClient) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: name, CloneURL: "https://example.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
-func (m *mockClient) Host() string { return m.host }
+func (m *mockClient) Host() string                    { return m.host }
+func (m *mockClient) GetTokenScopes() ([]string, error) { return []string{}, nil }
+func (m *mockClient) ListOrgTeams(org string) ([]api.TeamInfo, error) {
+	return nil, nil
+}
+func (m *mockClient) ListTeamMembers(org, teamSlug, role string) ([]api.UserInfo, error) {
+	return nil, nil
+}
+func (m *mockClient) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
+	return nil, nil
+}
+func (m *mockClient) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+	return nil, nil
+}
 
 func newTestCollection(t *testing.T, visibility Visibility) *Collection {
 	t.Helper()
@@ -466,7 +479,7 @@ func TestSyncCollaborators_CheckAndRemoveFailures(t *testing.T) {
 
 	checkFail := newMockClient()
 	checkFail.failCheck = true
-	if _, _, err := col.SyncCollaborators(checkFail); err == nil {
+	if _, _, err := col.SyncCollaborators(checkFail, nil); err == nil {
 		t.Fatal("expected SyncCollaborators to surface CheckCollaborator failures")
 	}
 
@@ -477,7 +490,7 @@ func TestSyncCollaborators_CheckAndRemoveFailures(t *testing.T) {
 	col2.Members = []string{"alice"}
 	col2.Groups = map[string][]string{"red-team": {}} // alice is a member but not in red-team
 	col2.Repos = []RepoAccess{{Name: "r", Groups: []string{"red-team"}}}
-	if _, _, err := col2.SyncCollaborators(removeFail); err == nil {
+	if _, _, err := col2.SyncCollaborators(removeFail, nil); err == nil {
 		t.Fatal("expected SyncCollaborators to surface RemoveCollaborator failures")
 	}
 }

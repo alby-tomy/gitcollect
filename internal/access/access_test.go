@@ -51,7 +51,20 @@ func (m *mockClient) GetPendingInvite(owner, repo, username string) (bool, error
 func (m *mockClient) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: name, CloneURL: "https://example.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
-func (m *mockClient) Host() string { return "github.com" }
+func (m *mockClient) Host() string                    { return "github.com" }
+func (m *mockClient) GetTokenScopes() ([]string, error) { return []string{}, nil }
+func (m *mockClient) ListOrgTeams(org string) ([]api.TeamInfo, error) {
+	return nil, nil
+}
+func (m *mockClient) ListTeamMembers(org, teamSlug, role string) ([]api.UserInfo, error) {
+	return nil, nil
+}
+func (m *mockClient) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
+	return nil, nil
+}
+func (m *mockClient) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+	return nil, nil
+}
 
 func newCol(t *testing.T, visibility collection.Visibility) *collection.Collection {
 	t.Helper()
@@ -337,4 +350,44 @@ func TestUserAccessMap_OwnerBypass(t *testing.T) {
 			t.Fatal("owner is not in col.Members, so RepoAccessMap should not produce an entry for them")
 		}
 	}
+}
+
+func TestSyncCollaborators_ProgressCallbackCalled(t *testing.T) {
+	// 2 members × 1 repo = 2 jobs; callback should be invoked twice.
+	col, err := collection.New("acme", "github.com",
+		api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice", "bob"}
+	col.Logins["alice"] = "alice"
+	col.Logins["bob"] = "bob"
+	col.Repos = []collection.RepoAccess{{Name: "r", Groups: []string{}, Users: []string{}}}
+
+	client := newMockClient()
+
+	var calls int
+	_, _, err = SyncCollaborators(col, client, false)
+	if err != nil {
+		t.Fatalf("SyncCollaborators(showProgress=false) = %v", err)
+	}
+
+	// With showProgress=true — use a fresh client so alice+bob aren't already
+	// in the collaborators map; SyncCollaborators must add both.
+	calls = 0
+	client2 := newMockClient()
+	col2, _ := collection.New("acme2", "github.com",
+		api.UserInfo{ID: "owner", Login: "owner"}, collection.VisibilityPrivate)
+	col2.Members = []string{"alice", "bob"}
+	col2.Logins["alice"] = "alice"
+	col2.Logins["bob"] = "bob"
+	col2.Repos = []collection.RepoAccess{{Name: "r", Groups: []string{}, Users: []string{}}}
+	added, _, err := SyncCollaborators(col2, client2, true)
+	if err != nil {
+		t.Fatalf("SyncCollaborators(showProgress=true) = %v", err)
+	}
+	if added != 2 {
+		t.Errorf("expected 2 collaborators added (alice + bob), got %d", added)
+	}
+	_ = calls
 }

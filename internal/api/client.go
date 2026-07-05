@@ -48,6 +48,27 @@ type Client interface {
 	// Returns ErrForbidden if the authenticated user cannot create repos
 	// under the given owner (e.g. not a member of the org).
 	CreateRepo(owner, name string, private bool, description string) (RepoInfo, error)
+	// ListOrgTeams returns all teams in the org, handling pagination.
+	// Requires read:org scope on GitHub.
+	// On GitLab: returns subgroups of the group.
+	ListOrgTeams(org string) ([]TeamInfo, error)
+	// ListTeamMembers returns members of a team.
+	// role: "" = all, "maintainer" = maintainers only, "member" = non-maintainers.
+	// On GitLab: role maps to "owner"/"maintainer"/"developer"/etc.
+	ListTeamMembers(org, teamSlug, role string) ([]UserInfo, error)
+	// ListTeamRepos returns repos a team has access to, handling pagination.
+	// On GitLab: returns projects the subgroup has access to.
+	ListTeamRepos(org, teamSlug string) ([]RepoInfo, error)
+	// GetTokenScopes returns the OAuth scopes the current token has.
+	// GitHub: reads X-OAuth-Scopes response header from /user endpoint.
+	// GitLab: reads scope from /oauth/token/info endpoint.
+	// Used for pre-flight scope checking before import.
+	GetTokenScopes() ([]string, error)
+	// SearchRepos finds repos in org matching a name pattern or topic.
+	// pattern is a glob-style string (e.g. "payments-*"); empty = skip.
+	// topic is a GitHub topic name (e.g. "payments"); empty = skip.
+	// Returns up to limit repos (max 100). GitHub only; GitLab returns an error.
+	SearchRepos(org, pattern, topic string, limit int) ([]RepoInfo, error)
 	Host() string
 }
 
@@ -91,6 +112,17 @@ type CommitInfo struct {
 	Author      string
 	Message     string // first line only
 	CommittedAt time.Time
+}
+
+// TeamInfo describes a single team (GitHub) or subgroup (GitLab) returned
+// by ListOrgTeams.
+type TeamInfo struct {
+	ID          int64
+	Name        string // display name e.g. "Payments Team"
+	Slug        string // URL-safe e.g. "payments-team"
+	Description string
+	Privacy     string // "closed" | "secret" (GitHub) | "private" (GitLab)
+	ParentSlug  string // non-empty for nested teams
 }
 
 var (

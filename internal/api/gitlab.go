@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -67,7 +68,7 @@ func (c *gitlabClient) do(method, path string, body any) (*http.Response, error)
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.retryDo(req)
 	if err != nil {
 		return nil, fmt.Errorf("request to %s failed: %w", c.host, err)
 	}
@@ -358,4 +359,200 @@ func (c *gitlabClient) CheckCollaborator(owner, repo, username string) (bool, er
 // must be accepted" state to detect.
 func (c *gitlabClient) GetPendingInvite(owner, repo, username string) (bool, error) {
 	return false, nil
+}
+
+// retryDo executes r through the package-level doWithRetry helper
+// (defined in github.go — same package).
+func (c *gitlabClient) retryDo(r *http.Request) (*http.Response, error) {
+	return doWithRetry(r, c.httpClient, c.host)
+}
+
+// paginateGitLab calls startURL repeatedly following Link: rel="next" headers
+// (GitLab REST API uses the same Link header format as GitHub). Falls back to
+// the X-Next-Page header when the Link header is absent.
+func (c *gitlabClient) paginateGitLab(startURL string, fn func([]byte) error) error {
+	pageURL := startURL
+	for pageURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
+		if err != nil {
+			cancel()
+			return err
+		}
+		req.Header.Set("PRIVATE-TOKEN", c.token)
+
+		resp, err := c.retryDo(req)
+		if err != nil {
+			cancel()
+			return err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		cancel()
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return classifyStatus(resp.StatusCode)
+		}
+		if err := fn(body); err != nil {
+			return err
+		}
+		// nextPageURL is defined in github.go (same package) and parses the
+		// Link header format that GitLab also produces.
+		if next := nextPageURL(resp.Header.Get("Link")); next != "" {
+			pageURL = next
+		} else if pg := resp.Header.Get("X-Next-Page"); pg != "" {
+			u, parseErr := url.Parse(startURL)
+			if parseErr != nil {
+				break
+			}
+			q := u.Query()
+			q.Set("page", pg)
+			u.RawQuery = q.Encode()
+			pageURL = u.String()
+		} else {
+			pageURL = ""
+		}
+	}
+	return nil
+}
+
+// ListOrgTeams returns the direct subgroups of the given GitLab group,
+// mapped onto TeamInfo. The group slug is used as the Slug field.
+func (c *gitlabClient) ListOrgTeams(org string) ([]TeamInfo, error) {
+	startURL := fmt.Sprintf("%s/groups/%s/subgroups?per_page=100",
+		c.baseURL, url.PathEscape(org))
+	var teams []TeamInfo
+	err := c.paginateGitLab(startURL, func(body []byte) error {
+		var page []struct {
+			ID          int64  `json:"id"`
+			Name        string `json:"name"`
+			Path        string `json:"path"`
+			Description string `json:"description"`
+			Visibility  string `json:"visibility"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, g := range page {
+			privacy := "private"
+			if g.Visibility == "public" {
+				privacy = "public"
+			}
+			teams = append(teams, TeamInfo{
+				ID:          g.ID,
+				Name:        g.Name,
+				Slug:        g.Path,
+				Description: g.Description,
+				Privacy:     privacy,
+			})
+		}
+		return nil
+	})
+	return teams, err
+}
+
+// ListTeamMembers returns members of a GitLab subgroup (org/teamSlug).
+// The role parameter is accepted but not currently filtered server-side;
+// GitLab's members endpoint returns all access levels and the caller
+// can filter on the returned data if needed.
+func (c *gitlabClient) ListTeamMembers(org, teamSlug, role string) ([]UserInfo, error) {
+	groupPath := url.QueryEscape(org + "/" + teamSlug)
+	startURL := fmt.Sprintf("%s/groups/%s/members?per_page=100", c.baseURL, groupPath)
+	var members []UserInfo
+	err := c.paginateGitLab(startURL, func(body []byte) error {
+		var page []struct {
+			ID       int64  `json:"id"`
+			Username string `json:"username"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, m := range page {
+			members = append(members, UserInfo{
+				ID:    strconv.FormatInt(m.ID, 10),
+				Login: m.Username,
+			})
+		}
+		return nil
+	})
+	return members, err
+}
+
+// ListTeamRepos returns the projects accessible to a GitLab subgroup (org/teamSlug).
+func (c *gitlabClient) ListTeamRepos(org, teamSlug string) ([]RepoInfo, error) {
+	groupPath := url.QueryEscape(org + "/" + teamSlug)
+	startURL := fmt.Sprintf("%s/groups/%s/projects?per_page=100", c.baseURL, groupPath)
+	var repos []RepoInfo
+	err := c.paginateGitLab(startURL, func(body []byte) error {
+		var page []struct {
+			Name          string `json:"name"`
+			HTTPURLToRepo string `json:"http_url_to_repo"`
+			Visibility    string `json:"visibility"`
+			Archived      bool   `json:"archived"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, r := range page {
+			repos = append(repos, RepoInfo{
+				Name:     r.Name,
+				CloneURL: r.HTTPURLToRepo,
+				Private:  r.Visibility != "public",
+				Archived: r.Archived,
+			})
+		}
+		return nil
+	})
+	return repos, err
+}
+
+// GetTokenScopes returns the OAuth scopes for the current GitLab token.
+// Tries the personal access token info endpoint first (GitLab 15.0+),
+// then falls back to the OAuth token info endpoint.
+func (c *gitlabClient) GetTokenScopes() ([]string, error) {
+	resp, err := c.do(http.MethodGet, "/personal_access_tokens/self", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		var out struct {
+			Scopes []string `json:"scopes"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return []string{}, nil
+		}
+		return out.Scopes, nil
+	}
+
+	// Fall back to OAuth token info (space-separated scope string).
+	resp2, err := c.do(http.MethodGet, "/oauth/token/info", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		return []string{}, nil
+	}
+	var out2 struct {
+		Scope string `json:"scope"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&out2); err != nil {
+		return []string{}, nil
+	}
+	var scopes []string
+	for _, s := range strings.Split(out2.Scope, " ") {
+		if s = strings.TrimSpace(s); s != "" {
+			scopes = append(scopes, s)
+		}
+	}
+	return scopes, nil
+}
+
+func (c *gitlabClient) SearchRepos(org, pattern, topic string, limit int) ([]RepoInfo, error) {
+	return nil, fmt.Errorf("search is not supported for GitLab")
 }

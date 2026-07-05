@@ -101,7 +101,20 @@ func (m *rootMock) ListCommits(owner, repo, branch string, limit int) ([]api.Com
 func (m *rootMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
-func (m *rootMock) Host() string { return "github.com" }
+func (m *rootMock) Host() string                    { return "github.com" }
+func (m *rootMock) GetTokenScopes() ([]string, error) { return []string{}, nil }
+func (m *rootMock) ListOrgTeams(org string) ([]api.TeamInfo, error) {
+	return nil, nil
+}
+func (m *rootMock) ListTeamMembers(org, teamSlug, role string) ([]api.UserInfo, error) {
+	return nil, nil
+}
+func (m *rootMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
+	return nil, nil
+}
+func (m *rootMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
+	return nil, nil
+}
 
 // resetCallerCache clears the package-level identity cache before a test and
 // restores it to empty afterward, so each test starts from a clean slate.
@@ -334,5 +347,88 @@ func TestLoadForOwner_CollectionNotFound_VerbPrefixed(t *testing.T) {
 	}
 	if !strings.HasPrefix(err.Error(), "delete:") {
 		t.Errorf("expected error prefixed with verb 'delete:', got: %v", err)
+	}
+}
+
+func TestRequiresAuth_NoToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	err := requiresAuth("github.com")
+	if err == nil {
+		t.Fatal("expected error when no token stored, got nil")
+	}
+	if !strings.Contains(err.Error(), "gitcollect auth --host github.com") {
+		t.Errorf("error should contain auth hint, got: %v", err)
+	}
+}
+
+func TestRequiresAuth_TokenPresent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	if err := config.SaveToken("github.com", "tok-test"); err != nil {
+		t.Fatalf("SaveToken: %v", err)
+	}
+	if err := requiresAuth("github.com"); err != nil {
+		t.Errorf("expected nil when token stored, got: %v", err)
+	}
+}
+
+func TestOfflineMode_IsOfflineDefaultFalse(t *testing.T) {
+	old := offlineMode
+	offlineMode = false
+	t.Cleanup(func() { offlineMode = old })
+
+	if IsOffline() {
+		t.Error("IsOffline() = true before any flag is set, want false")
+	}
+}
+
+func TestOfflineMode_IsOfflineTrueWhenFlagSet(t *testing.T) {
+	old := offlineMode
+	offlineMode = true
+	t.Cleanup(func() { offlineMode = old })
+
+	if !IsOffline() {
+		t.Error("IsOffline() = false after setting offlineMode = true, want true")
+	}
+}
+
+func TestOfflineMode_BlocksNetworkCommands(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	old := offlineMode
+	offlineMode = true
+	t.Cleanup(func() { offlineMode = old })
+
+	err := requiresAuth("github.com")
+	if err == nil {
+		t.Fatal("expected error from requiresAuth in offline mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "network connection") {
+		t.Errorf("expected offline message, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "gitcollect auth") {
+		t.Errorf("offline error should not mention auth command, got: %v", err)
+	}
+}
+
+func TestOfflineMode_AllowsLocalCommands(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	old := offlineMode
+	offlineMode = true
+	t.Cleanup(func() { offlineMode = old })
+
+	// list reads only local manifests — should succeed even offline.
+	if err := runList(nil, nil); err != nil {
+		t.Errorf("runList in offline mode returned error: %v", err)
 	}
 }

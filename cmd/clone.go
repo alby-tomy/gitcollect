@@ -110,6 +110,9 @@ func runClone(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		output.Success("Cloned %d repo(s) in %.1fs", len(cloned), totalDur.Seconds())
+		if absPath, err := filepath.Abs(cloneDest); err == nil {
+			output.Dim("  Location: %s", absPath)
+		}
 	}
 
 	if len(skipped) > 0 {
