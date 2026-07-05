@@ -12,48 +12,48 @@
 | Command | Description | Auth required | Owner only |
 |---------|-------------|---------------|------------|
 | auth | Authenticate with GitHub or GitLab and store the access token | no | no |
-| whoami | Show the authenticated user for each configured host | no | no |
+| whoami | Show the authenticated user for each host you've run gitcollect auth on | no | no |
 | init | Create a new collection | yes | — |
-| delete | Delete a collection and revoke all access | yes | yes |
-| list | List collections you own or are a member of (local, no network) | no | no |
-| show | Show repos, members, and groups in a collection | no | no |
+| delete | Delete a collection and revoke all access to its repos | yes | yes |
+| list | List your collections (owned + member) | no | no |
+| show | Show a summary of a collection: repos, members, and groups | no | no |
 | visibility | Change a collection's visibility | yes | yes |
 | rename | Rename a collection | yes | yes |
 | copy | Copy a collection to a new name | yes | no (read) |
 | transfer | Transfer collection ownership to another member | yes | yes |
-| scale | Switch between TEAM and ORGANISATION tiers | yes | yes |
-| add | Add repos to a collection | yes | yes |
-| remove | Remove a repo from a collection | yes | yes |
+| scale | Switch a collection between TEAM and ORGANISATION tiers | yes | yes |
+| add | Add repos to a collection, open to all members by default | yes | yes |
+| remove | Remove a repo from a collection and revoke everyone's access to it | yes | yes |
 | repo access | Restrict or open up who can access a repo | yes | yes |
 | repo show | Show who can access a repo and why | yes | no |
 | member add | Add one or more members to a collection | yes | yes |
-| member remove | Remove a member and revoke all their access | yes | yes |
+| member remove | Remove a member from a collection and revoke all their access | yes | yes |
 | member list | List members and their group memberships | yes | no |
 | group create | Create a group | yes | yes |
-| group delete | Delete a group | yes | yes |
-| group add | Add members to a group | yes | owner or group admin |
+| group delete | Delete a group (blocked if any repo still uses it) | yes | yes |
+| group add | Add one or more members to a group | yes | owner or group admin |
 | group remove | Remove a member from a group | yes | owner or group admin |
 | group list | List groups and their members | yes | no |
-| group show | Show a group's members and accessible repos | yes | no |
-| group admin add | Grant group admin rights for a group | yes | yes |
-| group admin remove | Revoke group admin rights | yes | yes or self |
-| group admin list | List group admin assignments | yes | no |
-| inspect | Show access decisions for the collection | yes | no |
-| audit | Show the access change log | no | no |
-| activity | Show recent git commit activity [experimental] | yes | no |
-| clone | Clone every accessible repo in a collection | yes | no |
-| pull | git pull inside every cloned repo | yes | no |
-| sync | Clone missing repos + pull existing ones | yes | no |
-| status | git status inside every cloned repo | yes | no |
-| diff | Compare local collection against GitHub/GitLab reality | yes | no |
+| group show | Show a group's members and the repos they can reach | yes | no |
+| group admin add | Grant a member group admin rights for a specific group (owner-only) | yes | yes |
+| group admin remove | Revoke group admin rights for a specific group | yes | yes or self |
+| group admin list | List all group admin assignments in a collection | yes | no |
+| inspect | Show access decisions for a user, a repo, or the full collection matrix | yes | no |
+| audit | Show the access change log for a collection | no | no |
+| activity | Show commits across a collection's repos, fetched live from the platform | yes | no |
+| clone | Clone every repo you can access in a collection | yes | no |
+| pull | git pull inside every accessible repo that's already cloned | yes | no |
+| sync | Clone every repo not yet present locally, pull every repo that already is | yes | no |
+| status | git status inside every accessible repo that's already cloned | yes | no |
+| diff | Compare a local collection against GitHub/GitLab reality | yes | no |
 | move | Move a repo from one collection to another | yes | yes (both) |
-| import | Import GitHub/GitLab org structure as collections | yes | — |
-| publish | Push collection files to a shared git repo | yes | — |
-| pull-config | Fetch collection files from a shared git repo | yes | — |
-| join | New-hire onboarding: fetch config + clone repos | yes | — |
-| sync-config | Refresh local collections from platform org state | yes | — |
+| import | Import GitHub/GitLab org structure as gitcollect collections | yes | — |
+| publish | Push collection files to a shared git repository | yes | — |
+| pull-config | Fetch collection files from a shared git repository | yes | — |
+| join | New-hire onboarding: fetch your team's config and clone repos in one step | yes | — |
+| sync-config | Refresh local collections from the platform org state | yes | — |
 | version | Print version and platform information | no | no |
-| completion | Generate shell autocompletion scripts | no | no |
+| completion | Generate the autocompletion script for the specified shell | no | no |
 
 ---
 
@@ -155,14 +155,18 @@ gitcollect init cybersecurity --host gitlab.com --description "pen-test tools"
 gitcollect delete <collection> [flags]
 ```
 
-**Flags:** none (beyond `-h`)
+**Flags:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dry-run` | false | preview impact without deleting |
 
 **Example:**
 ```bash
 gitcollect delete cybersecurity
+gitcollect delete cybersecurity --dry-run
 ```
 
-**Notes:** Irreversible. Removes the local YAML file permanently. All platform access revocations are made before the file is deleted.
+**Notes:** Irreversible. Removes the local YAML file permanently. All platform access revocations are made before the file is deleted. Use `--dry-run` to see which members would have access revoked before committing.
 
 **See also:** visibility, rename
 
@@ -273,7 +277,7 @@ gitcollect rename cybersecurity security-research
 gitcollect copy <collection> <new-name> [flags]
 ```
 
-**Flags:** none shown in `--help` beyond `-h`
+**Flags:** none (beyond `-h`)
 
 **Example:**
 ```bash
@@ -472,10 +476,12 @@ gitcollect member remove <collection> <username> [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--confirm-self` | false | required when removing your own username |
+| `--dry-run` | false | preview impact without removing |
 
 **Example:**
 ```bash
 gitcollect member remove cybersecurity alice
+gitcollect member remove cybersecurity alice --dry-run
 gitcollect member remove cybersecurity alice --confirm-self
 ```
 
@@ -1126,3 +1132,5 @@ gitcollect completion powershell >> $PROFILE; . $PROFILE
 | `gitcollect verify` | FEATURE_GAPS.md (B4) |
 | `gitcollect export` | FEATURE_GAPS.md (C1) |
 | `gitcollect concepts` | FEATURE_GAPS.md (B1) |
+| `gitcollect find` | FEATURE_GAPS.md |
+| `gitcollect describe` | FEATURE_GAPS.md |
