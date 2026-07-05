@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/alby-tomy/gitcollect/internal/api"
+	"github.com/alby-tomy/gitcollect/internal/audit"
 	"github.com/alby-tomy/gitcollect/internal/collection"
 )
 
@@ -695,5 +696,143 @@ func TestAdd_NonArchivedRepo_NoPrompt(t *testing.T) {
 
 	if confirmCalled {
 		t.Error("non-archived repo must not trigger the archived confirmation prompt")
+	}
+}
+
+// ── FEATURE_AUTO_CREATE_REPO: interactive path tests ─────────────────────────
+
+func TestEnsureRepoExists_MissingDeclined(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	col := newTestCol(t)
+	createCalled := false
+	client := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		getRepoErr:   api.ErrNotFound,
+		createRepoFunc: func(owner, name string, private bool, description string) (api.RepoInfo, error) {
+			createCalled = true
+			return api.RepoInfo{}, nil
+		},
+	}
+	caller := api.UserInfo{ID: "owner", Login: "owner"}
+
+	oldIsTerminal, oldConfirm := addIsTerminalFn, addConfirmFn
+	t.Cleanup(func() { addIsTerminalFn = oldIsTerminal; addConfirmFn = oldConfirm })
+	addIsTerminalFn = func() bool { return true }
+	addConfirmFn = func(msg string) bool { return false }
+
+	var retErr error
+	captureStderr(func() {
+		captureStdout(func() {
+			_, retErr = ensureRepoExists(col, "new-repo", client, caller, true)
+		})
+	})
+
+	if !errors.Is(retErr, errSkipped) {
+		t.Errorf("expected errSkipped when user declines, got %v", retErr)
+	}
+	if createCalled {
+		t.Error("CreateRepo must not be called when user declines")
+	}
+}
+
+func TestEnsureRepoExists_MissingConfirmed(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	col := newTestCol(t)
+	var createCalledWith string
+	client := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		getRepoErr:   api.ErrNotFound,
+		createRepoFunc: func(owner, name string, private bool, description string) (api.RepoInfo, error) {
+			createCalledWith = name
+			return api.RepoInfo{Name: name, CloneURL: "https://github.com/owner/" + name + ".git", Private: private}, nil
+		},
+	}
+	caller := api.UserInfo{ID: "owner", Login: "owner"}
+
+	oldIsTerminal, oldConfirm := addIsTerminalFn, addConfirmFn
+	t.Cleanup(func() { addIsTerminalFn = oldIsTerminal; addConfirmFn = oldConfirm })
+	addIsTerminalFn = func() bool { return true }
+	addConfirmFn = func(msg string) bool { return true }
+
+	var retErr error
+	captureStderr(func() {
+		captureStdout(func() {
+			_, retErr = ensureRepoExists(col, "brand-new", client, caller, true)
+		})
+	})
+
+	if retErr != nil {
+		t.Fatalf("expected nil when user confirms creation, got %v", retErr)
+	}
+	if createCalledWith != "brand-new" {
+		t.Errorf("CreateRepo called with %q, want %q", createCalledWith, "brand-new")
+	}
+
+	entries, err := audit.Read(col.Name)
+	if err != nil {
+		t.Fatalf("audit.Read: %v", err)
+	}
+	var found bool
+	for _, e := range entries {
+		if e.Action == "repo.create" && e.Target == "brand-new" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected repo.create audit entry for brand-new, got %+v", entries)
+	}
+}
+
+func TestAdd_BatchWithMixedExistence(t *testing.T) {
+	confirmCallCount := 0
+	mock := &addTestMock{
+		multiAddMock: newMultiAddMock(),
+		getRepoFunc: func(owner, repo string) (api.RepoInfo, error) {
+			if repo == "exists-repo" {
+				return api.RepoInfo{Name: repo}, nil
+			}
+			return api.RepoInfo{}, api.ErrNotFound
+		},
+	}
+	setupAddSearchTest(t, "batch-col", mock)
+	resetAddFlags(t)
+
+	addIsTerminalFn = func() bool { return true }
+	addConfirmFn = func(msg string) bool {
+		confirmCallCount++
+		return confirmCallCount == 1 // first missing repo confirmed; second declined
+	}
+
+	captureStdout(func() {
+		captureStderr(func() {
+			if err := runAdd(nil, []string{"batch-col", "exists-repo", "new-repo", "skip-repo"}); err != nil {
+				t.Fatalf("runAdd = %v, want nil", err)
+			}
+		})
+	})
+
+	reloaded, err := collection.Load("batch-col")
+	if err != nil {
+		t.Fatalf("collection.Load: %v", err)
+	}
+
+	if !collectionHasRepo(reloaded, "exists-repo") {
+		t.Error("exists-repo should be in collection")
+	}
+	if !collectionHasRepo(reloaded, "new-repo") {
+		t.Error("new-repo should be in collection after confirmed creation")
+	}
+	if collectionHasRepo(reloaded, "skip-repo") {
+		t.Error("skip-repo should NOT be in collection (user declined)")
+	}
+	if confirmCallCount != 2 {
+		t.Errorf("expected 2 confirm calls (one per missing repo), got %d", confirmCallCount)
 	}
 }
