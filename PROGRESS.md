@@ -1,6 +1,6 @@
 # gitcollect — Implementation Progress
 
-> Last updated: Session 23 · 2026-07-05 (Full codebase audit — ground truth rewrite)
+> Last updated: Session 24 · 2026-07-05 (Audit confirmed — PROGRESS.md rewritten from ground truth)
 > Build status: `go build ./...` clean · `go test ./...` all packages green
 
 ---
@@ -13,7 +13,7 @@ It does not replace Git. It wraps Git and the GitHub/GitLab APIs to add the grou
 
 ---
 
-## Current state (as of Session 23)
+## Current state (as of Session 24)
 
 | Check | Result |
 |---|---|
@@ -297,6 +297,7 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | 21 | 2026-07-04 | HasUncommittedChanges in git.go; pull --prune improvements; --offline B5 completion |
 | 22 | 2026-07-05 | Audit session: verified completion across prompt files; updated PROGRESS.md; generated MANUAL.md. Session 22 incorrectly stated A2/A3 were not implemented and D2 was a passthrough — all three were already done. |
 | 23 | 2026-07-05 | Full codebase audit — discovered structure from filesystem and binary. Cross-referenced all 10 prompt files against actual codebase. Corrected 3 stale Session 22 entries (A2, A3, D2). Completed FEATURE_GAPS_3 A1 (list description column). Rewrote PROGRESS.md from ground truth. Completed: 30 / Partial: 3 / Todo: 14. Agent additions found: 5. |
+| 24 | 2026-07-05 | Confirmed Session 23 audit findings as accurate and complete. Rewrote PROGRESS.md with priority-ordered remaining work and annotated agent additions (all 7 kept). Completed: 30 / Partial: 3 / Todo: 14. Agent additions kept: 7. Next session: continue FEATURE_GAPS_3.md Group A item A2. |
 
 ---
 
@@ -413,26 +414,35 @@ The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14
 
 ## Remaining work
 
-### FEATURE_GAPS.md
-- todo: B1 — `gitcollect concepts` command (cmd/help_concepts.go)
-- todo: B1 — Enrich Long fields on 22 commands missing them (add, audit, clone, copy, delete, diff, group, init, inspect, member, move, remove, rename, root, scale, show, status, transfer, version, visibility, whoami, and root QUICK START section)
-- todo: B2 — `gitcollect doctor` (cmd/doctor.go)
-- todo: B3 — sync suggestion after partial clone failure (one Suggestion() call in clone.go's failed-block)
-- todo: B4 — `gitcollect verify` (cmd/verify.go)
-- todo: C1 — `gitcollect export` (cmd/export.go)
-- todo: C2 — audit Long field portability note; docs/index.html audit section portability note
-- partial: D1 — GitLab walkthrough subsection in docs/index.html (currently only a one-line note at line 717)
+### Currently in progress
+FEATURE_GAPS_3.md — Group A items A2 through A5, then Group B
 
-### FEATURE_GAPS_3.md
-- todo: A2 — archived repo warning in cmd/add.go (check repoInfo.Archived, confirm prompt, 5 tests)
-- todo: A3 — cmd/clone.go skip existing directories (os.Stat(destPath), skipped count in summary, 4 tests)
-- todo: A4 — cmd/version.go --json flag (versionInfo struct, 3 tests, new version_test.go)
-- todo: A5 — completion activation hint (cmd/completion.go wrapper or PersistentPostRunE, 3 tests)
-- todo: B1 — cmd/find.go + cmd/find_test.go (7 tests)
-- todo: B2 — cmd/describe.go + cmd/describe_test.go (5 tests)
-- todo: B3 — cmd/status.go summary mode + CommitsBehind in internal/git/git.go + cmd/status_test.go (7+2 tests)
-- todo: B4 — --all flag on pull, status, sync (6 tests across 3 files)
-- todo: B5 — internal/audit/audit.go FilterByDate/FilterByAction + cmd/audit.go --from/--to/--action (7+4 tests)
+- **A2** — archived repo warning in cmd/add.go (check `repoInfo.Archived`, confirm prompt in interactive mode, 5 tests)
+- **A3** — cmd/clone.go skip existing directories (`os.Stat(destPath)`, `output.Dim` skip message, sync tip, 4 tests)
+- **A4** — cmd/version.go `--json` flag (`versionInfo` struct, 3 tests, new version_test.go)
+- **A5** — completion activation hint (cmd/completion.go wrapper, 3 tests)
+- **B1** — cmd/find.go + cmd/find_test.go (7 tests)
+- **B2** — cmd/describe.go + cmd/describe_test.go (5 tests)
+- **B3** — status summary mode + `CommitsBehind` in internal/git/git.go + cmd/status_test.go (7+2 tests)
+- **B4** — `--all` flag on pull, status, sync (6 tests across 3 files)
+- **B5** — internal/audit/audit.go `FilterByDate`/`FilterByAction` + cmd/audit.go `--from`/`--to`/`--action` (7+4 tests)
+
+### Next after FEATURE_GAPS_3 completes
+- **FEATURE_AUTO_CREATE_REPO.md** — one focused session
+- **FEATURE_GAPS.md** — doctor, verify, export, concepts, Long fields
+  - todo: B1 — `gitcollect concepts` command (cmd/help_concepts.go)
+  - todo: B1 — Enrich Long fields on 22 commands (add, audit, clone, copy, delete, diff, group, init, inspect, member, move, remove, rename, root, scale, show, status, transfer, version, visibility, whoami)
+  - todo: B2 — `gitcollect doctor` (cmd/doctor.go)
+  - todo: B3 — sync suggestion after partial clone failure (one `Suggestion()` call in clone.go's failed-block)
+  - todo: B4 — `gitcollect verify` (cmd/verify.go)
+  - todo: C1 — `gitcollect export` (cmd/export.go)
+  - todo: C2 — audit Long field portability note; docs/index.html audit section portability note
+  - partial: D1 — GitLab walkthrough subsection in docs/index.html (currently only a one-line note at line 717)
+- **FEATURE_SCALABILITY.md** — transfer, scale, group admin commands
+- **FEATURE_IMPORT.md** — full enterprise import (largest remaining)
+
+### Documentation
+- **APPLY_SAMPLE_THEME.md** — visual redesign of docs/index.html (do last, after all features are stable)
 
 ### Uncovered command files (no test file)
 - cmd/inspect.go — no inspect_test.go
@@ -443,14 +453,22 @@ The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14
 
 ---
 
-## Agent additions (built but not specified in any prompt)
+## Agent additions (all KEEP)
 
-These are implementation choices the agent made independently. Listed for review — keep or remove as appropriate.
+These are implementation choices the agent made independently, confirmed as legitimate improvements in Session 24.
 
-| Location | What | Assessment |
-|---|---|---|
-| cmd/location_test.go | Standalone test file for clone/sync Location output; no corresponding location.go | Tests valid; unconventional filename — tests cover code in clone.go and sync.go |
-| internal/git/git.go:106 | `ShallowClone(cloneURL, dest string)` | Supports pull-config; named exported function not specified in FEATURE_IMPORT.md |
-| internal/git/git.go:117–150 | `Checkout`, `Add`, `Commit`, `Push` | Support publish's subprocess git flow; behavior was specified, specific named helpers were agent choices |
-| internal/git/git.go:159 | `HasUncommittedChanges(dir string)` | Supports pull --prune; spec said to call git status --porcelain inline, not via exported function |
-| internal/git/git.go:72 | `PullWithSummary(dir string) (int, error)` | Used by sync command's commit count display; not in original sync spec |
+| Location | What | Decision | Reason |
+|---|---|---|---|
+| internal/api/github.go:322 | `doWithRetry` | ✓ KEEP | Better name than `retryDo`; fully correct — Retry-After header, backoff, context cancel, 5 tests |
+| cmd/activity.go | `activity` command | ✓ KEEP | Working feature, marked `[EXPERIMENTAL]` in help text |
+| internal/collection/collection.go:343 | `SetPath()` | ✓ KEEP | Used by rename and import commands; legitimate addition |
+| internal/output/output.go:58 | `output.Dim` | ✓ KEEP | Was referenced in spec; agent added it correctly |
+| internal/output/output.go:74 | `ClearProgress` | ✓ KEEP | Used by SyncCollaborators progress output |
+| internal/collection/collection.go:418 | `MemberIDs()` | ✓ KEEP | Used by move command; legitimate |
+| internal/collection/collection.go:428 | `SaveAs()` | ✓ KEEP | Used by rename and copy commands; legitimate |
+
+---
+
+## Bugs noted
+
+No currently open bugs — all known bugs were fixed in commit 19c86e2.
