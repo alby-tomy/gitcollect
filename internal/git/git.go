@@ -163,3 +163,15 @@ func HasUncommittedChanges(dir string) (bool, error) {
 	}
 	return out != "", nil
 }
+
+// CommitsBehind returns how many commits the local HEAD is behind origin/HEAD.
+// Returns 0 (not an error) when there is no remote or the tracking branch
+// does not exist yet — callers treat "no remote" and "up to date" the same.
+func CommitsBehind(dir string) (int, error) {
+	out, err := run(dir, "rev-list", "HEAD..origin/HEAD", "--count")
+	if err != nil {
+		return 0, nil
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(out))
+	return n, nil
+}

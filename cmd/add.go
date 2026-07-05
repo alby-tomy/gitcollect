@@ -28,6 +28,10 @@ var (
 
 	// addConfirmFn is injectable so tests can control the y/N prompt.
 	addConfirmFn = func(msg string) bool { return output.Confirm(msg) }
+
+	// addIsTerminalFn is injectable so tests can simulate interactive mode for
+	// the archived-repo confirmation prompt.
+	addIsTerminalFn = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 )
 
 var addCmd = &cobra.Command{
@@ -177,37 +181,38 @@ func runAddSearch(col *collection.Collection, collectionName, caller, callerID s
 }
 
 // ensureRepoExists checks whether repoName exists under col.RepoNamespace().
-// If it does, returns nil. If it does not exist and the context is interactive,
-// asks the owner whether to create it; on confirmation, creates the repo and
-// audits the action. Returns errSkipped if the user declines. In
-// non-interactive contexts (stdout is not a TTY) returns an error immediately.
-func ensureRepoExists(col *collection.Collection, repoName string, client api.Client, caller api.UserInfo, private bool) error {
+// Returns (archived, nil) if the repo exists; archived reflects the platform
+// archived flag so the caller can warn before adding. If the repo does not
+// exist and the context is interactive, asks the owner whether to create it;
+// on confirmation, creates the repo and audits the action. Returns errSkipped
+// if the user declines. In non-interactive contexts returns an error immediately.
+func ensureRepoExists(col *collection.Collection, repoName string, client api.Client, caller api.UserInfo, private bool) (archived bool, err error) {
 	namespace := col.RepoNamespace()
 
-	_, err := client.GetRepo(namespace, repoName)
-	if err == nil {
-		return nil
+	repoInfo, gerr := client.GetRepo(namespace, repoName)
+	if gerr == nil {
+		return repoInfo.Archived, nil
 	}
-	if !errors.Is(err, api.ErrNotFound) {
-		return fmt.Errorf("checking repo %q: %w", repoName, err)
+	if !errors.Is(gerr, api.ErrNotFound) {
+		return false, fmt.Errorf("checking repo %q: %w", repoName, gerr)
 	}
 
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return fmt.Errorf("repo %q not found under %s (running non-interactively — create it manually first)", repoName, namespace)
+		return false, fmt.Errorf("repo %q not found under %s (running non-interactively — create it manually first)", repoName, namespace)
 	}
 
 	output.Warn("repo %q does not exist under %s", repoName, namespace)
 	if !output.Confirm(fmt.Sprintf("Create %s/%s as a %s repository?", namespace, repoName, visibilityWord(private))) {
-		return errSkipped
+		return false, errSkipped
 	}
 
 	_, createErr := client.CreateRepo(namespace, repoName, private, "")
 	if errors.Is(createErr, api.ErrNameConflict) {
 		output.Info("repo %q was just created by someone else — continuing", repoName)
-		return nil
+		return false, nil
 	}
 	if createErr != nil {
-		return fmt.Errorf("create repo %q: %w", repoName, createErr)
+		return false, fmt.Errorf("create repo %q: %w", repoName, createErr)
 	}
 
 	recordAudit(audit.AuditEntry{
@@ -220,7 +225,7 @@ func ensureRepoExists(col *collection.Collection, repoName string, client api.Cl
 	})
 
 	output.Success("Created %s/%s", namespace, repoName)
-	return nil
+	return false, nil
 }
 
 func visibilityWord(private bool) string {
@@ -240,8 +245,19 @@ func addOneRepo(col *collection.Collection, name, caller, callerID, repoName str
 		}
 	}
 
-	if err := ensureRepoExists(col, repoName, client, api.UserInfo{ID: callerID, Login: caller}, private); err != nil {
+	archived, err := ensureRepoExists(col, repoName, client, api.UserInfo{ID: callerID, Login: caller}, private)
+	if err != nil {
 		return err
+	}
+
+	if archived {
+		output.Warn("%s is archived on GitHub (read-only — cannot push)", repoName)
+		if addIsTerminalFn() {
+			if !addConfirmFn("Add anyway?") {
+				output.Info("Skipped %s", repoName)
+				return errSkipped
+			}
+		}
 	}
 
 	col.Repos = append(col.Repos, collection.RepoAccess{Name: repoName, Groups: []string{}, Users: []string{}})
@@ -273,7 +289,11 @@ func addOneRepo(col *collection.Collection, name, caller, callerID, repoName str
 		Result:     "ok",
 	})
 
-	output.Success("Added %s to %q (open to all %d members)", repoName, name, len(col.Members))
+	if archived {
+		output.Success("Added %s to %q (archived — read-only)", repoName, name)
+	} else {
+		output.Success("Added %s to %q (open to all %d members)", repoName, name, len(col.Members))
+	}
 	output.Suggestion(fmt.Sprintf("gitcollect repo access %s %s --groups <g1,g2>", name, repoName))
 	return nil
 }

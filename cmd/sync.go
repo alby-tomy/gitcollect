@@ -22,16 +22,17 @@ var (
 	syncDryRun      bool
 	syncConcurrency int
 	syncDest        string
+	syncAll         bool
 )
 
 var syncCmd = &cobra.Command{
-	Use:   "sync <collection>",
+	Use:   "sync [collection]",
 	Short: "Clone every repo not yet present locally, pull every repo that already is",
 	Long: `One command instead of two: for every accessible repo, sync clones it if
 it isn't present yet at --dest, or runs "git pull" if it already is.
 Equivalent to running clone and pull back to back, but in a single pass
 and a single access check.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runSync,
 }
 
@@ -39,10 +40,20 @@ func init() {
 	syncCmd.Flags().BoolVar(&syncDryRun, "dry-run", false, "preview what would be cloned/pulled without doing it")
 	syncCmd.Flags().IntVar(&syncConcurrency, "concurrency", defaultSyncConcurrency, "max repos to sync in parallel")
 	syncCmd.Flags().StringVar(&syncDest, "dest", ".", "directory to clone into, or where repos were already cloned")
+	syncCmd.Flags().BoolVar(&syncAll, "all", false, "run across all collections you own or belong to")
 	rootCmd.AddCommand(syncCmd)
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
+	if syncAll && len(args) > 0 {
+		return NewUsageError(fmt.Errorf("sync: use either <collection> or --all, not both"))
+	}
+	if !syncAll && len(args) == 0 {
+		return NewUsageError(fmt.Errorf("sync: provide a collection name or use --all"))
+	}
+	if syncAll {
+		return runSyncAll(syncDest, syncDryRun, syncConcurrency)
+	}
 	name := args[0]
 
 	if syncConcurrency < 1 {
@@ -70,7 +81,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	results := syncAll(col, client, accessible, syncDest, syncConcurrency, syncDryRun)
+	results := syncTargets(col, client, accessible, syncDest, syncConcurrency, syncDryRun)
 
 	var synced, failed []string
 	for _, r := range results {
@@ -109,6 +120,65 @@ func runSync(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runSyncAll iterates every collection the caller can reach and runs sync on each.
+func runSyncAll(destDir string, dryRun bool, concurrency int) error {
+	names, err := collection.List()
+	if err != nil {
+		return fmt.Errorf("sync --all: %w", err)
+	}
+	if len(names) == 0 {
+		output.Info("no collections found")
+		return nil
+	}
+
+	var anyFailed bool
+	for _, name := range names {
+		col, caller, callerID, client, err := loadForGit(name)
+		if err != nil {
+			output.Dim("Skipping %s: %v", name, err)
+			continue
+		}
+		output.Info("── %s ──", name)
+
+		accessible, err := access.FilterAccessible(col, callerID, client)
+		if err != nil {
+			output.Warn("  %s: %v", name, err)
+			anyFailed = true
+			continue
+		}
+		printAccessSummary(col, caller, callerID, len(accessible), len(col.Repos))
+
+		if len(accessible) == 0 {
+			output.Info("  no repos to sync")
+			continue
+		}
+
+		results := syncTargets(col, client, accessible, destDir, concurrency, dryRun)
+		var synced, failed int
+		for _, r := range results {
+			if r.err != nil {
+				failed++
+			} else {
+				synced++
+			}
+		}
+		if dryRun {
+			output.Success("  Dry run: would sync %d repo(s)", len(accessible))
+		} else {
+			output.Success("  Synced %d repo(s)", synced)
+		}
+		if failed > 0 {
+			anyFailed = true
+			output.Error("  %d failed", failed)
+		}
+	}
+
+	if anyFailed {
+		return fmt.Errorf("sync --all: some collections had failures")
+	}
+	return nil
+}
+
 // syncKind is which of the two operations syncOne actually performed for
 // a given repo, decided purely by whether it was already present at dest.
 type syncKind int
@@ -126,9 +196,9 @@ type syncResult struct {
 	err        error
 }
 
-// syncAll syncs targets into dest, at most concurrency at a time, printing
-// one progress line per repo as it completes.
-func syncAll(col *collection.Collection, client api.Client, targets []collection.RepoAccess, dest string, concurrency int, dryRun bool) []syncResult {
+// syncTargets syncs targets into dest, at most concurrency at a time,
+// printing one progress line per repo as it completes.
+func syncTargets(col *collection.Collection, client api.Client, targets []collection.RepoAccess, dest string, concurrency int, dryRun bool) []syncResult {
 	results := make([]syncResult, len(targets))
 
 	var (

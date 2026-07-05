@@ -238,3 +238,128 @@ func TestPullPrune_SkipsUnrelatedRepos(t *testing.T) {
 		t.Errorf("expected shared-lib to still exist: %v", err)
 	}
 }
+
+// ── B4: --all flag tests ─────────────────────────────────────────────────────
+
+func setupPullAllTest(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	mock := newMultiAddMock()
+	mock.collabs["owner/repo1/owner"] = true
+	cachedClient = mock
+	cachedUser = "owner"
+	cachedUserID = "owner-id"
+	t.Cleanup(func() {
+		cachedClient = nil
+		cachedUser = ""
+		cachedUserID = ""
+	})
+}
+
+func makePullCollection(t *testing.T, name string, repos []string) {
+	t.Helper()
+	col, err := collection.New(name, "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New(%s): %v", name, err)
+	}
+	for _, r := range repos {
+		col.Repos = append(col.Repos, collection.RepoAccess{Name: r, Groups: []string{}, Users: []string{}})
+	}
+	if err := col.Save(); err != nil {
+		t.Fatalf("col.Save(%s): %v", name, err)
+	}
+}
+
+func resetPullFlags() func() {
+	old := pullAll
+	pullAll = false
+	return func() { pullAll = old }
+}
+
+func TestPullAll_RunsOnAllCollections(t *testing.T) {
+	defer resetPullFlags()()
+	setupPullAllTest(t)
+	makePullCollection(t, "pull-a", []string{"repo1"})
+	makePullCollection(t, "pull-b", []string{"repo1"})
+
+	dest := t.TempDir()
+	// No repo dirs cloned — missing repos are skipped, no git.Pull calls.
+	stderr := captureStderr(func() {
+		captureStdout(func() {
+			if err := runPullAll(dest); err != nil {
+				t.Fatalf("runPullAll: %v", err)
+			}
+		})
+	})
+
+	if !strings.Contains(stderr, "pull-a") || !strings.Contains(stderr, "pull-b") {
+		t.Errorf("expected both collection names in output, got: %q", stderr)
+	}
+}
+
+func TestPullAll_SkipsInaccessible(t *testing.T) {
+	defer resetPullFlags()()
+	setupPullAllTest(t)
+	makePullCollection(t, "accessible-col", []string{"repo1"})
+
+	// Create a collection for a different host that has no token in the test env.
+	inaccessible, err := collection.New("inaccessible-col", "gitlab.com",
+		api.UserInfo{ID: "other-id", Login: "other"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New inaccessible: %v", err)
+	}
+	if err := inaccessible.Save(); err != nil {
+		t.Fatalf("inaccessible.Save: %v", err)
+	}
+
+	dest := t.TempDir()
+	var runErr error
+	captureStderr(func() {
+		captureStdout(func() {
+			runErr = runPullAll(dest)
+		})
+	})
+
+	if runErr != nil {
+		t.Errorf("runPullAll should succeed even when one collection is inaccessible, got: %v", runErr)
+	}
+}
+
+func TestPullAll_ErrorOnBothArgAndAll(t *testing.T) {
+	defer resetPullFlags()()
+	pullAll = true
+
+	var runErr error
+	captureStderr(func() {
+		captureStdout(func() {
+			runErr = runPull(nil, []string{"some-collection"})
+		})
+	})
+
+	if runErr == nil {
+		t.Error("expected error when both collection arg and --all are given, got nil")
+	}
+}
+
+func TestPullAll_EmptyCollectionsDir(t *testing.T) {
+	defer resetPullFlags()()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	dest := t.TempDir()
+	var runErr error
+	captureStderr(func() {
+		captureStdout(func() {
+			runErr = runPullAll(dest)
+		})
+	})
+
+	if runErr != nil {
+		t.Errorf("expected no error for empty collections dir, got: %v", runErr)
+	}
+}

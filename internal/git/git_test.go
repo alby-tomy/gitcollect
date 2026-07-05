@@ -175,6 +175,38 @@ func TestPullWithSummary_PropagatesPullFailure(t *testing.T) {
 	}
 }
 
+func TestCommitsBehind_NoRemote(t *testing.T) {
+	dir := t.TempDir()
+	installFakeGit(t, filepath.Join(dir, "log.txt"), true) // exits non-zero = simulates no remote
+
+	n, err := CommitsBehind(t.TempDir())
+	if err != nil {
+		t.Fatalf("CommitsBehind should return nil error when git fails: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 when no remote (git error), got %d", n)
+	}
+}
+
+func TestCommitsBehind_BehindByN(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptDir := t.TempDir()
+
+	script := "@echo off\r\nif \"%1\"==\"rev-list\" (\r\n  echo 5\r\n  exit /b 0\r\n)\r\nexit /b 0\r\n"
+	if err := os.WriteFile(filepath.Join(scriptDir, "git.bat"), []byte(script), 0o755); err != nil {
+		t.Fatalf("could not write fake git: %v", err)
+	}
+	t.Setenv("PATH", scriptDir)
+
+	n, err := CommitsBehind(tmpDir)
+	if err != nil {
+		t.Fatalf("CommitsBehind: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("expected 5 commits behind, got %d", n)
+	}
+}
+
 func TestStatus_ReturnsTrimmedOutput(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "log.txt")
 	installFakeGit(t, logPath, false)

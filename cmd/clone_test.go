@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/alby-tomy/gitcollect/internal/api"
@@ -133,5 +134,147 @@ func TestCloneOne_DryRun_NoGitCall(t *testing.T) {
 		if e.Name() == "my-repo" {
 			t.Errorf("git.Clone was called in dry-run mode: found %s directory", filepath.Join(dir, "my-repo"))
 		}
+	}
+}
+
+// ── A3 skip-existing tests ───────────��────────────────────────────────────────
+
+func TestClone_SkipsExistingDirectory(t *testing.T) {
+	dest := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dest, "my-repo"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	col, err := collection.New("test", "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+
+	targets := []collection.RepoAccess{{Name: "my-repo"}}
+	client := newMultiAddMock()
+
+	var results []cloneResult
+	captureStderr(func() {
+		captureStdout(func() {
+			// dryRun=false: the dir already exists so the skip fires before
+			// cloneOne is called — no real git subprocess runs.
+			results = cloneAll(col, client, targets, dest, 1, false)
+		})
+	})
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if !results[0].skipped {
+		t.Error("expected result.skipped=true for pre-existing directory")
+	}
+	if results[0].err != nil {
+		t.Errorf("expected no error for skipped repo, got %v", results[0].err)
+	}
+}
+
+func TestClone_SkipCountInSummary(t *testing.T) {
+	setupGitTest(t, "testcol-skipcount")
+
+	dest := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dest, "repo1"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	oldDest, oldDryRun := cloneDest, cloneDryRun
+	t.Cleanup(func() { cloneDest = oldDest; cloneDryRun = oldDryRun })
+	cloneDest = dest
+	cloneDryRun = false
+
+	out := captureStdout(func() {
+		captureStderr(func() {
+			if err := runClone(nil, []string{"testcol-skipcount"}); err != nil {
+				t.Errorf("runClone = %v", err)
+			}
+		})
+	})
+
+	if !strings.Contains(out, "already present") {
+		t.Errorf("expected 'already present' in summary stdout, got: %q", out)
+	}
+}
+
+func TestClone_SuggestsSyncAfterSkip(t *testing.T) {
+	setupGitTest(t, "testcol-skipsugg")
+
+	dest := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dest, "repo1"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	oldDest, oldDryRun := cloneDest, cloneDryRun
+	t.Cleanup(func() { cloneDest = oldDest; cloneDryRun = oldDryRun })
+	cloneDest = dest
+	cloneDryRun = false
+
+	stderr := captureStderr(func() {
+		captureStdout(func() {
+			if err := runClone(nil, []string{"testcol-skipsugg"}); err != nil {
+				t.Errorf("runClone = %v", err)
+			}
+		})
+	})
+
+	if !strings.Contains(stderr, "sync") {
+		t.Errorf("expected sync suggestion in stderr when repos skipped, got: %q", stderr)
+	}
+}
+
+func TestClone_ClonesNewWhenSomeExist(t *testing.T) {
+	dest := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dest, "existing-repo"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	col, err := collection.New("test", "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+
+	targets := []collection.RepoAccess{
+		{Name: "existing-repo"},
+		{Name: "new-repo"},
+	}
+	client := newMultiAddMock()
+
+	var results []cloneResult
+	captureStderr(func() {
+		captureStdout(func() {
+			// dryRun=true so new-repo's cloneOne returns nil without git.
+			results = cloneAll(col, client, targets, dest, 1, true)
+		})
+	})
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	var existingResult, newResult *cloneResult
+	for i := range results {
+		switch results[i].name {
+		case "existing-repo":
+			existingResult = &results[i]
+		case "new-repo":
+			newResult = &results[i]
+		}
+	}
+	if existingResult == nil || newResult == nil {
+		t.Fatalf("unexpected result names: %+v", results)
+	}
+	if !existingResult.skipped {
+		t.Error("existing-repo directory is present — expected result.skipped=true")
+	}
+	if newResult.skipped {
+		t.Error("new-repo directory is absent — expected result.skipped=false")
+	}
+	if newResult.err != nil {
+		t.Errorf("expected no error for new-repo in dryRun mode, got %v", newResult.err)
 	}
 }
