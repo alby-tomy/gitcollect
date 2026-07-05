@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/alby-tomy/gitcollect/internal/collection"
@@ -53,13 +54,27 @@ func init() {
 }
 
 type listRow struct {
-	Name       string `json:"name"`
-	Host       string `json:"host"`
-	Visibility string `json:"visibility"`
-	Role       string `json:"role"`
-	Members    int    `json:"members"`
-	Repos      int    `json:"repos"`
-	StaleDays  int    `json:"stale_days,omitempty"`
+	Name        string `json:"name"`
+	Host        string `json:"host"`
+	Visibility  string `json:"visibility"`
+	Role        string `json:"role"`
+	Description string `json:"description"`
+	Members     int    `json:"members"`
+	Repos       int    `json:"repos"`
+	StaleDays   int    `json:"stale_days,omitempty"`
+}
+
+// truncateDesc truncates s to 40 runes with a "..." suffix; returns s unchanged
+// if it's 40 runes or fewer, and returns "" if s is empty.
+func truncateDesc(s string) string {
+	if s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= 40 {
+		return s
+	}
+	return string(runes[:40]) + "..."
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -99,13 +114,14 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 
 		rows = append(rows, listRow{
-			Name:       col.Name,
-			Host:       col.Host,
-			Visibility: string(col.Visibility),
-			Role:       role,
-			Members:    len(col.Members),
-			Repos:      len(col.Repos),
-			StaleDays:  staleDays(col.UpdatedAt),
+			Name:        col.Name,
+			Host:        col.Host,
+			Visibility:  string(col.Visibility),
+			Role:        role,
+			Description: truncateDesc(col.Description),
+			Members:     len(col.Members),
+			Repos:       len(col.Repos),
+			StaleDays:   staleDays(col.UpdatedAt),
 		})
 	}
 
@@ -115,9 +131,13 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	tableRows := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		tableRows = append(tableRows, []string{r.Name, r.Visibility, r.Role, fmt.Sprintf("%d", r.Members), fmt.Sprintf("%d", r.Repos)})
+		desc := color.HiBlackString("(no description)")
+		if r.Description != "" {
+			desc = `"` + r.Description + `"`
+		}
+		tableRows = append(tableRows, []string{r.Name, r.Visibility, r.Role, desc, fmt.Sprintf("%d", r.Members), fmt.Sprintf("%d", r.Repos)})
 	}
-	output.Table([]string{"NAME", "VISIBILITY", "ROLE", "MEMBERS", "REPOS"}, tableRows)
+	output.Table([]string{"NAME", "VISIBILITY", "ROLE", "DESCRIPTION", "MEMBERS", "REPOS"}, tableRows)
 
 	for _, r := range rows {
 		if r.StaleDays > 0 {
