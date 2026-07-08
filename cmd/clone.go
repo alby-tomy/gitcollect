@@ -30,8 +30,32 @@ var (
 var cloneCmd = &cobra.Command{
 	Use:   "clone <collection>",
 	Short: "Clone every repo you can access in a collection",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runClone,
+	Long: `Clone every repo you can access in a collection.
+
+Access is verified before cloning using two independent checks:
+the local collection manifest (your ID must be listed as a member)
+and the platform API (GitHub/GitLab must have you as a collaborator).
+Repos you cannot reach are skipped and reported, not treated as errors.
+
+Examples:
+  gitcollect clone cybersecurity
+  gitcollect clone cybersecurity --pick "pen-test-tools vuln-scanner"
+  gitcollect clone cybersecurity --dest ~/projects --dry-run
+  gitcollect clone cybersecurity --concurrency 8
+
+Note: --pick takes space-separated repo names in quotes.
+      --groups and --users on other commands are comma-separated.
+      These two flags intentionally behave differently.
+
+If cloning fails with "pending collaborator invite":
+  Accept the invite at https://github.com/notifications
+  Then retry: gitcollect clone cybersecurity
+
+See also:
+  gitcollect sync   — clone missing repos + pull existing in one pass
+  gitcollect pull   — pull updates in already-cloned repos`,
+	Args: cobra.ExactArgs(1),
+	RunE: runClone,
 }
 
 func init() {
@@ -114,6 +138,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		for _, f := range failed {
 			output.Dim("  ✗ %s", f)
 		}
+		output.Suggestion(fmt.Sprintf("gitcollect sync %s --dest %s", name, cloneDest))
 	} else {
 		if skippedCount > 0 {
 			output.Success("Cloned %d repos · %d already present (skipped) · in %.1fs",

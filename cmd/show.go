@@ -16,8 +16,24 @@ var showJSON bool
 var showCmd = &cobra.Command{
 	Use:   "show <collection>",
 	Short: "Show a summary of a collection: repos, members, and groups",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runShow,
+	Long: `Show a full summary of a collection.
+
+Displays all repos, members, groups, and per-user access status.
+The ACCESS column shows which repos each user can reach based on
+collection-level membership and repo-level group/user restrictions.
+
+For private collections you must be the owner or a member.
+For public collections, show works without authentication.
+
+Examples:
+  gitcollect show my-project
+  gitcollect show my-project --json
+
+See also:
+  gitcollect inspect   — detailed access decisions for a user or repo
+  gitcollect list      — list all collections you own or are a member of`,
+	Args: cobra.ExactArgs(1),
+	RunE: runShow,
 }
 
 func init() {

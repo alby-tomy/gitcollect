@@ -5,9 +5,4 @@ coverage.out
 .env
 
 # prompt / spec files — not for distribution
-PROMPT*
-FEATURE_*.md
-DOCS_*.md
-AUDIT_SESSION.md
-PRE_SHIP_IMPROVEMENTS.md
-APPLY_SAMPLE_THEME.md
+prompt/

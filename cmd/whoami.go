@@ -20,8 +20,20 @@ var (
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami",
 	Short: "Show the authenticated user for each host you've run gitcollect auth on",
-	Args:  cobra.NoArgs,
-	RunE:  runWhoami,
+	Long: `Show which user is authenticated for each host.
+
+Displays the GitHub/GitLab username, platform user ID, and platform
+host for every token stored in ~/.gitcollect/config. Useful for
+verifying you are using the right account before team operations.
+
+Examples:
+  gitcollect whoami
+  gitcollect whoami --json
+
+See also:
+  gitcollect auth   — store or refresh a token`,
+	Args: cobra.NoArgs,
+	RunE: runWhoami,
 }
 
 func init() {

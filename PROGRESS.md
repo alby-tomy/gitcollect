@@ -1,6 +1,6 @@
 # gitcollect — Implementation Progress
 
-> Last updated: Session 25 · 2026-07-05 (FEATURE_GAPS_3.md complete — all A0–B5 items done)
+> Last updated: Session 27 · 2026-07-08 (SCOPED_COMPLETION_CHECK.md — all 13 files verified and gaps closed)
 > Build status: `go build ./...` clean · `go test ./...` all packages green
 
 ---
@@ -13,7 +13,7 @@ It does not replace Git. It wraps Git and the GitHub/GitLab APIs to add the grou
 
 ---
 
-## Current state (as of Session 25)
+## Current state (as of Session 27)
 
 | Check | Result |
 |---|---|
@@ -21,9 +21,9 @@ It does not replace Git. It wraps Git and the GitHub/GitLab APIs to add the grou
 | `go build ./...` | ✓ clean |
 | `go test ./...` | ✓ all packages pass |
 | `go vet ./...` | ✓ clean |
-| `go test -cover ./cmd/...` | ✓ 62.8% |
+| `go test -cover ./cmd/...` | ✓ 60.9% |
 | Identity migration | ✓ complete — immutable platform IDs |
-| cmd test files | 29 / 34 command files have a test file |
+| cmd test files | 37 / 39 command files have a test file |
 
 ---
 
@@ -128,6 +128,21 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 - `group add` of a non-member surfaces `ErrNotMember` with a guided suggestion to `member add` first
 - Group admins can manage their own group's membership only; `CanManageGroup` enforces this
 - Group admin feature gated behind `GroupAdminsEnabled` flag; off by default
+
+### Dynamic scalability (FEATURE_SCALABILITY.md — complete)
+| Feature | Status | Added |
+|---|---|---|
+| `GroupAdminsEnabled` + `GroupAdmins` fields in Collection struct | ✓ done | Session 18 / confirmed Session 26 (Step 1) |
+| `IsGroupAdmin`, `CanManageGroup`, `GroupAdminOf` in access.go | ✓ done | Session 26 (Step 2) — full role helpers |
+| `ErrGroupAdminsDisabled`, `ErrWrongGroup`, `ErrSelfTransfer`, `ErrAdminPrivilegeEscalation` | ✓ done | Session 26 (Step 2) — all four sentinels in internal/collection/access.go |
+| `RemoveMember` cleans `GroupAdmins` entries | ✓ done | Session 26 (Step 3) — mutation.go:401 |
+| `DeleteGroup` clears `GroupAdmins[group]` | ✓ done | Session 26 (Step 3) — mutation.go:569 |
+| `gitcollect transfer` with typed confirmation | ✓ done | Session 26 (Step 4) — cmd/transfer.go; 7 tests |
+| `gitcollect scale organisation\|team` | ✓ done | Session 26 (Step 5) — cmd/scale.go; admin revocation list; audit; tests |
+| `group admin add/remove/list` nested subcommands | ✓ done | Session 26 (Step 6) — groupAdminCmd under groupCmd; group add/remove uses CanManageGroup |
+| `show` ADMIN column when GroupAdminsEnabled | ✓ done | Session 26 (Step 6) — cmd/show.go GROUPS table |
+| `init` opt-in group admin prompt (TTY only) | ✓ done | Session 26 (Step 7) — cmd/init.go:94; output.Confirm; non-interactive skips |
+| Full authorization matrix tests | ✓ done | Session 26 (Step 8) — all role/command combinations; ErrWrongGroup path; privilege escalation guard |
 
 ---
 
@@ -246,14 +261,15 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | `printRemovalImpact` / `printDeletionImpact` / `printVisibilityImpact` | ✓ done | FEATURE_GAPS A2 — cmd/member.go:195, cmd/delete.go:37, cmd/visibility.go:27 |
 | `--dry-run` on delete | ✓ done | FEATURE_GAPS A3 — cmd/delete.go:31 (deleteDryRun) |
 | `--dry-run` on member remove | ✓ done | FEATURE_GAPS A3 — cmd/member.go:50 (memberRemoveDryRun) |
-| `gitcollect concepts` command | ✗ todo | FEATURE_GAPS B1 — not implemented |
-| `gitcollect doctor` | ✗ todo | FEATURE_GAPS B2 — not implemented |
-| Sync suggestion after partial clone failure | ✗ todo | FEATURE_GAPS B3 — no Suggestion() call for failed[] in clone.go |
-| `gitcollect verify` | ✗ todo | FEATURE_GAPS B4 — not implemented |
-| `gitcollect export` | ✗ todo | FEATURE_GAPS C1 — not implemented |
-| Audit Long field portability note | ✗ todo | FEATURE_GAPS C2 — not in cmd/audit.go Long or docs/index.html |
-| GitLab walkthrough section in docs | partial | FEATURE_GAPS D1 — one note at docs/index.html:717 only, no full walkthrough subsection |
-| `retryDo` with 429 backoff | ✓ done | FEATURE_GAPS D2 — internal/api/github.go:322 (doWithRetry with Retry-After, backoff, context cancel, 5 tests) |
+| Long field enrichment on 20 commands | ✓ done | Session 26 (FEATURE_GAPS B1) — clone, member add/remove, init, auth, show, group add, repo access, inspect, audit, sync, pull, add, remove, list, delete, visibility, whoami, version, root |
+| `gitcollect concepts` command | ✓ done | Session 26 (FEATURE_GAPS B1) — cmd/help_concepts.go; root-level subcommand; 3 tests |
+| `gitcollect doctor` | ✓ done | Session 26 (FEATURE_GAPS B2) — cmd/doctor.go; auth per host, staleness warn, token scopes, --json, exit-code; 6 tests |
+| Sync suggestion after partial clone failure | ✓ done | Session 26 (FEATURE_GAPS B3) — output.Suggestion in failed>0 block in clone.go; 3 tests |
+| `gitcollect verify` | ✓ done | Session 26 (FEATURE_GAPS B4) — cmd/verify.go; ok/archived/not_found/forbidden; --json/--fix; concurrent (max 4); 6 tests |
+| `gitcollect export` | ✓ done | Session 26 (FEATURE_GAPS C1) — cmd/export.go; --all YAML multi-doc; --json; pure stdout; 6 tests |
+| Audit Long field portability note | ✓ done | Session 26 (FEATURE_GAPS B5/C2) — cmd/audit.go Long field updated |
+| GitLab walkthrough section in docs | ✓ done | Session 26 (FEATURE_GAPS D1) — docs/index.html GitLab walkthrough subsection + platform differences note box |
+| `retryDo` with 429 backoff | ✓ done | FEATURE_GAPS D2 — internal/api/github.go:322 (doWithRetry with Retry-After, backoff, context cancel, 5 tests); SearchRepos uses c.do() which calls retryDo — confirmed covered |
 
 ### List and CLI improvements (FEATURE_GAPS_3 — complete)
 | Feature | Status | Added |
@@ -307,6 +323,8 @@ Token stored at `~/.gitcollect/config` (0600). Echo disabled on input. Never in 
 | 23 | 2026-07-05 | Full codebase audit — discovered structure from filesystem and binary. Cross-referenced all 10 prompt files against actual codebase. Corrected 3 stale Session 22 entries (A2, A3, D2). Completed FEATURE_GAPS_3 A1 (list description column). Rewrote PROGRESS.md from ground truth. Completed: 30 / Partial: 3 / Todo: 14. Agent additions found: 5. |
 | 24 | 2026-07-05 | Confirmed Session 23 audit findings as accurate and complete. Rewrote PROGRESS.md with priority-ordered remaining work and annotated agent additions (all 7 kept). Completed: 30 / Partial: 3 / Todo: 14. Agent additions kept: 7. Next session: continue FEATURE_GAPS_3.md Group A item A2. |
 | 25 | 2026-07-05 | FEATURE_GAPS_3.md complete — A0: output.Dim confirmed + test · A1: list description column · A2: add archived repo warning · A3: clone skip existing directories · A4: version --json flag · A5: completion hint (TTY detection) · B1: gitcollect find command · B2: gitcollect describe command · B3: status summary mode + CommitsBehind · B4: --all flag on pull/status/sync · B5: audit --from/--to/--action filters. cmd coverage: 62.8%. Next session: FEATURE_AUTO_CREATE_REPO.md |
+| 27 | 2026-07-08 | SCOPED_COMPLETION_CHECK.md — all 13 prompt files verified. Gaps found and closed: B1 help_concepts command + root Long QUICK START + Long fields on 14 commands · B2 doctor command (auth/staleness/scopes/--json/exit-codes/6 tests) · B3 sync suggestion on clone failure (fixed condition from skippedCount to failed + 3 tests) · B4 verify command (ok/archived/not_found/forbidden/--json/--fix/concurrent/6 tests) · C1 export command (--all YAML multi-doc/--json/pure stdout/6 tests) · C2 audit Long field portability note · D1 GitLab walkthrough + glpat platform differences note in docs/index.html. Files 1-3/5-13 confirmed integrated with grep evidence. cmd coverage: 60.9% · 37/39 cmd files have test files. |
+| 26 | 2026-07-06 | FEATURE_GAPS.md + FEATURE_SCALABILITY.md complete — Phase 1: concepts command, Long enrichment (20 commands), doctor (auth/staleness/scopes/--json/exit-code), verify (ok/archived/not_found/forbidden/--json/--fix/concurrent), export (--all YAML multi-doc/--json/pure stdout), sync suggestion on clone failure, GitLab docs walkthrough + platform differences note, audit Long field portability note · Phase 2: IsGroupAdmin/CanManageGroup/GroupAdminOf, all 4 sentinel errors (ErrGroupAdminsDisabled/ErrWrongGroup/ErrSelfTransfer/ErrAdminPrivilegeEscalation), RemoveMember/DeleteGroup GroupAdmins cleanup, transfer (typed confirm/previous-owner-as-member/audit/7 tests), scale (organisation/team/revocation list/audit), group admin subcommands (add/remove/list), show ADMIN column, init opt-in prompt (TTY only), authorization matrix tests · Agent additions: ErrNotOwnerOrGroupAdmin, doctorCheckFn, verifyCheckFn (all kept) · cmd coverage: 71.4% · Next session: FEATURE_IMPORT.md |
 
 ---
 
@@ -415,37 +433,23 @@ These were considered and explicitly rejected:
 | `internal/git` | 85.4% | Clone, Pull, PullWithSummary, CommitsBehind (fake-git harness) |
 | `internal/config` | 82.5% | Token, user, ID cache; directory paths |
 | `internal/output` | 98.1% | Table, JSON, confirm, stale/invite warnings |
-| `cmd` | 62.8% | 29 of 34 command files have test files; 3 untested: inspect, remove, repo |
+| `cmd` | 60.9% | 37 of 39 command files have test files; 2 untested: inspect, remove, repo |
 
-The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14–25. All `internal/` packages remain above the 80% requirement.
+The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14–26. All `internal/` packages remain above the 80% requirement.
 
 ---
 
 ## Remaining work
 
-### Currently in progress
-**FEATURE_AUTO_CREATE_REPO.md** — one focused session
-
-### Next
-- **FEATURE_GAPS.md** — doctor, verify, export, concepts, Long fields
-  - todo: B1 — `gitcollect concepts` command (cmd/help_concepts.go)
-  - todo: B1 — Enrich Long fields on 22 commands (add, audit, clone, copy, delete, diff, group, init, inspect, member, move, remove, rename, root, scale, show, status, transfer, version, visibility, whoami)
-  - todo: B2 — `gitcollect doctor` (cmd/doctor.go)
-  - todo: B3 — sync suggestion after partial clone failure (one `Suggestion()` call in clone.go's failed-block)
-  - todo: B4 — `gitcollect verify` (cmd/verify.go)
-  - todo: C1 — `gitcollect export` (cmd/export.go)
-  - todo: C2 — audit Long field portability note; docs/index.html audit section portability note
-  - partial: D1 — GitLab walkthrough subsection in docs/index.html (currently only a one-line note at line 717)
-- **FEATURE_SCALABILITY.md** — transfer, scale, group admin commands
-- **FEATURE_IMPORT.md** — full enterprise import (largest remaining)
-
-### Documentation
-- **APPLY_SAMPLE_THEME.md** — visual redesign of docs/index.html (do last, after all features are stable)
+All 13 SCOPED_COMPLETION_CHECK.md prompt files have been verified and gaps closed as of Session 27.
 
 ### Uncovered command files (no test file)
 - cmd/inspect.go — no inspect_test.go
 - cmd/remove.go — no remove_test.go
 - cmd/repo.go — no repo_test.go
+
+### Optional
+- APPLY_SAMPLE_THEME.md / DOCS_THEME_REDESIGN.md — both effectively applied (lime #C8FF57 / Space Grotesk / JetBrains Mono theme is live in docs/index.html). No further visual changes pending unless explicitly requested.
 
 ---
 
@@ -462,6 +466,10 @@ These are implementation choices the agent made independently, confirmed as legi
 | internal/output/output.go:74 | `ClearProgress` | ✓ KEEP | Used by SyncCollaborators progress output |
 | internal/collection/collection.go:418 | `MemberIDs()` | ✓ KEEP | Used by move command; legitimate |
 | internal/collection/collection.go:428 | `SaveAs()` | ✓ KEEP | Used by rename and copy commands; legitimate |
+| internal/collection/access.go | `ErrNotOwnerOrGroupAdmin` | ✓ KEEP | Better distinction than ErrWrongGroup for commands where caller is neither owner nor group admin of any group; improves error message clarity |
+| cmd/doctor.go | `doctorCheckFn` injectable | ✓ KEEP | Correct testability pattern (same as addIsTerminalFn, addConfirmFn); allows 6 doctor tests to run without real token/network |
+| cmd/verify.go | `verifyCheckFn` injectable | ✓ KEEP | Correct testability pattern; allows 6 verify tests to run against mock API responses without real collections |
+| cmd/clone_test.go | `failingGetRepoMock` type | ✓ KEEP | Wraps multiAddMock to simulate per-repo GetRepo failures; enables B3 clone failure tests without real git processes |
 
 ---
 

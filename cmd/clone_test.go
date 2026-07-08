@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -276,5 +277,134 @@ func TestClone_ClonesNewWhenSomeExist(t *testing.T) {
 	}
 	if newResult.err != nil {
 		t.Errorf("expected no error for new-repo in dryRun mode, got %v", newResult.err)
+	}
+}
+
+// ── B3: sync suggestion after clone failure ──────────────────────────────────
+
+// failingGetRepoMock wraps multiAddMock but returns an error for repos in failFor.
+type failingGetRepoMock struct {
+	*multiAddMock
+	failFor map[string]bool
+}
+
+func (m *failingGetRepoMock) GetRepo(owner, repo string) (api.RepoInfo, error) {
+	if m.failFor[repo] {
+		return api.RepoInfo{}, fmt.Errorf("mock: GetRepo %s failed", repo)
+	}
+	return m.multiAddMock.GetRepo(owner, repo)
+}
+
+func setupCloneFailTest(t *testing.T, collName string, repos []string, failRepos map[string]bool) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	base := newMultiAddMock()
+	mock := &failingGetRepoMock{multiAddMock: base, failFor: failRepos}
+	for _, r := range repos {
+		mock.collabs["owner/"+r+"/owner"] = true
+	}
+
+	cachedClient = mock
+	cachedUser = "owner"
+	cachedUserID = "owner-id"
+	t.Cleanup(func() {
+		cachedClient = nil
+		cachedUser = ""
+		cachedUserID = ""
+	})
+
+	col, err := collection.New(collName, "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	for _, r := range repos {
+		col.Repos = append(col.Repos, collection.RepoAccess{Name: r, Groups: []string{}, Users: []string{}})
+	}
+	if err := col.Save(); err != nil {
+		t.Fatalf("col.Save: %v", err)
+	}
+}
+
+// TestClone_PartialFailure_SuggestsSync verifies that the sync suggestion
+// appears in stderr when at least one clone fails.
+func TestClone_PartialFailure_SuggestsSync(t *testing.T) {
+	// two repos: repo1 succeeds (pre-existing dir → skipped), repo2 fails (GetRepo error)
+	setupCloneFailTest(t, "testcol-partfail",
+		[]string{"repo1", "repo2"},
+		map[string]bool{"repo2": true},
+	)
+
+	dest := t.TempDir()
+	// repo1 already present → skipped (not a failure)
+	if err := os.MkdirAll(filepath.Join(dest, "repo1"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	oldDest, oldDryRun := cloneDest, cloneDryRun
+	t.Cleanup(func() { cloneDest = oldDest; cloneDryRun = oldDryRun })
+	cloneDest = dest
+	cloneDryRun = false
+
+	stderr := captureStderr(func() {
+		captureStdout(func() {
+			_ = runClone(nil, []string{"testcol-partfail"})
+		})
+	})
+
+	if !strings.Contains(stderr, "sync") {
+		t.Errorf("expected sync suggestion in stderr after partial clone failure, got: %q", stderr)
+	}
+}
+
+// TestClone_AllFail_SuggestsSync verifies sync suggestion appears when all clones fail.
+func TestClone_AllFail_SuggestsSync(t *testing.T) {
+	setupCloneFailTest(t, "testcol-allfail",
+		[]string{"repo1", "repo2"},
+		map[string]bool{"repo1": true, "repo2": true},
+	)
+
+	dest := t.TempDir()
+
+	oldDest, oldDryRun := cloneDest, cloneDryRun
+	t.Cleanup(func() { cloneDest = oldDest; cloneDryRun = oldDryRun })
+	cloneDest = dest
+	cloneDryRun = false
+
+	stderr := captureStderr(func() {
+		captureStdout(func() {
+			_ = runClone(nil, []string{"testcol-allfail"})
+		})
+	})
+
+	if !strings.Contains(stderr, "sync") {
+		t.Errorf("expected sync suggestion in stderr when all clones fail, got: %q", stderr)
+	}
+}
+
+// TestClone_AllSucceed_NoSuggestion verifies no failure-branch sync suggestion
+// when nothing fails (dry-run exits before any failure check).
+func TestClone_AllSucceed_NoSuggestion(t *testing.T) {
+	setupGitTest(t, "testcol-nosugg")
+
+	oldDest, oldDryRun := cloneDest, cloneDryRun
+	t.Cleanup(func() { cloneDest = oldDest; cloneDryRun = oldDryRun })
+	cloneDest = t.TempDir()
+	cloneDryRun = true // dry-run: no real clone, no failures
+
+	stderr := captureStderr(func() {
+		captureStdout(func() {
+			if err := runClone(nil, []string{"testcol-nosugg"}); err != nil {
+				t.Errorf("runClone dry-run = %v", err)
+			}
+		})
+	})
+
+	// dry-run exits early before the failure branch — no failure-branch suggestion
+	if strings.Contains(stderr, "gitcollect sync testcol-nosugg --dest") {
+		t.Errorf("expected no failure-branch sync suggestion in dry-run, got: %q", stderr)
 	}
 }
