@@ -17,6 +17,21 @@ import (
 var memberCmd = &cobra.Command{
 	Use:   "member",
 	Short: "Manage a collection's members",
+	Long: `Manage who is a member of a collection.
+
+Members are the set of users who can use a collection — clone repos,
+pull updates, and interact with the collection at all. Only the
+collection owner can add or remove members.
+
+Subcommands:
+  member add     — add one or more users as members
+  member remove  — remove a member and revoke their platform access
+  member list    — list all current members
+
+Examples:
+  gitcollect member add my-project alice bob
+  gitcollect member remove my-project alice
+  gitcollect member list my-project`,
 }
 
 var memberAddCmd = &cobra.Command{

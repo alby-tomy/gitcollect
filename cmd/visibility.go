@@ -15,8 +15,20 @@ import (
 var visibilityCmd = &cobra.Command{
 	Use:   "visibility <collection> <public|private>",
 	Short: "Change a collection's visibility",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runVisibility,
+	Long: `Change a collection's visibility between public and private.
+
+private  Only listed members can use the collection. Non-members see
+         the same "not found" error regardless of whether it exists.
+public   Any gitcollect user can discover and clone the collection
+         without authentication. Repo list is visible to everyone.
+
+Making a collection public shows an impact preview before confirming.
+
+Examples:
+  gitcollect visibility my-project public
+  gitcollect visibility my-project private`,
+	Args: cobra.ExactArgs(2),
+	RunE: runVisibility,
 }
 
 func init() {

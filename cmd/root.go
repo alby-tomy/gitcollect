@@ -48,13 +48,19 @@ var ranPersistentPreRun bool
 var rootCmd = &cobra.Command{
 	Use:   "gitcollect",
 	Short: "Group GitHub/GitLab repositories into access-controlled collections",
-	Long: `gitcollect groups GitHub/GitLab repositories into named collections and
-controls who can access them, at both the collection level (membership) and
-the repo level (which groups or individuals can reach which repos).
+	Long: `gitcollect — group GitHub and GitLab repos into collections
 
-It wraps Git and the GitHub/GitLab APIs: every access change gitcollect makes
-locally is driven through to the real platform via its collaborator API
-before the local YAML is ever written. The two never diverge.`,
+QUICK START
+  gitcollect auth                         authenticate with GitHub/GitLab
+  gitcollect init my-project              create a collection
+  gitcollect add my-project repo-name     add a repo to it
+  gitcollect member add my-project alice  share with a teammate
+  gitcollect clone my-project             clone everything you can access
+
+LEARN MORE
+  gitcollect concepts                     how collections and access work
+  gitcollect <command> --help             flags and options for any command
+  https://alby-tomy.github.io/gitcollect/`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

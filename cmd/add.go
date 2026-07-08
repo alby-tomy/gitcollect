@@ -37,8 +37,29 @@ var (
 var addCmd = &cobra.Command{
 	Use:   "add <collection> [repo...] [--pattern glob | --topic name]",
 	Short: "Add repos to a collection, open to all members by default",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runAdd,
+	Long: `Add one or more repos to a collection.
+
+By default, every member of the collection gets access to newly added
+repos. Use gitcollect repo access to restrict a repo to specific groups
+or users after adding it.
+
+If a repo does not exist on the platform and you are running interactively,
+gitcollect asks whether to create it. In non-interactive mode it fails
+with a clear error instead of silently skipping.
+
+Examples:
+  gitcollect add my-project api-server frontend
+  gitcollect add my-project --pattern "service-*"
+  gitcollect add my-project --topic security --limit 20
+  gitcollect add my-project --pattern "svc-*" --dry-run
+
+Flags --pattern and --topic are mutually exclusive with positional names.
+
+See also:
+  gitcollect remove   — remove a repo and revoke access
+  gitcollect repo     — manage per-repo access restrictions`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runAdd,
 }
 
 func init() {

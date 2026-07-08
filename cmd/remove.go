@@ -18,6 +18,22 @@ const removeMaxConcurrency = 4
 var removeCmd = &cobra.Command{
 	Use:   "remove <collection> <repo>",
 	Short: "Remove a repo from a collection and revoke everyone's access to it",
+	Long: `Remove a repo from a collection and revoke every member's platform access.
+
+This is a destructive operation. All members (including group members) who
+had collaborator access to this repo via gitcollect will have that access
+revoked through the GitHub/GitLab API before the local YAML is updated.
+
+The repo itself is not deleted on the platform — only the collection entry
+and its access grants are removed.
+
+Examples:
+  gitcollect remove my-project old-service
+  gitcollect remove my-project old-service --dry-run
+
+See also:
+  gitcollect add       — add a repo to a collection
+  gitcollect delete    — delete the entire collection`,
 	Args:  cobra.ExactArgs(2),
 	RunE:  runRemove,
 }

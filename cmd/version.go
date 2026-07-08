@@ -20,7 +20,12 @@ type versionInfo struct {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version and platform information",
-	Args:  cobra.NoArgs,
+	Long: `Print the gitcollect version, Go runtime version, and OS/arch.
+
+Examples:
+  gitcollect version
+  gitcollect version --json`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if versionJSON {
 			return output.JSON(versionInfo{

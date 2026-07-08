@@ -17,6 +17,23 @@ import (
 var groupCmd = &cobra.Command{
 	Use:   "group",
 	Short: "Manage groups within a collection",
+	Long: `Manage named groups of members within a collection.
+
+Groups let you restrict specific repos to a subset of members without
+granting everyone access to everything. A member can be in multiple
+groups. A repo can be restricted to specific groups or individual users.
+
+Subcommands:
+  group create — create a new group
+  group delete — delete a group
+  group add    — add members to a group
+  group remove — remove members from a group
+  group list   — list all groups and their members
+
+Examples:
+  gitcollect group create my-project backend
+  gitcollect group add my-project backend alice bob
+  gitcollect repo access my-project api-server --groups backend`,
 }
 
 var groupCreateCmd = &cobra.Command{

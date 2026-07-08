@@ -21,8 +21,24 @@ var (
 var inspectCmd = &cobra.Command{
 	Use:   "inspect <collection>",
 	Short: "Show access decisions for a user, a repo, or the full collection matrix",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runInspect,
+	Long: `Show the full access matrix or a slice of it for debugging.
+
+Access is controlled at two levels: collection membership (who is in
+the collection at all) and repo-level restrictions (which groups or
+users can reach each repo). inspect shows both layers and the final
+allow/deny decision for every user-repo pair.
+
+Examples:
+  gitcollect inspect my-project              full matrix
+  gitcollect inspect my-project --user alice show alice's access to every repo
+  gitcollect inspect my-project --repo api   show who can access "api"
+  gitcollect inspect my-project --json
+
+If a member shows "no access" for a repo, use:
+  gitcollect repo access my-project api --groups <group>
+to grant them access.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runInspect,
 }
 
 func init() {

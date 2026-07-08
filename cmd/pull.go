@@ -40,8 +40,24 @@ var (
 var pullCmd = &cobra.Command{
 	Use:   "pull [collection]",
 	Short: "git pull inside every accessible repo that's already cloned",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runPull,
+	Long: `Run git pull inside every repo from a collection that is already
+cloned locally. Repos that are not cloned are skipped — use
+gitcollect clone or gitcollect sync to clone them first.
+
+Examples:
+  gitcollect pull my-project
+  gitcollect pull my-project --dest ~/projects
+  gitcollect pull my-project --prune
+  gitcollect pull --all
+
+--prune removes local clones of repos that are no longer in the collection.
+--all pulls across every collection you are a member of.
+
+See also:
+  gitcollect clone   — initial clone of all accessible repos
+  gitcollect sync    — clone missing + pull existing in one pass`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runPull,
 }
 
 func init() {

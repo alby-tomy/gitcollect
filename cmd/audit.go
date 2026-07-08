@@ -23,8 +23,30 @@ var (
 var auditCmd = &cobra.Command{
 	Use:   "audit <collection>",
 	Short: "Show the access change log for a collection",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runAudit,
+	Long: `Show the audit log for a collection — every access change since the
+collection was created: members added/removed, repos added/removed,
+group changes, and visibility changes.
+
+Examples:
+  gitcollect audit my-project
+  gitcollect audit my-project --since 2024-01-01
+  gitcollect audit my-project --user alice
+  gitcollect audit my-project --action member.add
+  gitcollect audit my-project --json
+
+Filtering:
+  --since / --from / --to   date range (RFC3339 or YYYY-MM-DD)
+  --user                    show only entries for this user
+  --action                  show only entries with this action type
+
+Note: The audit log is stored locally at ~/.gitcollect/audit/<collection>.log.
+To preserve audit history across machines, commit this file to a shared
+repository or include it in your gitcollect-collections backup.
+
+To export the audit log:
+  gitcollect audit my-project --json > my-project-audit-backup.json`,
+	Args: cobra.ExactArgs(1),
+	RunE: runAudit,
 }
 
 func init() {

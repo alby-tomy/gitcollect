@@ -21,8 +21,26 @@ var (
 var initCmd = &cobra.Command{
 	Use:   "init <name>",
 	Short: "Create a new collection",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runInit,
+	Long: `Create a new collection.
+
+A collection is a named group of repos stored at
+~/.gitcollect/collections/<name>.yaml. You are the owner; only you can
+add/remove repos and manage membership.
+
+By default collections are private — only listed members can use them.
+Use --public to create a public collection anyone can clone from.
+
+Examples:
+  gitcollect init my-project
+  gitcollect init my-project --description "backend microservices"
+  gitcollect init my-project --namespace acme-corp --public
+  gitcollect init my-project --host gitlab.com
+
+After creating a collection:
+  gitcollect add my-project repo-name     add a repo
+  gitcollect member add my-project alice  invite a teammate`,
+	Args: cobra.ExactArgs(1),
+	RunE: runInit,
 }
 
 func init() {

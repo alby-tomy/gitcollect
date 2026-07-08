@@ -715,6 +715,12 @@
     </table>
     <p class="note"><strong>Windows:</strong> <code>~/.gitcollect/</code> maps to <code>%USERPROFILE%\.gitcollect\</code></p>
     <p class="note"><strong>GitHub vs GitLab:</strong> On GitHub, adding a collaborator sends an invite email that must be accepted before access is active. On GitLab, API-granted project membership is immediate — there is no invite step. gitcollect warns you when a GitHub repo is in the pending-invite state.</p>
+    <p class="note"><strong>GitLab users:</strong> access grants take effect immediately —
+    there is no collaborator invite to accept. Use
+    <code>--host gitlab.com</code> or your self-hosted domain on all
+    commands. GitLab personal access tokens use the format
+    <code>glpat-xxxx...</code>. Namespaces on GitLab can be nested
+    (e.g. <code>acme/backend</code>) — pass the full path as <code>--namespace</code>.</p>
   </div>
 </section>
 
@@ -1054,6 +1060,62 @@ exploit-db  ✗ no    no access — group red-team required</pre></div>
             second, because the platform — not the file — is the actual enforcement
             point.</p>
           </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── GITLAB WALKTHROUGH ── -->
+<section id="gitlab-walkthrough" class="section">
+  <div class="container">
+    <div class="section-label">GitLab</div>
+    <h2 class="section-title">Walkthrough: GitLab collections</h2>
+    <p class="section-sub">gitcollect supports GitLab with the same commands. Key differences from GitHub are noted at each step.</p>
+
+    <div class="setup-steps">
+
+      <div class="setup-step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>Authenticate with GitLab</h3>
+          <div class="code-block"><pre>gitcollect auth --host gitlab.com</pre></div>
+          <p>GitLab personal access tokens use the format <code>glpat-xxxx...</code> (not <code>ghp_xxx...</code>).
+          For self-hosted GitLab: <code>gitcollect auth --host gitlab.company.com</code></p>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>Create a collection</h3>
+          <div class="code-block"><pre>gitcollect init my-project --host gitlab.com</pre></div>
+          <p>For GitLab groups use <code>--namespace</code> to set the repo namespace.
+          GitLab namespaces can be nested paths: <code>--namespace acme/backend</code></p>
+          <div class="code-block"><pre>gitcollect init my-project --namespace my-group --host gitlab.com</pre></div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>No invite step needed</h3>
+          <div class="code-block"><pre>gitcollect member add my-project teammate-username</pre></div>
+          <p>GitLab access is immediate — teammates can clone as soon as you run
+          <code>member add</code>. There is no email invite to accept (unlike GitHub).</p>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <h3>Self-hosted GitLab</h3>
+          <div class="code-block"><pre>gitcollect auth --host gitlab.company.com
+gitcollect init my-project --host gitlab.company.com</pre></div>
+          <p>Pass your instance hostname to every command via <code>--host</code>,
+          or set it once during <code>init</code> — the collection stores the host
+          and uses it for all subsequent commands.</p>
         </div>
       </div>
 
@@ -1444,6 +1506,11 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
           <tr><td class="flagname">--since &lt;dur&gt;</td><td class="flagdesc">filter to entries within this duration — must be exactly one of <code>1h</code>, <code>24h</code>, <code>7d</code>, <code>30d</code>, <code>90d</code> (strict allow-list, no other value accepted)</td></tr>
           <tr><td class="flagname">--json</td><td class="flagdesc">machine-readable output</td></tr>
         </table>
+        <p class="note">Audit logs are stored locally at
+        <code>~/.gitcollect/audit/&lt;collection&gt;.log</code> and are not
+        automatically shared or backed up. Export them with
+        <code>gitcollect audit &lt;collection&gt; --json</code> for off-machine
+        storage. A shared audit log is planned for a future release.</p>
       </div>
 
       <div class="cmd-block">

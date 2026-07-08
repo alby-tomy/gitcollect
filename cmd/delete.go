@@ -23,6 +23,21 @@ var deleteDryRun bool
 var deleteCmd = &cobra.Command{
 	Use:   "delete <collection>",
 	Short: "Delete a collection and revoke all access to its repos",
+	Long: `Delete a collection and revoke every member's platform access.
+
+Before deleting, gitcollect shows the full impact: how many members and
+repos are affected. You must confirm before changes are made.
+
+All platform collaborator grants are revoked via the GitHub/GitLab API
+before the local YAML is deleted. The repos themselves are not deleted
+on the platform — only access is revoked.
+
+Examples:
+  gitcollect delete my-project
+  gitcollect delete my-project --dry-run
+
+If you want to recover the collection after accidental deletion, restore
+the YAML from backup and run gitcollect sync to re-apply platform access.`,
 	Args:  cobra.ExactArgs(1),
 	RunE:  runDelete,
 }
