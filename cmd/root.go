@@ -139,6 +139,9 @@ var (
 // currentClient returns an authenticated api.Client for host, loading the
 // stored token from ~/.gitcollect/config.
 func currentClient(host string) (api.Client, error) {
+	if IsOffline() {
+		return nil, fmt.Errorf("this command requires a network connection\n  Remove --offline to enable network access")
+	}
 	if cachedClient != nil && cachedClient.Host() == host {
 		return cachedClient, nil
 	}

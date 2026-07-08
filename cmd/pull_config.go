@@ -103,8 +103,10 @@ func runPullConfig(_ *cobra.Command, _ []string) error {
 
 		dst := filepath.Join(collDir, e.Name())
 
-		// Check if destination already exists.
-		if _, statErr := os.Stat(dst); statErr == nil && !pullConfigOverwrite {
+		// Check existence before writing — determines new vs. updated label.
+		_, statErr := os.Stat(dst)
+		existedBefore := statErr == nil
+		if existedBefore && !pullConfigOverwrite {
 			output.Dim("  %-30s (exists, skipped — use --overwrite to replace)", name)
 			skipped++
 			continue
@@ -115,14 +117,10 @@ func runPullConfig(_ *cobra.Command, _ []string) error {
 			return fmt.Errorf("pull-config: %w", err)
 		}
 
-		isNew := true
-		if _, statErr := os.Stat(dst); statErr == nil && pullConfigOverwrite {
-			isNew = false
-		}
-		if isNew {
-			output.Success("%-30s (new)", name)
-		} else {
+		if existedBefore {
 			output.Success("%-30s (updated)", name)
+		} else {
+			output.Success("%-30s (new)", name)
 		}
 		fetched++
 	}

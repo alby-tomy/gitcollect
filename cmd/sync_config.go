@@ -42,13 +42,17 @@ func init() {
 	rootCmd.AddCommand(syncConfigCmd)
 }
 
-// syncConfigResult carries the diff for one collection.
+// syncConfigResult carries the diff for one collection along with the
+// platform data fetched to compute it, so callers can reuse it rather
+// than issuing a second round of API calls to apply the sync.
 type syncConfigResult struct {
-	name           string
-	addedMembers   []string
-	removedMembers []string
-	addedRepos     []string
-	removedRepos   []string
+	name            string
+	addedMembers    []string
+	removedMembers  []string
+	addedRepos      []string
+	removedRepos    []string
+	platformMembers []api.UserInfo
+	platformRepos   []api.RepoInfo
 }
 
 func (r syncConfigResult) hasChanges() bool {
@@ -124,6 +128,11 @@ func syncOneCollection(col *collection.Collection, client api.Client, org, teamS
 			res.removedRepos = append(res.removedRepos, r.Name)
 		}
 	}
+
+	// Stash the fetched platform data so callers can apply the sync
+	// without a second round of API calls.
+	res.platformMembers = allMembers
+	res.platformRepos = allRepos
 
 	return res, nil
 }
@@ -263,21 +272,7 @@ func runSyncConfig(_ *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Re-fetch full member/repo lists to apply.
-		platformMembers, err := client.ListTeamMembers(org, teamSlug, "")
-		if err != nil {
-			output.Warn("sync-config: %q: could not re-fetch members: %v", name, err)
-			anyFailed = true
-			continue
-		}
-		platformRepos, err := client.ListTeamRepos(org, teamSlug)
-		if err != nil {
-			output.Warn("sync-config: %q: could not re-fetch repos: %v", name, err)
-			anyFailed = true
-			continue
-		}
-
-		applySync(col, platformMembers, platformRepos)
+		applySync(col, diff.platformMembers, diff.platformRepos)
 
 		if err := col.Save(); err != nil {
 			output.Warn("sync-config: %q: could not save: %v", name, err)

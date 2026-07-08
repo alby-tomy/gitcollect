@@ -164,10 +164,14 @@ func runJoin(_ *cobra.Command, _ []string) error {
 	ns := col.RepoNamespace()
 	cloned := 0
 	for i, r := range accessible {
-		cloneURL := fmt.Sprintf("https://%s/%s/%s.git", host, ns, r.Name)
+		info, err := client.GetRepo(ns, r.Name)
+		if err != nil {
+			output.Warn("  could not get %s: %v", r.Name, err)
+			continue
+		}
 		destDir := filepath.Join(joinDest, r.Name)
 		output.Progress(i+1, len(accessible), "Cloning "+r.Name+"...")
-		if err := git.Clone(cloneURL, destDir); err != nil {
+		if err := git.Clone(info.CloneURL, destDir); err != nil {
 			output.Warn("  could not clone %s: %v", r.Name, err)
 			continue
 		}
