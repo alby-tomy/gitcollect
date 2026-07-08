@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>gitcollect — Command Reference with Examples</title>
+  <meta name="description"
+    content="Real-world gitcollect examples for personal and org-level workflows: auth, collections, members, groups, access control, onboarding, and more.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+    rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    :root {
+      --ink:   #0A0E14;
+      --ink2:  #111720;
+      --ink3:  #1A2230;
+      --wire:  #1E2A3A;
+      --wire2: #2A3A50;
+      --dim:   #4A5A70;
+      --muted: #6A7A90;
+      --body:  #B8C4D4;
+      --head:  #E8EEF8;
+      --lime:  #C8FF57;
+      --lime2: #A8E040;
+      --warn:  #FEBC2E;
+      --err:   #FF6B6B;
+      --mono: 'JetBrains Mono', monospace;
+      --sans: 'Space Grotesk', system-ui, sans-serif;
+    }
+
+    body {
+      background: var(--ink);
+      color: var(--body);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+    }
+
+    a { color: var(--lime); text-decoration: none; }
+    a:hover { color: var(--lime2); text-decoration: underline; }
+
+    /* ── SIDEBAR NAV ── */
+    nav {
+      position: fixed;
+      top: 0; left: 0;
+      width: 220px;
+      height: 100vh;
+      background: var(--ink2);
+      border-right: 1px solid var(--wire);
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+      overflow-y: auto;
+      scrollbar-width: none;
+      flex-shrink: 0;
+    }
+    nav::-webkit-scrollbar { display: none; }
+
+    .nav-inner {
+      display: flex;
+      flex-direction: column;
+      padding: 24px 0 32px;
+      flex: 1;
+    }
+
+    .nav-logo {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--lime);
+      text-decoration: none;
+      letter-spacing: -0.02em;
+      padding: 0 20px 20px;
+      border-bottom: 1px solid var(--wire);
+      margin-bottom: 16px;
+      display: block;
+    }
+    .nav-logo:hover { color: var(--lime); text-decoration: none; }
+    .nav-logo span { color: var(--muted); }
+
+    .nav-section-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--dim);
+      padding: 12px 20px 6px;
+    }
+
+    .nav-links {
+      display: flex;
+      flex-direction: column;
+      list-style: none;
+      gap: 2px;
+      padding: 0 12px;
+    }
+
+    .nav-links a {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--muted);
+      text-decoration: none;
+      letter-spacing: 0.02em;
+      transition: color 0.15s, background 0.15s;
+      display: block;
+      padding: 6px 10px;
+      border-radius: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .nav-links a:hover { color: var(--head); background: var(--ink3); text-decoration: none; }
+    .nav-links a.active { color: var(--lime); background: rgba(200,255,87,0.07); }
+
+    .nav-back {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--dim);
+      text-decoration: none;
+      padding: 6px 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 4px;
+      transition: color 0.15s;
+      margin: 0 12px 4px;
+    }
+    .nav-back:hover { color: var(--muted); text-decoration: none; }
+
+    /* ── PAGE BODY ── */
+    .page-body {
+      margin-left: 220px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* ── HERO ── */
+    header.hero {
+      border-bottom: 1px solid var(--wire);
+      background: linear-gradient(180deg, var(--ink3), var(--ink));
+      padding: 56px 0 40px;
+    }
+
+    .container {
+      max-width: 85%;
+      margin: 0 auto;
+      padding: 0 40px;
+    }
+
+    header.hero h1 {
+      font-size: clamp(22px, 3vw, 32px);
+      font-weight: 700;
+      color: var(--head);
+      letter-spacing: -0.03em;
+      margin-bottom: 10px;
+      line-height: 1.15;
+    }
+
+    header.hero h1 .lime { color: var(--lime); }
+    header.hero h1 .dim  { color: var(--muted); font-weight: 400; }
+
+    header.hero p.tagline {
+      font-size: 0.95rem;
+      color: var(--muted);
+      max-width: 600px;
+      line-height: 1.7;
+    }
+
+    /* ── PILLS ── */
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 2px 9px;
+      border-radius: 20px;
+      flex-shrink: 0;
+    }
+    .pill-personal {
+      background: rgba(200,255,87,0.10);
+      color: var(--lime);
+      border: 1px solid rgba(200,255,87,0.20);
+    }
+    .pill-org {
+      background: rgba(199,146,234,0.10);
+      color: #C792EA;
+      border: 1px solid rgba(199,146,234,0.20);
+    }
+    .pill-both {
+      background: rgba(122,162,247,0.10);
+      color: #7AA2F7;
+      border: 1px solid rgba(122,162,247,0.20);
+    }
+
+    /* ── SECTIONS ── */
+    .section {
+      padding: 64px 0;
+      border-bottom: 1px solid var(--wire);
+    }
+    .section:last-of-type { border-bottom: none; }
+
+    .section-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--lime);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-label::after {
+      content: '';
+      flex: 1;
+      max-width: 40px;
+      height: 1px;
+      background: var(--lime);
+      opacity: 0.4;
+    }
+
+    .section-title {
+      font-size: clamp(20px, 2.5vw, 28px);
+      font-weight: 700;
+      color: var(--head);
+      letter-spacing: -0.025em;
+      line-height: 1.2;
+      margin-bottom: 10px;
+      text-wrap: balance;
+    }
+
+    .section-title .pill {
+      vertical-align: middle;
+      margin-left: 10px;
+      font-size: 9px;
+    }
+
+    .section-sub {
+      font-size: 0.9rem;
+      color: var(--muted);
+      max-width: 640px;
+      margin-bottom: 36px;
+      line-height: 1.7;
+    }
+
+    /* ── TERMINAL BLOCKS ── */
+    .term {
+      background: var(--ink2);
+      border: 1px solid var(--wire);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 20px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.65;
+    }
+
+    .term-header {
+      background: var(--ink3);
+      padding: 8px 16px;
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid var(--wire);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .term-dots {
+      display: flex;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .term-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--wire2);
+    }
+
+    .term-body {
+      padding: 18px 20px;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    /* Token colours — match code-block palette from index.html */
+    .p  { color: var(--lime); }           /* $ prompt */
+    .c  { color: var(--head); }           /* command */
+    .f  { color: #C792EA; }               /* --flags */
+    .a  { color: #7DBBE6; }               /* arg values */
+    .s  { color: var(--lime); }           /* ✓ success */
+    .w  { color: var(--warn); }           /* ⚠ warning */
+    .e  { color: var(--err); }            /* ✗ error */
+    .d  { color: var(--dim); }            /* # comments / dim */
+    .h  { color: var(--head); }           /* output headers */
+    .o  { color: var(--body); }           /* plain output */
+
+    /* ── COMPARE GRID ── */
+    .compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .compare-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .compare-label.personal { color: var(--lime); }
+    .compare-label.org      { color: #C792EA; }
+    .compare .term { margin-bottom: 0; }
+
+    /* ── NOTE / WARN ── */
+    .note {
+      font-size: 0.875rem;
+      color: var(--muted);
+      border-left: 2px solid var(--lime);
+      padding: 10px 14px;
+      margin: 16px 0;
+      background: rgba(200,255,87,0.04);
+      border-radius: 0 4px 4px 0;
+      line-height: 1.65;
+    }
+    .note code { color: var(--lime); font-family: var(--mono); font-size: 0.875em; }
+    .note strong { color: var(--head); }
+
+    .warn {
+      font-size: 0.875rem;
+      color: var(--muted);
+      border-left: 2px solid var(--warn);
+      padding: 10px 14px;
+      margin: 16px 0;
+      background: rgba(254,188,46,0.04);
+      border-radius: 0 4px 4px 0;
+      line-height: 1.65;
+    }
+
+    /* ── COMMAND TABLE ── */
+    .cmd-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--wire);
+      border-radius: 6px;
+      margin: 20px 0;
+    }
+
+    .cmd-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    .cmd-table th {
+      text-align: left;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--dim);
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--wire);
+      background: var(--ink2);
+    }
+
+    .cmd-table td {
+      padding: 9px 16px;
+      border-bottom: 1px solid var(--wire2);
+      vertical-align: top;
+      line-height: 1.5;
+      color: var(--body);
+    }
+
+    .cmd-table tr:last-child td { border-bottom: none; }
+
+    .cmd-table td:first-child {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--lime);
+      white-space: nowrap;
+    }
+
+    .cmd-table td:nth-child(2) {
+      white-space: nowrap;
+    }
+
+    .cmd-table td:last-child { color: var(--muted); }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--wire);
+      padding: 40px 0;
+    }
+
+    .footer-inner {
+      max-width: 85%;
+      margin: 0 auto;
+      padding: 0 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-logo {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--dim);
+    }
+    .footer-logo span { color: var(--lime); }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+    }
+    .footer-links a {
+      font-size: 12px;
+      color: var(--dim);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .footer-links a:hover { color: var(--body); text-decoration: none; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 900px) {
+      nav { display: none; }
+      .page-body { margin-left: 0; }
+      .container { padding: 0 24px; }
+      .compare { grid-template-columns: 1fr; }
+      .footer-inner { flex-direction: column; gap: 20px; }
+      .section { padding: 40px 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ── NAV ── -->
+  <nav>
+    <div class="nav-inner">
+      <a href="index.html" class="nav-logo">git<span>collect</span></a>
+      <a href="index.html" class="nav-back">← Back to docs</a>
+
+      <div class="nav-section-label">Personal</div>
+      <ul class="nav-links">
+        <li><a href="#auth">Authentication</a></li>
+        <li><a href="#personal-create">Create collection</a></li>
+        <li><a href="#personal-add">Add repos</a></li>
+        <li><a href="#personal-clone">Clone &amp; pull</a></li>
+        <li><a href="#personal-inspect">Show &amp; inspect</a></li>
+      </ul>
+
+      <div class="nav-section-label">Team / Org</div>
+      <ul class="nav-links">
+        <li><a href="#org-create">Create team collection</a></li>
+        <li><a href="#org-members">Members &amp; groups</a></li>
+        <li><a href="#org-access">Repo access control</a></li>
+        <li><a href="#org-share">Share &amp; onboard</a></li>
+        <li><a href="#org-sync">Sync &amp; publish</a></li>
+      </ul>
+
+      <div class="nav-section-label">Maintenance</div>
+      <ul class="nav-links">
+        <li><a href="#doctor">Doctor</a></li>
+        <li><a href="#verify">Verify</a></li>
+        <li><a href="#audit">Audit log</a></li>
+        <li><a href="#export">Export &amp; import</a></li>
+        <li><a href="#all-commands">All commands</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="page-body">
+
+    <!-- ── HERO ── -->
+    <header class="hero">
+      <div class="container">
+        <h1>git<span class="lime">collect</span> <span class="dim">/ examples</span></h1>
+        <p class="tagline">Real commands with real output — personal account and team/org scenarios side by side.</p>
+      </div>
+    </header>
+
+    <!-- ── AUTH ── -->
+    <section id="auth" class="section">
+      <div class="container">
+        <div class="section-label">Getting started</div>
+        <h2 class="section-title">Authentication <span class="pill pill-both">All users</span></h2>
+        <p class="section-sub">Run once per platform. Tokens are stored in <code style="font-family:var(--mono);color:var(--lime)">~/.gitcollect/config</code>. Every command that touches the platform reads from there.</p>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Terminal
+          </div>
+          <div class="term-body"><span class="d"># GitHub (default)</span>
+<span class="p">$</span> <span class="c">gitcollect auth</span>
+<span class="d">Enter your GitHub personal access token: </span><span class="w">••••••••••••••••</span>
+<span class="s">✓ Authenticated as jsmith (github.com)</span>
+<span class="d">  Token stored at ~/.gitcollect/config</span>
+
+<span class="d"># GitLab (cloud)</span>
+<span class="p">$</span> <span class="c">gitcollect auth</span> <span class="f">--host</span> <span class="a">gitlab.com</span>
+<span class="d">Enter your GitLab personal access token (glpat-...): </span><span class="w">••••••••••••••••</span>
+<span class="s">✓ Authenticated as jsmith (gitlab.com)</span>
+
+<span class="d"># Self-hosted GitLab</span>
+<span class="p">$</span> <span class="c">gitcollect auth</span> <span class="f">--host</span> <span class="a">git.acme-corp.com</span>
+<span class="s">✓ Authenticated as jsmith (git.acme-corp.com)</span>
+
+<span class="d"># Confirm stored identities</span>
+<span class="p">$</span> <span class="c">gitcollect whoami</span>
+<span class="h">HOST                  LOGIN    ID</span>
+<span class="o">github.com            jsmith   1042871
+gitlab.com            jsmith   99431</span></div>
+        </div>
+
+        <p class="note"><strong>GitHub token scopes needed:</strong> <code>repo</code>, <code>read:org</code> (for team import), <code>admin:org</code> (to add collaborators to org repos). GitLab: <code>api</code> scope on a <code>glpat-…</code> token.</p>
+      </div>
+    </section>
+
+    <!-- ── PERSONAL CREATE ── -->
+    <section id="personal-create" class="section">
+      <div class="container">
+        <div class="section-label">Personal workflow</div>
+        <h2 class="section-title">Create a personal collection <span class="pill pill-personal">Personal</span></h2>
+        <p class="section-sub">Group your own repos — dotfiles, side projects, configs — into a named collection you can clone on any machine in one command.</p>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Personal account — create and populate
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect init</span> <span class="a">my-dotfiles</span>
+<span class="s">✓ Created collection "my-dotfiles" (private)</span>
+<span class="d">  ~/.gitcollect/collections/my-dotfiles.yaml</span>
+
+<span class="p">$</span> <span class="c">gitcollect add</span> <span class="a">my-dotfiles neovim-config zsh-config tmux-config</span>
+<span class="s">✓ Added jsmith/neovim-config to "my-dotfiles"</span>
+<span class="s">✓ Added jsmith/zsh-config to "my-dotfiles"</span>
+<span class="s">✓ Added jsmith/tmux-config to "my-dotfiles"</span>
+
+<span class="p">$</span> <span class="c">gitcollect show</span> <span class="a">my-dotfiles</span>
+<span class="h">Collection:  my-dotfiles</span>
+<span class="h">Owner:       jsmith</span>
+<span class="h">Visibility:  private</span>
+<span class="h">Host:        github.com</span>
+<span class="h">Repos (3):</span>
+<span class="o">  neovim-config
+  zsh-config
+  tmux-config</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── PERSONAL ADD ── -->
+    <section id="personal-add" class="section">
+      <div class="container">
+        <div class="section-label">Personal workflow</div>
+        <h2 class="section-title">Add and remove repos <span class="pill pill-personal">Personal</span></h2>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Add with options
+          </div>
+          <div class="term-body"><span class="d"># Add a repo from a different user/org</span>
+<span class="p">$</span> <span class="c">gitcollect add</span> <span class="a">my-dotfiles</span> <span class="f">--repo</span> <span class="a">ohmyzsh/ohmyzsh</span>
+<span class="s">✓ Added ohmyzsh/ohmyzsh to "my-dotfiles"</span>
+
+<span class="d"># Add multiple in one call</span>
+<span class="p">$</span> <span class="c">gitcollect add</span> <span class="a">my-dotfiles zsh-config tmux-config alacritty-theme</span>
+<span class="s">✓ Added jsmith/zsh-config</span>
+<span class="s">✓ Added jsmith/tmux-config</span>
+<span class="s">✓ Added jsmith/alacritty-theme</span>
+
+<span class="d"># Remove a repo (confirmation required)</span>
+<span class="p">$</span> <span class="c">gitcollect remove</span> <span class="a">my-dotfiles alacritty-theme</span>
+<span class="d">This will remove "alacritty-theme" from "my-dotfiles" (type "alacritty-theme" to confirm): </span><span class="a">alacritty-theme</span>
+<span class="s">✓ Removed alacritty-theme from "my-dotfiles"</span>
+
+<span class="d"># List all your collections</span>
+<span class="p">$</span> <span class="c">gitcollect list</span>
+<span class="h">NAME              HOST         REPOS  MEMBERS  VISIBILITY</span>
+<span class="o">my-dotfiles       github.com       3        0  private
+side-projects     github.com       7        0  private</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── PERSONAL CLONE ── -->
+    <section id="personal-clone" class="section">
+      <div class="container">
+        <div class="section-label">Personal workflow</div>
+        <h2 class="section-title">Clone and pull updates <span class="pill pill-personal">Personal</span></h2>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Clone, pull, sync
+          </div>
+          <div class="term-body"><span class="d"># Clone all repos to ~/repos/</span>
+<span class="p">$</span> <span class="c">gitcollect clone</span> <span class="a">my-dotfiles</span> <span class="f">--dest</span> <span class="a">~/repos</span>
+<span class="o">[1/3] Cloning neovim-config...</span>
+<span class="o">[2/3] Cloning zsh-config...</span>
+<span class="o">[3/3] Cloning tmux-config...</span>
+<span class="s">✓ Cloned 3 repos to ~/repos</span>
+
+<span class="d"># Pull updates on every repo in the collection</span>
+<span class="p">$</span> <span class="c">gitcollect pull</span> <span class="a">my-dotfiles</span> <span class="f">--dest</span> <span class="a">~/repos</span>
+<span class="o">[1/3] Pulling neovim-config...  </span><span class="s">✓ up to date</span>
+<span class="o">[2/3] Pulling zsh-config...     </span><span class="s">✓ updated (main → a3f91c2)</span>
+<span class="o">[3/3] Pulling tmux-config...    </span><span class="s">✓ up to date</span>
+<span class="s">✓ Pulled 3 repos</span>
+
+<span class="d"># Sync = clone missing + pull existing in one pass</span>
+<span class="p">$</span> <span class="c">gitcollect sync</span> <span class="a">my-dotfiles</span> <span class="f">--dest</span> <span class="a">~/repos</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── PERSONAL INSPECT ── -->
+    <section id="personal-inspect" class="section">
+      <div class="container">
+        <div class="section-label">Personal workflow</div>
+        <h2 class="section-title">Show and inspect <span class="pill pill-personal">Personal</span></h2>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Inspect the access matrix
+          </div>
+          <div class="term-body"><span class="d"># Full access matrix (more useful once you add members)</span>
+<span class="p">$</span> <span class="c">gitcollect inspect</span> <span class="a">my-dotfiles</span>
+<span class="o">Collection:  my-dotfiles
+Visibility:  private
+Members:     0
+
+No members or no repos to show in the access matrix.</span>
+
+<span class="d"># Machine-readable output for any command</span>
+<span class="p">$</span> <span class="c">gitcollect show</span> <span class="a">my-dotfiles</span> <span class="f">--json</span>
+<span class="o">{
+  "name": "my-dotfiles",
+  "host": "github.com",
+  "visibility": "private",
+  "repos": [
+    {"name": "neovim-config", "groups": [], "users": []},
+    {"name": "zsh-config",    "groups": [], "users": []},
+    {"name": "tmux-config",   "groups": [], "users": []}
+  ],
+  "members": []
+}</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ORG CREATE ── -->
+    <section id="org-create" class="section">
+      <div class="container">
+        <div class="section-label">Team / Org workflow</div>
+        <h2 class="section-title">Create a team collection <span class="pill pill-org">Org</span></h2>
+        <p class="section-sub">Set <code style="font-family:var(--mono);color:var(--lime)">--namespace</code> to your GitHub org or GitLab group. gitcollect uses the namespace for all API calls and repo lookups — it does not have to match the collection name.</p>
+
+        <div class="compare">
+          <div>
+            <div class="compare-label personal">Personal</div>
+            <div class="term">
+              <div class="term-body"><span class="p">$</span> <span class="c">gitcollect init</span> <span class="a">my-dotfiles</span>
+<span class="s">✓ Created "my-dotfiles" (private)</span>
+<span class="d">  Owner: jsmith
+  Host:  github.com</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="compare-label org">Org / Team</div>
+            <div class="term">
+              <div class="term-body"><span class="p">$</span> <span class="c">gitcollect init</span> <span class="a">payments-team</span> \
+    <span class="f">--namespace</span> <span class="a">acme-corp</span> \
+    <span class="f">--visibility</span> <span class="a">private</span>
+<span class="s">✓ Created "payments-team" (private)</span>
+<span class="d">  Owner:     jsmith
+  Namespace: acme-corp
+  Host:      github.com</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Add org repos (namespace is used automatically)
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect add</span> <span class="a">payments-team checkout-service payment-gateway fraud-detector</span>
+<span class="s">✓ Added acme-corp/checkout-service to "payments-team"</span>
+<span class="s">✓ Added acme-corp/payment-gateway to "payments-team"</span>
+<span class="s">✓ Added acme-corp/fraud-detector to "payments-team"</span>
+
+<span class="p">$</span> <span class="c">gitcollect show</span> <span class="a">payments-team</span>
+<span class="h">Collection:  payments-team</span>
+<span class="h">Owner:       jsmith</span>
+<span class="h">Namespace:   acme-corp</span>
+<span class="h">Visibility:  private</span>
+<span class="h">Host:        github.com</span>
+<span class="h">Repos (3):</span>
+<span class="o">  checkout-service     (open to all members)
+  payment-gateway      (open to all members)
+  fraud-detector       (open to all members)</span>
+<span class="h">Members (0):</span>
+<span class="d">  No members yet. Run: gitcollect member add payments-team &lt;username&gt;</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ORG MEMBERS ── -->
+    <section id="org-members" class="section">
+      <div class="container">
+        <div class="section-label">Team / Org workflow</div>
+        <h2 class="section-title">Members and groups <span class="pill pill-org">Org</span></h2>
+        <p class="section-sub">Members are platform users who can access repos. Groups are named subsets — use them to restrict specific repos to specific roles without giving everyone access to everything.</p>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Add members, create groups, assign membership
+          </div>
+          <div class="term-body"><span class="d"># Add individual members (grants platform collaborator access to all repos)</span>
+<span class="p">$</span> <span class="c">gitcollect member add</span> <span class="a">payments-team alice bob carol</span>
+<span class="s">✓ Added alice to "payments-team" — granted access to 3 repos</span>
+<span class="s">✓ Added bob to "payments-team" — granted access to 3 repos</span>
+<span class="s">✓ Added carol to "payments-team" — granted access to 3 repos</span>
+<span class="d">  Note: GitHub will send them a collaborator invitation to accept.</span>
+
+<span class="d"># List members</span>
+<span class="p">$</span> <span class="c">gitcollect member list</span> <span class="a">payments-team</span>
+<span class="h">MEMBER   GROUPS   REPOS</span>
+<span class="o">alice    —            3
+bob      —            3
+carol    —            3</span>
+
+<span class="d"># Create groups and assign members</span>
+<span class="p">$</span> <span class="c">gitcollect group add</span> <span class="a">payments-team</span> <span class="f">--name</span> <span class="a">eng</span> <span class="a">alice bob</span>
+<span class="s">✓ Created group "eng" in "payments-team" with 2 member(s)</span>
+
+<span class="p">$</span> <span class="c">gitcollect group add</span> <span class="a">payments-team</span> <span class="f">--name</span> <span class="a">security</span> <span class="a">carol</span>
+<span class="s">✓ Created group "security" in "payments-team" with 1 member(s)</span>
+
+<span class="d"># Remove a member — revokes all platform access</span>
+<span class="p">$</span> <span class="c">gitcollect member remove</span> <span class="a">payments-team bob</span>
+<span class="s">✓ Removed bob from "payments-team" — revoked access to 3 repos</span></div>
+        </div>
+
+        <p class="note">gitcollect stores members by their immutable platform user ID, never by login. Renaming a GitHub or GitLab account never breaks membership — the cached login is kept alongside the ID for display only.</p>
+      </div>
+    </section>
+
+    <!-- ── ORG ACCESS ── -->
+    <section id="org-access" class="section">
+      <div class="container">
+        <div class="section-label">Team / Org workflow</div>
+        <h2 class="section-title">Repo access control <span class="pill pill-org">Org</span></h2>
+        <p class="section-sub">By default every member can reach every repo. Narrow that with per-repo rules: restrict to groups, specific users, or reopen to everyone.</p>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Restrict repos, then inspect the full matrix
+          </div>
+          <div class="term-body"><span class="d"># Restrict fraud-detector to security group only</span>
+<span class="p">$</span> <span class="c">gitcollect repo access</span> <span class="a">payments-team fraud-detector</span> <span class="f">--groups</span> <span class="a">security</span>
+<span class="s">✓ Updated access for fraud-detector</span>
+<span class="o">  Before: open to all members
+  After:  groups: security</span>
+<span class="d">Run: gitcollect inspect payments-team --repo fraud-detector</span>
+
+<span class="d"># Restrict payment-gateway to named individuals</span>
+<span class="p">$</span> <span class="c">gitcollect repo access</span> <span class="a">payments-team payment-gateway</span> <span class="f">--users</span> <span class="a">alice carol</span>
+<span class="s">✓ Updated access for payment-gateway</span>
+<span class="o">  Before: open to all members
+  After:  users: alice, carol</span>
+
+<span class="d"># Re-open a restricted repo</span>
+<span class="p">$</span> <span class="c">gitcollect repo access</span> <span class="a">payments-team checkout-service</span> <span class="f">--open</span>
+<span class="s">✓ Updated access for checkout-service (open to all members)</span>
+
+<span class="d"># Full access matrix</span>
+<span class="p">$</span> <span class="c">gitcollect inspect</span> <span class="a">payments-team</span>
+<span class="o">Collection:  payments-team
+Visibility:  private
+Members:     2</span>
+
+<span class="h">MEMBER   checkout-service   payment-gateway   fraud-detector</span>
+<span class="o">alice    ✓                  ✓                 ✗
+carol    ✓                  ✓                 ✓</span>
+
+<span class="d"># Access breakdown for one user</span>
+<span class="p">$</span> <span class="c">gitcollect inspect</span> <span class="a">payments-team</span> <span class="f">--user</span> <span class="a">alice</span>
+<span class="o">User:        alice
+Collection:  payments-team (private)
+Member:      yes
+Groups:      eng</span>
+
+<span class="h">REPO               ACCESS   REASON</span>
+<span class="o">checkout-service   ✓ yes    open to all members
+payment-gateway    ✓ yes    user: alice
+fraud-detector     ✗ no     restricted to group: security</span>
+
+<span class="o">To fix:
+  fraud-detector   gitcollect repo access payments-team fraud-detector --groups security,eng</span>
+
+<span class="d"># Who can reach a specific repo</span>
+<span class="p">$</span> <span class="c">gitcollect inspect</span> <span class="a">payments-team</span> <span class="f">--repo</span> <span class="a">fraud-detector</span>
+<span class="o">Repo:   fraud-detector
+Access: groups: security</span>
+
+<span class="h">MEMBER   ACCESS   REASON</span>
+<span class="o">alice    ✗ no     not in group: security
+carol    ✓ yes    group: security</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ORG SHARE ── -->
+    <section id="org-share" class="section">
+      <div class="container">
+        <div class="section-label">Team / Org workflow</div>
+        <h2 class="section-title">Share collections and onboard new hires <span class="pill pill-org">Org</span></h2>
+        <p class="section-sub">The admin publishes a collection YAML to a shared config repo. New team members fetch it and clone their repos in a single command.</p>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Admin publishes → new hire joins in one command
+          </div>
+          <div class="term-body"><span class="d">── Admin (on their machine) ─────────────────────────────────────</span>
+
+<span class="p">$</span> <span class="c">gitcollect publish</span> <span class="a">payments-team</span> <span class="f">--repo</span> <span class="a">acme-corp/gitcollect-config</span>
+<span class="s">✓ Published payments-team to acme-corp/gitcollect-config</span>
+<span class="d">  Committed to: collections/payments-team.yaml</span>
+
+<span class="d">── New hire (on their machine) ──────────────────────────────────</span>
+
+<span class="d"># Fetch config + clone all accessible repos in one step</span>
+<span class="p">$</span> <span class="c">gitcollect join</span> \
+    <span class="f">--org</span> <span class="a">acme-corp</span> \
+    <span class="f">--team</span> <span class="a">payments-team</span> \
+    <span class="f">--repo</span> <span class="a">acme-corp/gitcollect-config</span> \
+    <span class="f">--clone</span> <span class="f">--dest</span> <span class="a">~/dev</span>
+<span class="s">✓ Authenticated as dave (github.com)</span>
+<span class="s">✓ payments-team fetched (3 repos · 2 members)</span>
+<span class="d">  Written to ~/.gitcollect/collections/acme-corp-payments-team.yaml</span>
+
+<span class="o">Cloning repos...</span>
+<span class="o">[1/2] Cloning checkout-service...</span>
+<span class="o">[2/2] Cloning payment-gateway...</span>
+<span class="d">  fraud-detector — no access (restricted to group: security)</span>
+<span class="s">✓ Joined acme-corp/payments-team — 2 repos cloned to ~/dev</span>
+
+<span class="o">Welcome to the team. Next steps:
+  gitcollect show acme-corp-payments-team    see your full repo access
+  gitcollect pull acme-corp-payments-team    pull updates any time</span>
+
+<span class="d">── Alternative: pull-config without full join ────────────────────</span>
+
+<span class="p">$</span> <span class="c">gitcollect pull-config</span> <span class="f">--repo</span> <span class="a">acme-corp/gitcollect-config</span>
+<span class="s">payments-team                  (new)
+frontend-team                  (new)</span>
+<span class="s">✓ Fetched 2 collection(s)</span>
+
+<span class="d"># Overwrite if collections already exist locally</span>
+<span class="p">$</span> <span class="c">gitcollect pull-config</span> <span class="f">--repo</span> <span class="a">acme-corp/gitcollect-config</span> <span class="f">--overwrite</span>
+<span class="s">payments-team                  (updated)
+frontend-team                  (updated)</span>
+<span class="s">✓ Fetched 2 collection(s)</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ORG SYNC ── -->
+    <section id="org-sync" class="section">
+      <div class="container">
+        <div class="section-label">Team / Org workflow</div>
+        <h2 class="section-title">Sync and publish <span class="pill pill-org">Org</span></h2>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Keep collections current with the platform team state
+          </div>
+          <div class="term-body"><span class="d"># Refresh local collection from platform's current team membership</span>
+<span class="p">$</span> <span class="c">gitcollect sync-config</span> <span class="a">payments-team</span>
+<span class="o">Syncing payments-team from github.com/acme-corp...
+Changes detected:
+  + new member: dave (id: 1193847)
+  - removed member: bob (no longer in platform team)
+  + new repo:   reporting-api
+
+Applying changes...</span>
+<span class="s">✓ payments-team synced</span>
+<span class="o">
+Run: gitcollect sync payments-team   to clone new repos and pull existing</span>
+
+<span class="d"># Preview changes without applying</span>
+<span class="p">$</span> <span class="c">gitcollect sync-config</span> <span class="a">payments-team</span> <span class="f">--dry-run</span>
+<span class="o">Changes detected:
+  + new repo: reporting-api</span>
+<span class="d">[dry-run] No changes applied.</span>
+
+<span class="d"># After sync-config, bring local checkouts up to date</span>
+<span class="p">$</span> <span class="c">gitcollect sync</span> <span class="a">payments-team</span> <span class="f">--dest</span> <span class="a">~/dev</span>
+<span class="o">[1/4] checkout-service → </span><span class="s">up to date</span>
+<span class="o">[2/4] payment-gateway  → </span><span class="s">updated (main → c2f914a)</span>
+<span class="o">[3/4] fraud-detector   → </span><span class="s">up to date</span>
+<span class="o">[4/4] reporting-api    → </span><span class="s">cloned (new)</span>
+<span class="s">✓ Synced 4 repos</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── DOCTOR ── -->
+    <section id="doctor" class="section">
+      <div class="container">
+        <div class="section-label">Maintenance</div>
+        <h2 class="section-title">Doctor — pre-flight health check <span class="pill pill-both">All users</span></h2>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Check auth, token scopes, and stale collections
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect doctor</span>
+
+<span class="d">Checking gitcollect configuration...</span>
+
+<span class="s">✓  github.com auth       Token valid (jsmith)</span>
+<span class="w">⚠  github.com scopes     Missing read:org — team import will not work</span>
+<span class="w">⚠  payments-team         Last updated 42 days ago — consider gitcollect sync-config</span>
+<span class="s">✓  my-dotfiles           Last updated 2 days ago</span>
+<span class="s">✓  gitlab.com auth       Token valid (jsmith)</span>
+
+<span class="w">2 warnings</span>
+
+<span class="d">Fix:
+  Add read:org scope to your GitHub token at github.com/settings/tokens
+  Then run: gitcollect auth</span>
+
+<span class="d"># Machine-readable output</span>
+<span class="p">$</span> <span class="c">gitcollect doctor</span> <span class="f">--json</span>
+<span class="o">[
+  {"label":"github.com auth",  "status":"ok",   "message":"Token valid (jsmith)"},
+  {"label":"github.com scopes","status":"warn", "message":"Missing read:org",
+   "fix":"gitcollect auth"},
+  {"label":"payments-team",    "status":"warn", "message":"Last updated 42 days ago"}
+]</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── VERIFY ── -->
+    <section id="verify" class="section">
+      <div class="container">
+        <div class="section-label">Maintenance</div>
+        <h2 class="section-title">Verify — check repos still exist <span class="pill pill-both">All users</span></h2>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Check reachability, optionally auto-remove broken entries
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect verify</span> <span class="a">payments-team</span>
+<span class="s">✓  checkout-service    ok</span>
+<span class="s">✓  payment-gateway     ok</span>
+<span class="w">⚠  fraud-detector      archived</span>
+<span class="e">✗  reporting-api       not found (deleted or renamed on platform)</span>
+
+<span class="e">1 repo not reachable</span>
+<span class="d">Run: gitcollect verify payments-team --fix   to remove broken entries</span>
+
+<span class="d"># Auto-remove unreachable repos</span>
+<span class="p">$</span> <span class="c">gitcollect verify</span> <span class="a">payments-team</span> <span class="f">--fix</span>
+<span class="o">Removing reporting-api (not found)...</span>
+<span class="s">✓ payments-team updated (3 repos remaining)</span>
+
+<span class="d"># Machine-readable</span>
+<span class="p">$</span> <span class="c">gitcollect verify</span> <span class="a">payments-team</span> <span class="f">--json</span>
+<span class="o">[
+  {"repo":"checkout-service","status":"ok",       "message":""},
+  {"repo":"payment-gateway", "status":"ok",       "message":""},
+  {"repo":"fraud-detector",  "status":"archived", "message":""},
+  {"repo":"reporting-api",   "status":"not_found","message":""}
+]</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── AUDIT ── -->
+    <section id="audit" class="section">
+      <div class="container">
+        <div class="section-label">Maintenance</div>
+        <h2 class="section-title">Audit log <span class="pill pill-org">Org</span></h2>
+        <p class="section-sub">Every access-changing action is appended to <code style="font-family:var(--mono);color:var(--lime)">~/.gitcollect/audit/&lt;collection&gt;.log</code>. Logs are local — export them with <code style="font-family:var(--mono);color:var(--lime)">--json</code> for off-machine backup.</p>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            View and export audit history
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect audit</span> <span class="a">payments-team</span>
+<span class="h">TIME                  ACTOR    ACTION             TARGET             RESULT</span>
+<span class="o">2026-07-01 09:12:04   jsmith   init               payments-team      ok
+2026-07-01 09:14:22   jsmith   repo.add           checkout-service   ok
+2026-07-01 09:15:01   jsmith   member.add         alice              ok
+2026-07-01 09:15:03   jsmith   member.add         bob                ok
+2026-07-02 11:03:42   jsmith   repo.access.set    fraud-detector     ok
+2026-07-05 14:22:10   jsmith   member.remove      bob                ok</span>
+
+<span class="d"># Filter by action type</span>
+<span class="p">$</span> <span class="c">gitcollect audit</span> <span class="a">payments-team</span> <span class="f">--action</span> <span class="a">member</span>
+<span class="h">TIME                  ACTOR    ACTION        TARGET   RESULT</span>
+<span class="o">2026-07-01 09:15:01   jsmith   member.add    alice    ok
+2026-07-01 09:15:03   jsmith   member.add    bob      ok
+2026-07-05 14:22:10   jsmith   member.remove bob      ok</span>
+
+<span class="d"># Export for backup</span>
+<span class="p">$</span> <span class="c">gitcollect audit</span> <span class="a">payments-team</span> <span class="f">--json</span> <span class="o">> payments-team-audit.json</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── EXPORT ── -->
+    <section id="export" class="section">
+      <div class="container">
+        <div class="section-label">Maintenance</div>
+        <h2 class="section-title">Export and import <span class="pill pill-both">All users</span></h2>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Export, backup, and import from the platform
+          </div>
+          <div class="term-body"><span class="d"># Export a single collection as YAML (pure data — no colour, no ANSI)</span>
+<span class="p">$</span> <span class="c">gitcollect export</span> <span class="a">payments-team</span> <span class="o">> payments-team-backup.yaml</span>
+
+<span class="d"># Export as JSON</span>
+<span class="p">$</span> <span class="c">gitcollect export</span> <span class="a">payments-team</span> <span class="f">--json</span> <span class="o">> payments-team.json</span>
+
+<span class="d"># Export all collections (YAML multi-document)</span>
+<span class="p">$</span> <span class="c">gitcollect export</span> <span class="f">--all</span> <span class="o">> all-collections.yaml</span>
+
+<span class="d"># Import a team directly from the GitHub/GitLab team API</span>
+<span class="p">$</span> <span class="c">gitcollect import</span> <span class="f">--org</span> <span class="a">acme-corp</span> <span class="f">--team</span> <span class="a">payments-team</span>
+<span class="s">✓ Imported acme-corp/payments-team (3 repos, 4 members)</span>
+<span class="d">  Written to ~/.gitcollect/collections/acme-corp-payments-team.yaml</span>
+
+<span class="d"># Import all teams in an org at once</span>
+<span class="p">$</span> <span class="c">gitcollect import</span> <span class="f">--org</span> <span class="a">acme-corp</span> <span class="f">--all-teams</span>
+<span class="s">✓ Imported acme-corp/payments-team  (3 repos, 4 members)</span>
+<span class="s">✓ Imported acme-corp/platform-team  (7 repos, 6 members)</span>
+<span class="s">✓ Imported acme-corp/frontend-team  (5 repos, 3 members)</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── ALL COMMANDS ── -->
+    <section id="all-commands" class="section">
+      <div class="container">
+        <div class="section-label">Reference</div>
+        <h2 class="section-title">All commands</h2>
+        <p class="section-sub">Quick-reference table. See <a href="index.html#commands">the full docs</a> for every flag.</p>
+
+        <div class="cmd-table-wrap">
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>Command</th>
+                <th>Scope</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>gitcollect auth</td><td><span class="pill pill-both">Both</span></td><td>Store a platform token</td></tr>
+              <tr><td>gitcollect whoami</td><td><span class="pill pill-both">Both</span></td><td>Show authenticated identities</td></tr>
+              <tr><td>gitcollect init</td><td><span class="pill pill-both">Both</span></td><td>Create a new collection</td></tr>
+              <tr><td>gitcollect add</td><td><span class="pill pill-both">Both</span></td><td>Add repos to a collection</td></tr>
+              <tr><td>gitcollect remove</td><td><span class="pill pill-both">Both</span></td><td>Remove a repo (revokes platform access)</td></tr>
+              <tr><td>gitcollect list</td><td><span class="pill pill-both">Both</span></td><td>List all local collections</td></tr>
+              <tr><td>gitcollect show</td><td><span class="pill pill-both">Both</span></td><td>Show a collection's contents</td></tr>
+              <tr><td>gitcollect inspect</td><td><span class="pill pill-both">Both</span></td><td>Full access matrix — who can reach what</td></tr>
+              <tr><td>gitcollect clone</td><td><span class="pill pill-both">Both</span></td><td>Clone all accessible repos</td></tr>
+              <tr><td>gitcollect pull</td><td><span class="pill pill-both">Both</span></td><td>Pull updates in every local repo</td></tr>
+              <tr><td>gitcollect sync</td><td><span class="pill pill-both">Both</span></td><td>Clone missing + pull existing</td></tr>
+              <tr><td>gitcollect member add</td><td><span class="pill pill-org">Org</span></td><td>Add a member and grant platform access</td></tr>
+              <tr><td>gitcollect member remove</td><td><span class="pill pill-org">Org</span></td><td>Remove a member and revoke access</td></tr>
+              <tr><td>gitcollect member list</td><td><span class="pill pill-org">Org</span></td><td>List members with group/repo breakdown</td></tr>
+              <tr><td>gitcollect group add</td><td><span class="pill pill-org">Org</span></td><td>Create a group or add members to it</td></tr>
+              <tr><td>gitcollect group remove</td><td><span class="pill pill-org">Org</span></td><td>Remove a group or member from it</td></tr>
+              <tr><td>gitcollect repo access</td><td><span class="pill pill-org">Org</span></td><td>Restrict a repo to groups or users</td></tr>
+              <tr><td>gitcollect repo show</td><td><span class="pill pill-org">Org</span></td><td>Show who can access a specific repo</td></tr>
+              <tr><td>gitcollect visibility</td><td><span class="pill pill-org">Org</span></td><td>Change collection visibility</td></tr>
+              <tr><td>gitcollect publish</td><td><span class="pill pill-org">Org</span></td><td>Push collection YAML to a shared config repo</td></tr>
+              <tr><td>gitcollect pull-config</td><td><span class="pill pill-org">Org</span></td><td>Fetch collection files from a config repo</td></tr>
+              <tr><td>gitcollect join</td><td><span class="pill pill-org">Org</span></td><td>One-command new-hire onboarding</td></tr>
+              <tr><td>gitcollect import</td><td><span class="pill pill-org">Org</span></td><td>Import a team from the platform API</td></tr>
+              <tr><td>gitcollect sync-config</td><td><span class="pill pill-org">Org</span></td><td>Refresh local collection from platform team state</td></tr>
+              <tr><td>gitcollect export</td><td><span class="pill pill-both">Both</span></td><td>Print collection(s) as YAML or JSON</td></tr>
+              <tr><td>gitcollect audit</td><td><span class="pill pill-org">Org</span></td><td>View the local audit log</td></tr>
+              <tr><td>gitcollect verify</td><td><span class="pill pill-both">Both</span></td><td>Check repos are still reachable</td></tr>
+              <tr><td>gitcollect doctor</td><td><span class="pill pill-both">Both</span></td><td>Health-check auth and collections</td></tr>
+              <tr><td>gitcollect delete</td><td><span class="pill pill-both">Both</span></td><td>Delete a collection (revokes all access)</td></tr>
+              <tr><td>gitcollect concepts</td><td><span class="pill pill-both">Both</span></td><td>Explain core concepts and mental model</td></tr>
+              <tr><td>gitcollect version</td><td><span class="pill pill-both">Both</span></td><td>Print build version</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="note"><strong>--offline:</strong> Pass to any command to disable all network calls. Commands that require the platform API return a clear error instead of attempting a connection.</p>
+        <p class="note"><strong>Full flag reference:</strong> See <a href="index.html#commands">index.html → Commands</a> for every flag on every command.</p>
+      </div>
+    </section>
+
+    <footer>
+      <div class="footer-inner">
+        <div class="footer-logo">git<span>collect</span> / examples</div>
+        <ul class="footer-links">
+          <li><a href="index.html">← Full docs</a></li>
+          <li><a href="https://github.com/alby-tomy/gitcollect" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/alby-tomy/gitcollect/blob/main/README.md" target="_blank" rel="noopener">README</a></li>
+        </ul>
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    // Highlight active nav link on scroll
+    const links = document.querySelectorAll('.nav-links a');
+    const sections = document.querySelectorAll('section[id]');
+
+    const obs = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          links.forEach(l => l.classList.remove('active'));
+          const a = document.querySelector('.nav-links a[href="#' + e.target.id + '"]');
+          if (a) a.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-35% 0px -60% 0px' });
+
+    sections.forEach(s => obs.observe(s));
+  </script>
+
+</body>
+</html>
