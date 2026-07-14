@@ -51,6 +51,8 @@ func (m *transferMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, erro
 func (m *transferMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *transferMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *transferMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // setupTransferTest creates a saved collection and injects a mock client so
 // runTransfer can be called directly without a real token file.

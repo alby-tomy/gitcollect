@@ -12,6 +12,7 @@ import (
 
 	"github.com/alby-tomy/gitcollect/internal/api"
 	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/internal/output"
 )
 
 const diffMaxConcurrency = 4
@@ -20,6 +21,7 @@ var (
 	diffReposOnly   bool
 	diffMembersOnly bool
 	diffJSON        bool
+	diffFix         bool
 )
 
 var diffCmd = &cobra.Command{
@@ -33,6 +35,7 @@ func init() {
 	diffCmd.Flags().BoolVar(&diffReposOnly, "repos-only", false, "only compare repos, skip member check")
 	diffCmd.Flags().BoolVar(&diffMembersOnly, "members-only", false, "only compare members, skip repo check")
 	diffCmd.Flags().BoolVar(&diffJSON, "json", false, "machine-readable JSON output")
+	diffCmd.Flags().BoolVar(&diffFix, "fix", false, "interactively repair drift: re-grant removed collaborators, remove missing repos")
 	rootCmd.AddCommand(diffCmd)
 }
 
@@ -61,6 +64,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("diff: %w", err)
 	}
+	ns := col.RepoNamespace()
 
 	var (
 		repoResults   []repoDiffResult
@@ -109,10 +113,51 @@ func runDiff(cmd *cobra.Command, args []string) error {
 
 	printDiffSummary(name, repoResults, memberResults)
 
+	if diffFix {
+		runDiffFix(col, client, ns, name, repoResults, memberResults)
+	}
+
 	if apiErr != nil {
 		return fmt.Errorf("diff: %w", apiErr)
 	}
 	return nil
+}
+
+// runDiffFix interactively repairs diff findings: re-grants collaborator access
+// for drifted members, and prompts to remove missing repos from the collection.
+func runDiffFix(col *collection.Collection, client api.Client, ns, colName string, repos []repoDiffResult, members []memberDiffResult) {
+	for _, r := range repos {
+		if r.Status != "missing" {
+			continue
+		}
+		if output.Confirm(fmt.Sprintf("Remove missing repo %q from collection?", r.Name)) {
+			if err := runRemove(nil, []string{colName, r.Name}); err != nil {
+				output.Error("could not remove %s: %v", r.Name, err)
+			} else {
+				output.Success("Removed %s", r.Name)
+			}
+		}
+	}
+
+	for _, m := range members {
+		if m.Status != "drift" {
+			continue
+		}
+		accessible := col.AccessibleRepos(m.ID)
+		if len(accessible) == 0 {
+			continue
+		}
+		if !output.Confirm(fmt.Sprintf("Re-grant collaborator access for %s on %d repo(s)?", m.Username, len(accessible))) {
+			continue
+		}
+		for _, r := range accessible {
+			if err := client.AddCollaborator(ns, r.Name, m.Username, "push"); err != nil {
+				output.Warn("  could not re-grant %s on %s: %v", m.Username, r.Name, err)
+			} else {
+				output.Success("  re-granted %s on %s", m.Username, r.Name)
+			}
+		}
+	}
 }
 
 func checkRepoDiff(col *collection.Collection, client api.Client) ([]repoDiffResult, error) {

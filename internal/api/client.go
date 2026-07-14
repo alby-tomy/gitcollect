@@ -69,6 +69,14 @@ type Client interface {
 	// topic is a GitHub topic name (e.g. "payments"); empty = skip.
 	// Returns up to limit repos (max 100). GitHub only; GitLab returns an error.
 	SearchRepos(org, pattern, topic string, limit int) ([]RepoInfo, error)
+	// ListOrgRepos returns all repositories in an org/group, handling pagination.
+	// GitHub: GET /orgs/{org}/repos?type=all&per_page=100
+	// GitLab: GET /groups/{group}/projects?per_page=100
+	// Archived repos are included; callers may filter them out.
+	ListOrgRepos(org string) ([]RepoInfo, error)
+	// ListOpenPRs returns open pull requests (GitHub) or open merge requests
+	// (GitLab) for a single repo, handling pagination.
+	ListOpenPRs(owner, repo string) ([]PRInfo, error)
 	Host() string
 }
 
@@ -112,6 +120,19 @@ type CommitInfo struct {
 	Author      string
 	Message     string // first line only
 	CommittedAt time.Time
+}
+
+// PRInfo is the subset of pull-request (GitHub) or merge-request (GitLab)
+// metadata gitcollect needs to list open work across a collection.
+type PRInfo struct {
+	Number    int
+	Title     string
+	Author    string
+	State     string // "open" (GitHub) | "opened" (GitLab)
+	URL       string
+	Repo      string // repo name within the collection namespace
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // TeamInfo describes a single team (GitHub) or subgroup (GitLab) returned

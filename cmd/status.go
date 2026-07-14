@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	statusDest    string
-	statusVerbose bool
-	statusAll     bool
+	statusDest             string
+	statusVerbose          bool
+	statusAll              bool
+	statusIncludeArchived  bool
 
 	// injectable for testing — real git calls by default
 	statusGitStatusFn        = git.Status
@@ -34,6 +35,7 @@ func init() {
 	statusCmd.Flags().StringVar(&statusDest, "dest", ".", "directory repos were cloned into")
 	statusCmd.Flags().BoolVar(&statusVerbose, "verbose", false, "show raw git status output per repo")
 	statusCmd.Flags().BoolVar(&statusAll, "all", false, "run across all collections you own or belong to")
+	statusCmd.Flags().BoolVar(&statusIncludeArchived, "include-archived", false, "include archived collections when using --all")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -53,6 +55,10 @@ func runStatusAll(destDir string) error {
 		col, caller, callerID, client, err := loadForGit(name)
 		if err != nil {
 			output.Dim("Skipping %s: %v", name, err)
+			continue
+		}
+		if col.Archived && !statusIncludeArchived {
+			output.Dim("Skipping %s (archived)", name)
 			continue
 		}
 		output.Info("── %s ──", name)
@@ -79,11 +85,12 @@ func runStatusAll(destDir string) error {
 				state = fmt.Sprintf("%d change(s)", len(strings.Split(strings.TrimSpace(out), "\n")))
 			}
 			behind, _ := statusGitCommitsBehindFn(dir)
-			rows = append(rows, []string{repo.Name, state, fmt.Sprintf("%d", behind)})
+			branch, _ := git.CurrentBranch(dir)
+			rows = append(rows, []string{repo.Name, branch, state, fmt.Sprintf("%d", behind)})
 		}
 		if len(rows) > 0 {
 			fmt.Println()
-			output.Table([]string{"REPO", "STATUS", "BEHIND"}, rows)
+			output.Table([]string{"REPO", "BRANCH", "STATUS", "BEHIND"}, rows)
 		}
 	}
 	return nil
@@ -148,12 +155,13 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 
 		behind, _ := statusGitCommitsBehindFn(dir)
-		rows = append(rows, []string{repo.Name, state, fmt.Sprintf("%d", behind)})
+		branch, _ := git.CurrentBranch(dir)
+		rows = append(rows, []string{repo.Name, branch, state, fmt.Sprintf("%d", behind)})
 	}
 
 	if len(rows) > 0 {
 		fmt.Println()
-		output.Table([]string{"REPO", "STATUS", "BEHIND"}, rows)
+		output.Table([]string{"REPO", "BRANCH", "STATUS", "BEHIND"}, rows)
 	}
 	if len(missing) > 0 {
 		output.Info("%d repo(s) not cloned locally, skipped: %v", len(missing), missing)

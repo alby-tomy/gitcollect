@@ -418,6 +418,73 @@ func (c *gitlabClient) paginateGitLab(startURL string, fn func([]byte) error) er
 	return nil
 }
 
+// ListOpenPRs returns open merge requests for a GitLab project (owner/repo).
+func (c *gitlabClient) ListOpenPRs(owner, repo string) ([]PRInfo, error) {
+	id := url.PathEscape(owner + "/" + repo)
+	startURL := fmt.Sprintf("%s/projects/%s/merge_requests?state=opened&per_page=100", c.baseURL, id)
+	var prs []PRInfo
+	err := c.paginateGitLab(startURL, func(body []byte) error {
+		var page []struct {
+			IID       int       `json:"iid"`
+			Title     string    `json:"title"`
+			State     string    `json:"state"`
+			WebURL    string    `json:"web_url"`
+			CreatedAt time.Time `json:"created_at"`
+			UpdatedAt time.Time `json:"updated_at"`
+			Author    struct {
+				Username string `json:"username"`
+			} `json:"author"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, p := range page {
+			prs = append(prs, PRInfo{
+				Number:    p.IID,
+				Title:     p.Title,
+				Author:    p.Author.Username,
+				State:     p.State,
+				URL:       p.WebURL,
+				Repo:      repo,
+				CreatedAt: p.CreatedAt,
+				UpdatedAt: p.UpdatedAt,
+			})
+		}
+		return nil
+	})
+	return prs, err
+}
+
+// ListOrgRepos returns all projects in a GitLab group, handling pagination.
+func (c *gitlabClient) ListOrgRepos(org string) ([]RepoInfo, error) {
+	startURL := fmt.Sprintf("%s/groups/%s/projects?per_page=100&include_subgroups=false",
+		c.baseURL, url.PathEscape(org))
+	var repos []RepoInfo
+	err := c.paginateGitLab(startURL, func(body []byte) error {
+		var page []struct {
+			Name          string `json:"name"`
+			HTTPURLToRepo string `json:"http_url_to_repo"`
+			DefaultBranch string `json:"default_branch"`
+			Visibility    string `json:"visibility"`
+			Archived      bool   `json:"archived"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, r := range page {
+			repos = append(repos, RepoInfo{
+				Name:          r.Name,
+				CloneURL:      r.HTTPURLToRepo,
+				DefaultBranch: r.DefaultBranch,
+				Private:       r.Visibility != "public",
+				Archived:      r.Archived,
+			})
+		}
+		return nil
+	})
+	return repos, err
+}
+
 // ListOrgTeams returns the direct subgroups of the given GitLab group,
 // mapped onto TeamInfo. The group slug is used as the Slug field.
 func (c *gitlabClient) ListOrgTeams(org string) ([]TeamInfo, error) {
