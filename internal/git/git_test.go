@@ -3,9 +3,36 @@ package git
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// writeFakeGit writes an executable fake "git" into dir and returns nothing —
+// callers set PATH to dir themselves. Two scripts are required because the
+// shell differs by platform: Windows resolves "git" to a git.bat run by cmd,
+// every other platform needs a file literally named "git" with a shebang and
+// the executable bit set. Keeping both in one helper means each test below
+// describes the fake git's *behaviour* twice and its plumbing zero times.
+func writeFakeGit(t *testing.T, dir, batScript, shScript string) {
+	t.Helper()
+
+	name, script := "git", shScript
+	if runtime.GOOS == "windows" {
+		name, script = "git.bat", batScript
+	}
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("could not write fake git: %v", err)
+	}
+	// os.WriteFile's perm is masked by umask, so set the executable bit
+	// explicitly — exec.LookPath skips a non-executable file and the test
+	// would fail with a confusing "git not found on PATH".
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("could not make fake git executable: %v", err)
+	}
+}
 
 // installFakeGit puts a fake "git" executable on PATH that appends every
 // argument vector it receives, one line per invocation, to logPath. This
@@ -15,15 +42,16 @@ func installFakeGit(t *testing.T, logPath string, exitNonZero bool) {
 	t.Helper()
 	dir := t.TempDir()
 
-	script := "@echo off\r\necho %* >> \"" + logPath + "\"\r\n"
+	bat := "@echo off\r\necho %* >> \"" + logPath + "\"\r\n"
+	sh := "#!/bin/sh\necho \"$*\" >> \"" + logPath + "\"\n"
 	if exitNonZero {
-		script += "echo fake git failure 1>&2\r\nexit /b 1\r\n"
+		bat += "echo fake git failure 1>&2\r\nexit /b 1\r\n"
+		sh += "echo 'fake git failure' >&2\nexit 1\n"
 	} else {
-		script += "echo ok\r\nexit /b 0\r\n"
+		bat += "echo ok\r\nexit /b 0\r\n"
+		sh += "echo ok\nexit 0\n"
 	}
-	if err := os.WriteFile(filepath.Join(dir, "git.bat"), []byte(script), 0o755); err != nil {
-		t.Fatalf("could not write fake git: %v", err)
-	}
+	writeFakeGit(t, dir, bat, sh)
 
 	t.Setenv("PATH", dir)
 }
@@ -119,7 +147,7 @@ func installFakeGitForPull(t *testing.T, before, after, revListCount string) {
 	dir := t.TempDir()
 	counterPath := filepath.Join(dir, "calls")
 
-	script := `@echo off
+	bat := `@echo off
 if "%1"=="rev-parse" (
   if not exist "` + counterPath + `" (
     echo x >> "` + counterPath + `"
@@ -136,9 +164,22 @@ if "%1"=="rev-list" (
 )
 exit /b 0
 `
-	if err := os.WriteFile(filepath.Join(dir, "git.bat"), []byte(script), 0o755); err != nil {
-		t.Fatalf("could not write fake git: %v", err)
-	}
+	sh := `#!/bin/sh
+case "$1" in
+  rev-parse)
+    if [ ! -f "` + counterPath + `" ]; then
+      echo x >> "` + counterPath + `"
+      echo "` + before + `"
+    else
+      echo "` + after + `"
+    fi
+    exit 0 ;;
+  pull) exit 0 ;;
+  rev-list) echo "` + revListCount + `"; exit 0 ;;
+esac
+exit 0
+`
+	writeFakeGit(t, dir, bat, sh)
 	t.Setenv("PATH", dir)
 }
 
@@ -192,10 +233,9 @@ func TestCommitsBehind_BehindByN(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptDir := t.TempDir()
 
-	script := "@echo off\r\nif \"%1\"==\"rev-list\" (\r\n  echo 5\r\n  exit /b 0\r\n)\r\nexit /b 0\r\n"
-	if err := os.WriteFile(filepath.Join(scriptDir, "git.bat"), []byte(script), 0o755); err != nil {
-		t.Fatalf("could not write fake git: %v", err)
-	}
+	bat := "@echo off\r\nif \"%1\"==\"rev-list\" (\r\n  echo 5\r\n  exit /b 0\r\n)\r\nexit /b 0\r\n"
+	sh := "#!/bin/sh\nif [ \"$1\" = \"rev-list\" ]; then\n  echo 5\n  exit 0\nfi\nexit 0\n"
+	writeFakeGit(t, scriptDir, bat, sh)
 	t.Setenv("PATH", scriptDir)
 
 	n, err := CommitsBehind(tmpDir)

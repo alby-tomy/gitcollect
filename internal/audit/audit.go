@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alby-tomy/gitcollect/internal/config"
+	"github.com/alby-tomy/gitcollect/v3/internal/config"
 )
 
 // AuditEntry is one line of a collection's audit log.

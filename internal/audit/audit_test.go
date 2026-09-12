@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alby-tomy/gitcollect/internal/config"
+	"github.com/alby-tomy/gitcollect/v3/internal/config"
 )
 
 func useTempHome(t *testing.T) {
