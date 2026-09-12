@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
 )
 
 // useTempHome points ~/.gitcollect at a fresh t.TempDir() for the duration

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/audit"
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/audit"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 )
 
 // addTestMock extends multiAddMock with optional overrides for CreateRepo,

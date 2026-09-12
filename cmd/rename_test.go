@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 )
 
 func setupRenameTest(t *testing.T, collName string) {

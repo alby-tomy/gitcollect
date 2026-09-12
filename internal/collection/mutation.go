@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
 )
 
 // maxConcurrentSyncs bounds how many collaborator API calls run at once

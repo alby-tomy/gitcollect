@@ -15,8 +15,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/config"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/config"
 )
 
 // Visibility controls whether a collection's existence can be discovered by
