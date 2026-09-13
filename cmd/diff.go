@@ -47,7 +47,7 @@ type repoDiffResult struct {
 type memberDiffResult struct {
 	Username  string `json:"username"`
 	ID        string `json:"id"`
-	Status    string `json:"status"`    // "ok" | "drift"
+	Status    string `json:"status"`               // "ok" | "drift"
 	DriftRepo string `json:"drift_repo,omitempty"` // first repo where check failed
 }
 
@@ -151,7 +151,7 @@ func runDiffFix(col *collection.Collection, client api.Client, ns, colName strin
 			continue
 		}
 		for _, r := range accessible {
-			if err := client.AddCollaborator(ns, r.Name, m.Username, "push"); err != nil {
+			if err := client.AddCollaborator(ns, r.Name, m.Username, api.PermissionPull); err != nil {
 				output.Warn("  could not re-grant %s on %s: %v", m.Username, r.Name, err)
 			} else {
 				output.Success("  re-granted %s on %s", m.Username, r.Name)
