@@ -311,5 +311,8 @@ func cloneOne(col *collection.Collection, client api.Client, repoName, dest stri
 		return nil
 	}
 	target := filepath.Join(dest, repoName)
-	return git.Clone(info.CloneURL, target)
+	// Hand git the same token the API calls use. Without it a private
+	// repo — the case gitcollect exists for — can only be cloned if the
+	// user happens to have a credential helper configured.
+	return git.CloneWithToken(info.CloneURL, target, gitTokenFor(col.Host))
 }

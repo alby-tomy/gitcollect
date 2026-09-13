@@ -65,12 +65,17 @@ func TestJoin_ViaAPI(t *testing.T) {
 		t.Fatalf("runJoin via API = %v", err)
 	}
 
-	col, err := collection.Load("acme-corp-payments-team")
+	// The collection is identified as "<org>-<team>" everywhere: that is the
+	// file name AND the Name field. They used to disagree — the file was
+	// org-prefixed while Name held the bare team slug — so "gitcollect list"
+	// printed a name no other command would accept.
+	const want = "acme-corp-payments-team"
+	col, err := collection.Load(want)
 	if err != nil {
 		t.Fatalf("Load after join: %v", err)
 	}
-	if col.Name != "payments-team" {
-		t.Errorf("Name = %q, want payments-team", col.Name)
+	if col.Name != want {
+		t.Errorf("Name = %q, want %q — Name must match the file it loads from", col.Name, want)
 	}
 }
 

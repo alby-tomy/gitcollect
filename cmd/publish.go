@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,13 @@ import (
 	"github.com/alby-tomy/gitcollect/v3/internal/git"
 	"github.com/alby-tomy/gitcollect/v3/internal/output"
 )
+
+// auditLogPublish is the audit log name used for publish and pull-config.
+// Both act on a repository spec ("owner/name"), not a collection, and
+// audit.Append builds its file path from the Collection field — so the
+// raw spec would write to ~/.gitcollect/audit/owner/name.log, a directory
+// that does not exist.
+const auditLogPublish = "config-repo"
 
 var (
 	publishRepo       string
@@ -87,9 +95,12 @@ func runPublish(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Infer host from GITCOLLECT_HOST env or default to github.com.
-	host := config.DefaultHost
+	host, err := publishHost(filesToPublish)
+	if err != nil {
+		return err
+	}
 	cloneURL := repoCloneURL(host, publishRepo)
+	token := gitTokenFor(host)
 
 	output.Info("Publishing %d collection(s) to %s...", len(filesToPublish), publishRepo)
 
@@ -100,15 +111,12 @@ func runPublish(_ *cobra.Command, _ []string) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	if err := git.ShallowClone(cloneURL, tmpDir); err != nil {
-		return fmt.Errorf("publish: could not clone %s: %w", cloneURL, err)
-	}
-
-	// Switch to the target branch if it differs from the default.
-	if publishBranch != "" {
-		if err := git.Checkout(tmpDir, publishBranch); err != nil {
-			return fmt.Errorf("publish: could not checkout branch %q: %w", publishBranch, err)
-		}
+	// Select the branch during the clone. --depth=1 only fetches the
+	// branch it clones, so the previous clone-then-checkout sequence could
+	// never reach any branch but the remote's default — making --branch
+	// fail on, for example, a repo whose default is master.
+	if err := git.ShallowCloneBranch(cloneURL, tmpDir, publishBranch, token); err != nil {
+		return fmt.Errorf("publish: could not clone %s (branch %q): %w", cloneURL, publishBranch, err)
 	}
 
 	// Ensure the target path inside the clone exists.
@@ -134,7 +142,7 @@ func runPublish(_ *cobra.Command, _ []string) error {
 	if err := git.Commit(tmpDir, publishMessage); err != nil {
 		return fmt.Errorf("publish: git commit: %w", err)
 	}
-	if err := git.Push(tmpDir); err != nil {
+	if err := git.PushWithToken(tmpDir, token); err != nil {
 		return fmt.Errorf("publish: git push: %w", err)
 	}
 
@@ -148,7 +156,10 @@ func runPublish(_ *cobra.Command, _ []string) error {
 	if err == nil {
 		caller, _ := currentUser(client)
 		recordAudit(audit.AuditEntry{
-			Collection: publishRepo,
+			// Not publishRepo: it is "owner/name", and the audit log path
+			// is built from this field, so a slash would send the write to
+			// a directory that does not exist.
+			Collection: auditLogPublish,
 			Actor:      caller,
 			Action:     "publish",
 			Target:     publishRepo,
@@ -178,4 +189,44 @@ func copyFile(src, dst string) error {
 		return fmt.Errorf("copyFile: copy %s → %s: %w", src, dst, err)
 	}
 	return nil
+}
+
+// publishHost decides which platform the config repository lives on.
+//
+// It used to be hardcoded to github.com behind a comment claiming the
+// value came from a GITCOLLECT_HOST environment variable that was never
+// read, so GitLab users could not publish at all. The collections being
+// published already record their host, so use that: unambiguous when they
+// agree, and an explicit ask when they do not.
+func publishHost(files []string) (string, error) {
+	hosts := map[string]bool{}
+	for _, path := range files {
+		name := strings.TrimSuffix(filepath.Base(path), ".yaml")
+		col, err := collection.Load(name)
+		if err != nil {
+			continue
+		}
+		if col.Host != "" {
+			hosts[col.Host] = true
+		}
+	}
+
+	switch len(hosts) {
+	case 0:
+		return config.DefaultHost, nil
+	case 1:
+		for h := range hosts {
+			return h, nil
+		}
+	}
+
+	names := make([]string, 0, len(hosts))
+	for h := range hosts {
+		names = append(names, h)
+	}
+	sort.Strings(names)
+	return "", fmt.Errorf(
+		"publish: collections span more than one host (%s)\n"+
+			"  Publish them separately with --collection <name>",
+		strings.Join(names, ", "))
 }

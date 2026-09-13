@@ -29,10 +29,11 @@ var scanCmd = &cobra.Command{
 the common prefix in their names (e.g. payments-checkout, payments-gateway →
 "payments" collection).
 
-Verification steps (shown with --verify):
-  • owner    — authenticated token belongs to an org member
-  • repos    — each repo is accessible with the current token
-  • access   — current access level per repo (admin / write / read / none)
+--verify reports what the scan itself establishes: who the token
+authenticated as, and how many repositories that token can see in the org.
+It does not report a per-repo access level — listing an org does not reveal
+one — so treat the repo count as a lower bound: anything the token cannot
+see is absent from it entirely.
 
 By default the command prints a preview. Use --apply to write collection YAML
 files to ~/.gitcollect/collections/. Use --dry-run to see what would be written
@@ -47,7 +48,7 @@ func init() {
 	scanCmd.Flags().StringVar(&scanGroupBy, "group-by", "prefix", "grouping strategy: prefix or flat")
 	scanCmd.Flags().BoolVar(&scanDryRun, "dry-run", false, "preview collections without writing files")
 	scanCmd.Flags().BoolVar(&scanApply, "apply", false, "write collection YAML files")
-	scanCmd.Flags().BoolVar(&scanVerify, "verify", false, "check owner/repo/access verification chain")
+	scanCmd.Flags().BoolVar(&scanVerify, "verify", false, "report what the current token could actually see")
 	scanCmd.Flags().BoolVar(&scanNoArch, "no-archived", false, "exclude archived repos")
 	if err := scanCmd.MarkFlagRequired("org"); err != nil {
 		panic(err)
@@ -244,8 +245,10 @@ func checkScanScopes(client api.Client) error {
 }
 
 // groupByPrefix groups repos by the first segment of their name before a
-// hyphen or underscore. Repos without a separator land in an "other" bucket,
-// unless they share the org name as prefix.
+// hyphen or underscore. A repo whose name has no separator becomes its own
+// single-repo group, named after the repo — there is no shared "other"
+// bucket, so an org with many separator-less names produces many one-repo
+// collections. Use --group-by flat to put everything in one instead.
 func groupByPrefix(repos []api.RepoInfo) []scanGroup {
 	buckets := make(map[string][]api.RepoInfo)
 	for _, r := range repos {
@@ -314,15 +317,16 @@ func printScanSummary(groups []scanGroup) {
 	}
 }
 
+// printVerificationChain reports what the scan actually established.
+//
+// It used to print three fixed ✓ lines regardless of what the token could
+// reach, and the help promised a per-repo access level that was never
+// computed — a verification step that always passes is worse than none,
+// because it reassures about access it never checked. Everything below is
+// derived from the listing that just succeeded, and the closing note says
+// plainly what the listing cannot tell you.
 func printVerificationChain(caller, org string, repos []api.RepoInfo) {
-	fmt.Println()
-	fmt.Printf("Verification chain:\n")
-	fmt.Printf("  ✓ owner    %s (authenticated)\n", caller)
-	fmt.Printf("  ✓ org      %s\n", org)
-	fmt.Printf("  ✓ repos    %d total", len(repos))
-
-	archived := 0
-	private := 0
+	archived, private := 0, 0
 	for _, r := range repos {
 		if r.Archived {
 			archived++
@@ -331,10 +335,17 @@ func printVerificationChain(caller, org string, repos []api.RepoInfo) {
 			private++
 		}
 	}
-	if archived > 0 || private > 0 {
-		fmt.Printf(" (%d private, %d archived)", private, archived)
-	}
+
 	fmt.Println()
+	fmt.Printf("Verified with the current token:\n")
+	fmt.Printf("  authenticated as  %s\n", caller)
+	fmt.Printf("  org listed        %s\n", org)
+	fmt.Printf("  repos visible     %d (%d private, %d archived)\n", len(repos), private, archived)
+	fmt.Println()
+	output.Dim("  Repositories this token cannot see are not counted above.")
+	if private == 0 {
+		output.Dim("  No private repos were returned — check the token has 'repo' scope if you expected some.")
+	}
 }
 
 func plural(n int, singular, pluralSuffix string) string {

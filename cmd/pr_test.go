@@ -51,7 +51,10 @@ func TestFetchOpenPRs_AggregatesAcrossRepos(t *testing.T) {
 		},
 	})
 
-	got := fetchOpenPRs(mock, "acme", repoList("api", "web"))
+	got, failed := fetchOpenPRs(mock, "acme", repoList("api", "web"))
+	if len(failed) != 0 {
+		t.Errorf("expected no failures, got %v", failed)
+	}
 	if len(got) != 3 {
 		t.Fatalf("expected 3 PRs across both repos, got %d", len(got))
 	}
@@ -66,7 +69,8 @@ func TestFetchOpenPRs_TagsEachPRWithItsRepo(t *testing.T) {
 	})
 
 	byNumber := map[int]string{}
-	for _, p := range fetchOpenPRs(mock, "acme", repoList("api", "web")) {
+	all, _ := fetchOpenPRs(mock, "acme", repoList("api", "web"))
+	for _, p := range all {
 		byNumber[p.Number] = p.Repo
 	}
 	if byNumber[1] != "api" || byNumber[2] != "web" {
@@ -76,7 +80,7 @@ func TestFetchOpenPRs_TagsEachPRWithItsRepo(t *testing.T) {
 
 func TestFetchOpenPRs_EmptyWhenNoRepos(t *testing.T) {
 	mock := newPRMock(nil)
-	if got := fetchOpenPRs(mock, "acme", nil); len(got) != 0 {
+	if got, _ := fetchOpenPRs(mock, "acme", nil); len(got) != 0 {
 		t.Errorf("expected no PRs for an empty repo list, got %d", len(got))
 	}
 }
@@ -89,12 +93,17 @@ func TestFetchOpenPRs_SurvivesPerRepoFailure(t *testing.T) {
 	})
 	mock.failFor["web"] = errors.New("403 forbidden")
 
-	got := fetchOpenPRs(mock, "acme", repoList("api", "web"))
+	got, failed := fetchOpenPRs(mock, "acme", repoList("api", "web"))
 	if len(got) != 1 {
 		t.Fatalf("expected the one reachable repo's PRs, got %d", len(got))
 	}
 	if got[0].Repo != "api" {
 		t.Errorf("expected the surviving PR to be from api, got %q", got[0].Repo)
+	}
+	// The failure must be reported, not silently swallowed: an unreachable
+	// repo and a repo with no PRs are different answers.
+	if len(failed) != 1 || failed[0] != "web" {
+		t.Errorf("expected web reported as unreadable, got %v", failed)
 	}
 }
 
