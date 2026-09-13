@@ -505,6 +505,20 @@ func loadForGit(name string) (col *collection.Collection, caller, callerID strin
 	return col, caller, callerID, client, nil
 }
 
+// gitTokenFor returns the stored token for host, or "" when none is saved.
+//
+// Used only to hand git a credential for clone/push. An empty result is
+// not an error: git falls back to whatever credential helper the user has
+// configured, which is exactly the behaviour gitcollect had before it
+// passed a token at all. Callers therefore never need to branch on this.
+func gitTokenFor(host string) string {
+	token, err := config.LoadToken(host)
+	if err != nil {
+		return ""
+	}
+	return token
+}
+
 // recordAudit appends entry to the collection's audit log. It is called
 // synchronously, not from a detached goroutine: main calls os.Exit
 // immediately after Execute returns, and a truly fire-and-forget append

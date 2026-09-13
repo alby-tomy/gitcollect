@@ -1,8 +1,10 @@
 package audit
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,5 +220,60 @@ func TestFilterByAction_Empty_NoFilter(t *testing.T) {
 	got := FilterByAction(entries, "")
 	if len(got) != 2 {
 		t.Fatalf("expected no filter for empty action, got %d", len(got))
+	}
+}
+
+// --- regression: a Collection value that is not a bare name must not
+// escape the audit directory or silently fail to write ---
+
+func TestSafeLogName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"cybersecurity", "cybersecurity"},
+		{"acme/gitcollect-config", "acme-gitcollect-config"}, // publish's repo spec
+		{"../../etc/passwd", "etc-passwd"},
+		{"a b c", "a-b-c"},
+		{".hidden", "hidden"},
+		{"under_score.log", "under_score.log"},
+	}
+	for _, tc := range cases {
+		got, err := safeLogName(tc.in)
+		if err != nil {
+			t.Errorf("safeLogName(%q) returned error: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("safeLogName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if strings.ContainsAny(got, `/\`) || got == "." || got == ".." {
+			t.Errorf("safeLogName(%q) produced an unsafe segment: %q", tc.in, got)
+		}
+	}
+}
+
+func TestSafeLogName_RejectsEmptyResult(t *testing.T) {
+	for _, in := range []string{"", "///", "..."} {
+		if _, err := safeLogName(in); !errors.Is(err, ErrInvalidLogName) {
+			t.Errorf("safeLogName(%q) should report ErrInvalidLogName, got %v", in, err)
+		}
+	}
+}
+
+// publish records its repository spec, which contains a slash. The write
+// must land in the audit directory rather than a nonexistent subdirectory.
+func TestAppend_RepoSpecWritesInsideAuditDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	if err := Append(AuditEntry{Collection: "acme/gitcollect-config", Action: "publish", Result: "ok"}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	entries, err := Read("acme/gitcollect-config")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Action != "publish" {
+		t.Fatalf("expected the entry to round-trip, got %+v", entries)
 	}
 }

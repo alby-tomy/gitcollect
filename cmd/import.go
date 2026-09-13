@@ -18,16 +18,16 @@ import (
 )
 
 var (
-	importFrom               string
-	importOrg                string
-	importTeam               string
-	importDryRun             bool
-	importFlatten            bool
+	importFrom                string
+	importOrg                 string
+	importTeam                string
+	importDryRun              bool
+	importFlatten             bool
 	importOwnerFromMaintainer bool
-	importNamespace          string
-	importMerge              bool
-	importOverwrite          bool
-	importSkipExisting       bool
+	importNamespace           string
+	importMerge               bool
+	importOverwrite           bool
+	importSkipExisting        bool
 )
 
 var importCmd = &cobra.Command{
@@ -101,10 +101,15 @@ func collectionNameForTeam(team api.TeamInfo, flatten bool) string {
 }
 
 // buildCollectionFromTeam creates a Collection struct from the imported team
-// data. name is the pre-computed collection name (may differ from team.Slug
-// when --flatten=false and the team has a parent). The collection's file path
-// is set to org-name.yaml so imports from different orgs don't clobber each
-// other even if two orgs happen to have same-named teams.
+// data. name is the pre-computed team-derived name (may differ from
+// team.Slug when --flatten=false and the team has a parent).
+//
+// The collection is identified as "<org>-<name>" throughout: that is its
+// file name, so imports from different orgs cannot clobber each other when
+// two orgs have same-named teams, AND its Name field. Those two used to
+// disagree — the file was org-prefixed while Name held the bare team slug
+// — so "gitcollect list" printed a name that no other command would
+// accept, and import's own closing hint suggested the unusable one.
 func buildCollectionFromTeam(
 	team api.TeamInfo,
 	members []api.UserInfo,
@@ -152,10 +157,12 @@ func buildCollectionFromTeam(
 		repoAccess = []collection.RepoAccess{}
 	}
 
+	fullName := org + "-" + name
+
 	now := time.Now().UTC()
 	col := &collection.Collection{
 		Version:     collection.CurrentVersion,
-		Name:        name,
+		Name:        fullName,
 		Description: team.Description,
 		Host:        host,
 		Namespace:   namespace,
@@ -168,7 +175,7 @@ func buildCollectionFromTeam(
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	col.SetPath(org + "-" + name)
+	col.SetPath(fullName)
 
 	return col, col.Validate()
 }
@@ -474,7 +481,7 @@ func runImport(_ *cobra.Command, _ []string) error {
 	fmt.Println()
 	if importTeam != "" && imported == 1 {
 		r := results[0]
-		output.Success("Imported %s", r.name)
+		output.Success("Imported %s-%s", importOrg, r.name)
 		ownerLogin := r.col.Logins[r.col.Owner]
 		collDir, _ := config.CollectionsDir()
 		fmt.Printf("  %d repos · %d members · owner: %s\n", len(r.col.Repos), len(r.col.Members), ownerLogin)
@@ -496,9 +503,9 @@ func runImport(_ *cobra.Command, _ []string) error {
 	fmt.Printf("\nNext steps:\n")
 	fmt.Printf("  gitcollect list\n")
 	if importTeam != "" {
-		fmt.Printf("  gitcollect clone %s\n", results[0].name)
+		fmt.Printf("  gitcollect clone %s-%s\n", importOrg, results[0].name)
 	} else if len(results) > 0 {
-		fmt.Printf("  gitcollect clone %s\n", results[0].name)
+		fmt.Printf("  gitcollect clone %s-%s\n", importOrg, results[0].name)
 	}
 	fmt.Printf("  gitcollect publish --repo %s/gitcollect-config\n", importOrg)
 
