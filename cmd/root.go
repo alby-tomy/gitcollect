@@ -4,6 +4,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -88,8 +89,25 @@ func NewUsageError(err error) error {
 
 // SetVersion records the build version for use by the version command.
 // Must be called once, before Execute, by main.
+//
+// Setting rootCmd.Version is what makes "gitcollect --version" and its
+// "-v" shorthand work: cobra adds that flag to the root command when
+// Version is non-empty, and picks up "-v" automatically because no other
+// root flag claims it. The template is a plain string rather than a
+// cobra-rendered one so the output is byte-for-byte identical to
+// "gitcollect version" — two ways of asking the same question should not
+// answer it in two different formats.
 func SetVersion(v string) {
 	appVersion = v
+	rootCmd.Version = v
+	rootCmd.SetVersionTemplate(versionLine(v))
+}
+
+// versionLine renders the single line both "gitcollect version" and
+// "gitcollect --version" print. Kept here next to SetVersion so the two
+// cannot drift; cmd/version.go calls it too.
+func versionLine(v string) string {
+	return fmt.Sprintf("gitcollect %s %s/%s\n", v, runtime.GOOS, runtime.GOARCH)
 }
 
 // Execute runs the root command and returns the process exit code to use.
