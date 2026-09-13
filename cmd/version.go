@@ -34,7 +34,7 @@ Examples:
 				Platform:  runtime.GOOS + "/" + runtime.GOARCH,
 			})
 		}
-		fmt.Printf("gitcollect %s %s/%s\n", appVersion, runtime.GOOS, runtime.GOARCH)
+		fmt.Print(versionLine(appVersion))
 		return nil
 	},
 }
