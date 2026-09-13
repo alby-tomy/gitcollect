@@ -3,9 +3,9 @@ package cmd
 import (
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/access"
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/access"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 )
 
 // TestToShowOutput_OwnerVsMemberAccess verifies that the owner's callerID

@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 	"gopkg.in/yaml.v3"
 )
 

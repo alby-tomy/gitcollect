@@ -164,6 +164,20 @@ func HasUncommittedChanges(dir string) (bool, error) {
 	return out != "", nil
 }
 
+// CurrentBranch returns the name of the currently checked-out branch in dir.
+// Returns "" (not an error) when the repo is in detached HEAD state or dir is
+// not a git repository.
+func CurrentBranch(dir string) (string, error) {
+	out, err := run(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", nil
+	}
+	if out == "HEAD" {
+		return "", nil // detached HEAD
+	}
+	return out, nil
+}
+
 // CommitsBehind returns how many commits the local HEAD is behind origin/HEAD.
 // Returns 0 (not an error) when there is no remote or the tracking branch
 // does not exist yet — callers treat "no remote" and "up to date" the same.

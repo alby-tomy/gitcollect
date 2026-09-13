@@ -9,20 +9,21 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/alby-tomy/gitcollect/internal/access"
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
-	"github.com/alby-tomy/gitcollect/internal/git"
-	"github.com/alby-tomy/gitcollect/internal/output"
+	"github.com/alby-tomy/gitcollect/v3/internal/access"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/git"
+	"github.com/alby-tomy/gitcollect/v3/internal/output"
 )
 
 const defaultSyncConcurrency = 4
 
 var (
-	syncDryRun      bool
-	syncConcurrency int
-	syncDest        string
-	syncAll         bool
+	syncDryRun             bool
+	syncConcurrency        int
+	syncDest               string
+	syncAll                bool
+	syncIncludeArchived    bool
 )
 
 var syncCmd = &cobra.Command{
@@ -41,6 +42,7 @@ func init() {
 	syncCmd.Flags().IntVar(&syncConcurrency, "concurrency", defaultSyncConcurrency, "max repos to sync in parallel")
 	syncCmd.Flags().StringVar(&syncDest, "dest", ".", "directory to clone into, or where repos were already cloned")
 	syncCmd.Flags().BoolVar(&syncAll, "all", false, "run across all collections you own or belong to")
+	syncCmd.Flags().BoolVar(&syncIncludeArchived, "include-archived", false, "include archived collections when using --all")
 	rootCmd.AddCommand(syncCmd)
 }
 
@@ -136,6 +138,10 @@ func runSyncAll(destDir string, dryRun bool, concurrency int) error {
 		col, caller, callerID, client, err := loadForGit(name)
 		if err != nil {
 			output.Dim("Skipping %s: %v", name, err)
+			continue
+		}
+		if col.Archived && !syncIncludeArchived {
+			output.Dim("Skipping %s (archived)", name)
 			continue
 		}
 		output.Info("── %s ──", name)

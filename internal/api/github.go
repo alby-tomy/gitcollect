@@ -422,6 +422,70 @@ func nextPageURL(link string) string {
 	return ""
 }
 
+func (c *githubClient) ListOpenPRs(owner, repo string) ([]PRInfo, error) {
+	startURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&per_page=100",
+		githubBaseURL, url.PathEscape(owner), url.PathEscape(repo))
+	var prs []PRInfo
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			Number    int       `json:"number"`
+			Title     string    `json:"title"`
+			State     string    `json:"state"`
+			HTMLURL   string    `json:"html_url"`
+			CreatedAt time.Time `json:"created_at"`
+			UpdatedAt time.Time `json:"updated_at"`
+			User      struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, p := range page {
+			prs = append(prs, PRInfo{
+				Number:    p.Number,
+				Title:     p.Title,
+				Author:    p.User.Login,
+				State:     p.State,
+				URL:       p.HTMLURL,
+				Repo:      repo,
+				CreatedAt: p.CreatedAt,
+				UpdatedAt: p.UpdatedAt,
+			})
+		}
+		return nil
+	})
+	return prs, err
+}
+
+func (c *githubClient) ListOrgRepos(org string) ([]RepoInfo, error) {
+	startURL := fmt.Sprintf("%s/orgs/%s/repos?type=all&per_page=100", githubBaseURL, url.PathEscape(org))
+	var repos []RepoInfo
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			Name          string `json:"name"`
+			CloneURL      string `json:"clone_url"`
+			DefaultBranch string `json:"default_branch"`
+			Private       bool   `json:"private"`
+			Archived      bool   `json:"archived"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, r := range page {
+			repos = append(repos, RepoInfo{
+				Name:          r.Name,
+				CloneURL:      r.CloneURL,
+				DefaultBranch: r.DefaultBranch,
+				Private:       r.Private,
+				Archived:      r.Archived,
+			})
+		}
+		return nil
+	})
+	return repos, err
+}
+
 func (c *githubClient) ListOrgTeams(org string) ([]TeamInfo, error) {
 	startURL := fmt.Sprintf("%s/orgs/%s/teams?per_page=100", githubBaseURL, url.PathEscape(org))
 	var teams []TeamInfo

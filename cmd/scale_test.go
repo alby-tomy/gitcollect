@@ -3,8 +3,8 @@ package cmd
 import (
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 )
 
 // setupScaleTest creates a saved collection with a transferMock client

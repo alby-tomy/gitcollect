@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
-	"github.com/alby-tomy/gitcollect/internal/config"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/config"
 )
 
 // importMock is a minimal api.Client for import tests. All three new list
@@ -63,6 +63,8 @@ func (m *importMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error)
 func (m *importMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *importMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *importMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // Stubs for the rest of the Client interface.
 func (m *importMock) GetAuthenticatedUser() (api.UserInfo, error) {

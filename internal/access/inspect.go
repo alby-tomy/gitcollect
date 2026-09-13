@@ -1,6 +1,6 @@
 package access
 
-import "github.com/alby-tomy/gitcollect/internal/collection"
+import "github.com/alby-tomy/gitcollect/v3/internal/collection"
 
 // RepoAccessDetail is one row of a per-user access report: a repo and
 // whether/why the user can reach it.

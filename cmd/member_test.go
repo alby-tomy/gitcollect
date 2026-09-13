@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 )
 
 // multiAddMock is a concurrency-safe, in-memory api.Client used to exercise
@@ -86,6 +86,10 @@ func (m *multiAddMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, erro
 func (m *multiAddMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *multiAddMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *multiAddMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) {
+	return nil, nil
+}
 
 // pendingInviteMock is a minimal api.Client stub for exercising
 // hasPendingInvite without any network access — every method except
@@ -130,6 +134,8 @@ func (m *pendingInviteMock) ListTeamMembers(org, teamSlug, role string) ([]api.U
 func (m *pendingInviteMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *pendingInviteMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *pendingInviteMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 func (m *pendingInviteMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
 	return nil, nil
 }

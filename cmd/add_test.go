@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/audit"
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/audit"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 )
 
 // addTestMock extends multiAddMock with optional overrides for CreateRepo,
@@ -52,6 +52,8 @@ func (m *addTestMock) SearchRepos(org, pattern, topic string, limit int) ([]api.
 	}
 	return nil, nil
 }
+func (m *addTestMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *addTestMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 func (m *addTestMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	if m.createRepoFunc != nil {

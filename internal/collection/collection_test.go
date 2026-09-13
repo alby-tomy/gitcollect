@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
 )
 
 // useTempHome points ~/.gitcollect at a fresh t.TempDir() for the duration
@@ -92,6 +92,8 @@ func (m *mockClient) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error)
 func (m *mockClient) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *mockClient) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *mockClient) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 func newTestCollection(t *testing.T, visibility Visibility) *Collection {
 	t.Helper()
