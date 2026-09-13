@@ -13,13 +13,13 @@ import (
 )
 
 var (
-	scanOrg      string
-	scanFrom     string
-	scanGroupBy  string
-	scanDryRun   bool
-	scanApply    bool
-	scanVerify   bool
-	scanNoArch   bool
+	scanOrg     string
+	scanFrom    string
+	scanGroupBy string
+	scanDryRun  bool
+	scanApply   bool
+	scanVerify  bool
+	scanNoArch  bool
 )
 
 var scanCmd = &cobra.Command{
@@ -157,13 +157,28 @@ func runScan(_ *cobra.Command, _ []string) error {
 			continue
 		}
 
-		// --apply: create the collection file.
+		// --apply: create the collection file, but never clobber one that
+		// is already there. collection.New does NOT check existence — it
+		// only validates the name — so the existence test has to happen
+		// here. Relying on New's error meant an existing collection was
+		// silently overwritten (losing its members, groups and per-repo
+		// access rules) while an invalid name was misreported as
+		// "already exists".
+		exists, err := collection.Exists(colName)
+		if err != nil {
+			output.Warn("  could not check whether %q exists: %v", colName, err)
+			continue
+		}
+		if exists {
+			output.Dim("  %s (already exists, skipped)", colName)
+			skipped++
+			continue
+		}
+
 		col, err := collection.New(colName, host,
 			api.UserInfo{ID: callerID, Login: caller}, collection.VisibilityPrivate)
 		if err != nil {
-			// Collection already exists — skip rather than overwrite.
-			output.Dim("  %s (already exists, skipped)", colName)
-			skipped++
+			output.Warn("  could not create %q: %v", colName, err)
 			continue
 		}
 		col.Namespace = scanOrg
@@ -215,9 +230,9 @@ func checkScanScopes(client api.Client) error {
 	}
 	if !scopeSet["repo"] && !scopeSet["public_repo"] {
 		return fmt.Errorf(
-			"scan: GitHub token is missing required scopes (need repo or public_repo)\n\n"+
-				"  Generate a new token at:\n"+
-				"  https://github.com/settings/tokens/new?scopes=repo\n\n"+
+			"scan: GitHub token is missing required scopes (need repo or public_repo)\n\n" +
+				"  Generate a new token at:\n" +
+				"  https://github.com/settings/tokens/new?scopes=repo\n\n" +
 				"  Then run: gitcollect auth",
 		)
 	}
@@ -328,4 +343,3 @@ func plural(n int, singular, pluralSuffix string) string {
 	}
 	return pluralSuffix
 }
-

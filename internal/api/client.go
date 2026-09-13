@@ -85,6 +85,19 @@ type Client interface {
 // programmatically — it's always a manual, web-based step.
 const GitHubNotificationsURL = "https://github.com/notifications"
 
+// PermissionPull is the only permission gitcollect ever grants. A
+// collection says who may *reach* a repo, never what they may do once
+// there — write access stays whatever the platform already granted
+// through org or team membership, which gitcollect does not manage.
+//
+// Every AddCollaborator call must pass this rather than a literal. The
+// literal is how the two call sites drifted apart: SyncCollaborators
+// granted "pull" while diff --fix granted "push", quietly upgrading every
+// member it repaired from read to write across every repo they could
+// reach. One constant means a future call site cannot make that mistake
+// without writing the wrong thing on purpose.
+const PermissionPull = "pull"
+
 // UserInfo identifies a platform account. ID is the platform's own
 // immutable numeric identifier, stable across username/login renames —
 // gitcollect stores this, never the login, anywhere it needs to decide

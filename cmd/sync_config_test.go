@@ -239,3 +239,143 @@ func TestHumanDuration(t *testing.T) {
 		}
 	}
 }
+
+// --- regression: applySync must not destroy per-repo access rules ---
+
+// buildSyncCol returns a collection with a group, a group-restricted repo,
+// an individually-granted repo, and two members — the shape whose access
+// rules applySync used to discard.
+func buildSyncCol(t *testing.T) *collection.Collection {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	col, err := collection.New("acme", "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice-id", "bob-id"}
+	col.Logins["alice-id"] = "alice"
+	col.Logins["bob-id"] = "bob"
+	col.Groups = map[string][]string{"backend": {"alice-id", "bob-id"}}
+	col.Repos = []collection.RepoAccess{
+		{Name: "api", Groups: []string{"backend"}, Users: []string{}},
+		{Name: "web", Groups: []string{}, Users: []string{"bob-id"}},
+	}
+	return col
+}
+
+func repoByName(t *testing.T, col *collection.Collection, name string) collection.RepoAccess {
+	t.Helper()
+	for _, r := range col.Repos {
+		if r.Name == name {
+			return r
+		}
+	}
+	t.Fatalf("repo %q not found in collection", name)
+	return collection.RepoAccess{}
+}
+
+// The platform knows which repos exist; it knows nothing about gitcollect's
+// groups. applySync previously rebuilt every RepoAccess with empty Groups
+// and Users, silently reopening every restricted repo to all members.
+func TestApplySync_PreservesRepoAccessRules(t *testing.T) {
+	col := buildSyncCol(t)
+
+	applySync(col,
+		[]api.UserInfo{{ID: "alice-id", Login: "alice"}, {ID: "bob-id", Login: "bob"}},
+		[]api.RepoInfo{{Name: "api"}, {Name: "web"}},
+	)
+
+	if got := repoByName(t, col, "api").Groups; len(got) != 1 || got[0] != "backend" {
+		t.Errorf("api must stay restricted to the backend group, got %v", got)
+	}
+	if got := repoByName(t, col, "web").Users; len(got) != 1 || got[0] != "bob-id" {
+		t.Errorf("web must keep its individual grant, got %v", got)
+	}
+}
+
+func TestApplySync_AddsNewAndDropsRemovedRepos(t *testing.T) {
+	col := buildSyncCol(t)
+
+	applySync(col,
+		[]api.UserInfo{{ID: "alice-id", Login: "alice"}, {ID: "bob-id", Login: "bob"}},
+		[]api.RepoInfo{{Name: "api"}, {Name: "db"}}, // web gone, db new
+	)
+
+	names := map[string]bool{}
+	for _, r := range col.Repos {
+		names[r.Name] = true
+	}
+	if !names["db"] {
+		t.Error("a repo new on the platform should be added")
+	}
+	if names["web"] {
+		t.Error("a repo no longer on the platform should be dropped")
+	}
+	if got := repoByName(t, col, "db"); len(got.Groups) != 0 || len(got.Users) != 0 {
+		t.Errorf("a newly discovered repo should start open to all members, got %+v", got)
+	}
+}
+
+// A departing member has to be removed from groups, group admins and
+// per-repo grants as well as Members: Validate requires every such
+// reference to name a current member, so a stale one makes the very next
+// Save fail.
+func TestApplySync_PrunesDepartedMemberReferences(t *testing.T) {
+	col := buildSyncCol(t)
+	col.GroupAdminsEnabled = true
+	col.GroupAdmins = map[string][]string{"backend": {"bob-id"}}
+
+	applySync(col,
+		[]api.UserInfo{{ID: "alice-id", Login: "alice"}}, // bob has left the team
+		[]api.RepoInfo{{Name: "api"}, {Name: "web"}},
+	)
+
+	if err := col.Validate(); err != nil {
+		t.Fatalf("collection must stay valid after a member leaves: %v", err)
+	}
+	for _, id := range col.Groups["backend"] {
+		if id == "bob-id" {
+			t.Error("departed member still listed in a group")
+		}
+	}
+	for _, id := range repoByName(t, col, "web").Users {
+		if id == "bob-id" {
+			t.Error("departed member still holds an individual repo grant")
+		}
+	}
+	if _, ok := col.GroupAdmins["backend"]; ok {
+		t.Error("a group whose only admin left should not keep an empty admin list")
+	}
+}
+
+// Groups are a structure the owner created deliberately; emptying one out
+// is not a reason to delete it.
+func TestApplySync_KeepsEmptiedGroups(t *testing.T) {
+	col := buildSyncCol(t)
+
+	applySync(col, []api.UserInfo{}, []api.RepoInfo{{Name: "api"}})
+
+	if _, ok := col.Groups["backend"]; !ok {
+		t.Error("group should survive even when all its members leave")
+	}
+	if len(col.Groups["backend"]) != 0 {
+		t.Errorf("group should be empty, got %v", col.Groups["backend"])
+	}
+}
+
+func TestApplySync_SavesCleanlyAfterMemberDeparture(t *testing.T) {
+	col := buildSyncCol(t)
+	if err := col.Save(); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+
+	applySync(col, []api.UserInfo{{ID: "alice-id", Login: "alice"}}, []api.RepoInfo{{Name: "api"}})
+
+	if err := col.Save(); err != nil {
+		t.Fatalf("save after sync-config must succeed: %v", err)
+	}
+}

@@ -137,22 +137,40 @@ func syncOneCollection(col *collection.Collection, client api.Client, org, teamS
 	return res, nil
 }
 
-// applySync updates col in-place with the diff from syncOneCollection and
-// merges new login entries.
+// applySync updates col in-place to match the platform state fetched by
+// syncOneCollection, without discarding anything the platform does not
+// know about.
+//
+// That last part is the whole point. This function previously rebuilt
+// col.Repos from the platform list with empty Groups and Users on every
+// entry, which silently reset every repo to "open to all members" — so a
+// routine refresh destroyed exactly the per-repo access control the
+// collection exists to express. The platform knows which repos a team can
+// reach; it knows nothing about gitcollect's groups, so it can only ever
+// add and remove repos, never restate their access rules.
+//
+// Membership is authoritative from the platform, so departing members are
+// dropped. Their references elsewhere in the manifest have to go with
+// them: Validate requires every group member, group admin and per-repo
+// grantee to appear in Members, so leaving a stale reference behind would
+// make the very next Save fail.
 func applySync(col *collection.Collection, platformMembers []api.UserInfo, platformRepos []api.RepoInfo) {
-	// Update members: set to the platform list (minus owner).
-	var memberIDs []string
+	// Members: the platform list is authoritative. The owner is tracked
+	// separately from Members here, matching how import builds a
+	// collection in the first place.
+	memberIDs := make([]string, 0, len(platformMembers))
+	retained := make(map[string]bool, len(platformMembers))
 	for _, m := range platformMembers {
-		if m.ID != col.Owner {
-			memberIDs = append(memberIDs, m.ID)
+		if m.ID == col.Owner {
+			continue
 		}
-	}
-	if memberIDs == nil {
-		memberIDs = []string{}
+		memberIDs = append(memberIDs, m.ID)
+		retained[m.ID] = true
 	}
 	col.Members = memberIDs
 
-	// Merge logins cache.
+	// Merge logins cache — additive, so an ID that left the team keeps a
+	// readable name in any audit output that still references it.
 	if col.Logins == nil {
 		col.Logins = make(map[string]string)
 	}
@@ -162,16 +180,58 @@ func applySync(col *collection.Collection, platformMembers []api.UserInfo, platf
 		}
 	}
 
-	// Update repos.
-	repoAccess := make([]collection.RepoAccess, 0, len(platformRepos))
-	for _, r := range platformRepos {
-		repoAccess = append(repoAccess, collection.RepoAccess{
-			Name:   r.Name,
+	// Repos: add what is new, drop what is gone, and carry the existing
+	// access rule across for everything that survives.
+	previous := make(map[string]collection.RepoAccess, len(col.Repos))
+	for _, r := range col.Repos {
+		previous[r.Name] = r
+	}
+	repos := make([]collection.RepoAccess, 0, len(platformRepos))
+	for _, pr := range platformRepos {
+		if prior, ok := previous[pr.Name]; ok {
+			repos = append(repos, prior)
+			continue
+		}
+		repos = append(repos, collection.RepoAccess{
+			Name:   pr.Name,
 			Groups: []string{},
 			Users:  []string{},
 		})
 	}
-	col.Repos = repoAccess
+	col.Repos = repos
+
+	pruneDepartedMembers(col, retained)
+}
+
+// pruneDepartedMembers removes every reference to an ID that is no longer
+// in retained from the collection's groups, group admins and per-repo
+// user grants. Groups themselves are kept even when they empty out — a
+// group is a deliberate structure the owner created, not a side effect of
+// who currently happens to be in it.
+func pruneDepartedMembers(col *collection.Collection, retained map[string]bool) {
+	filter := func(ids []string) []string {
+		kept := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if retained[id] {
+				kept = append(kept, id)
+			}
+		}
+		return kept
+	}
+
+	for group, ids := range col.Groups {
+		col.Groups[group] = filter(ids)
+	}
+	for group, ids := range col.GroupAdmins {
+		if admins := filter(ids); len(admins) > 0 {
+			col.GroupAdmins[group] = admins
+		} else {
+			delete(col.GroupAdmins, group)
+		}
+	}
+	for i := range col.Repos {
+		col.Repos[i].Users = filter(col.Repos[i].Users)
+	}
 }
 
 func runSyncConfig(_ *cobra.Command, args []string) error {

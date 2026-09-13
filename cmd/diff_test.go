@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -78,8 +79,8 @@ func (m *diffMock) GetAuthenticatedUser() (api.UserInfo, error) {
 func (m *diffMock) GetUser(username string) (api.UserInfo, error) {
 	return api.UserInfo{ID: username + "-id", Login: username}, nil
 }
-func (m *diffMock) AddCollaborator(owner, repo, username, perm string) error  { return nil }
-func (m *diffMock) RemoveCollaborator(owner, repo, username string) error      { return nil }
+func (m *diffMock) AddCollaborator(owner, repo, username, perm string) error    { return nil }
+func (m *diffMock) RemoveCollaborator(owner, repo, username string) error       { return nil }
 func (m *diffMock) GetPendingInvite(owner, repo, username string) (bool, error) { return false, nil }
 func (m *diffMock) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
 	return nil, nil
@@ -99,7 +100,7 @@ func (m *diffMock) ListTeamRepos(org, slug string) ([]api.RepoInfo, error) { ret
 func (m *diffMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
-func (m *diffMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *diffMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
 func (m *diffMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // setupDiffTest creates a collection on disk with the given repos and members,
@@ -371,5 +372,74 @@ func TestDiff_Concurrent(t *testing.T) {
 	// Verify all 6 repos were checked (concurrentPeak will be > 0).
 	if mock.concurrentPeak == 0 {
 		t.Error("expected concurrent GetRepo calls, concurrentPeak = 0")
+	}
+}
+
+// --- regression: drift repair must never escalate a member to write ---
+
+// permRecorder records the permission string passed to AddCollaborator, so
+// tests can assert on the access level a repair actually grants.
+type permRecorder struct {
+	multiAddMock
+	mu    sync.Mutex
+	perms []string
+}
+
+func (m *permRecorder) AddCollaborator(owner, repo, username, permission string) error {
+	m.mu.Lock()
+	m.perms = append(m.perms, permission)
+	m.mu.Unlock()
+	return m.multiAddMock.AddCollaborator(owner, repo, username, permission)
+}
+
+// diff --fix was the only grant in the codebase that passed "push".
+// Repairing drift therefore upgraded every member it touched from read to
+// write, on every repo they could reach — and because drift is detected by
+// sampling a single repo, one stale entry escalated them everywhere.
+func TestDiffFix_GrantsReadOnlyAccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	col, err := collection.New("acme", "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice-id"}
+	col.Logins["alice-id"] = "alice"
+	col.Repos = []collection.RepoAccess{
+		{Name: "api", Groups: []string{}, Users: []string{}},
+		{Name: "web", Groups: []string{}, Users: []string{}},
+	}
+	if err := col.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	rec := &permRecorder{multiAddMock: *newMultiAddMock()}
+	withStdin(t, "y\n") // confirm the single re-grant prompt
+
+	runDiffFix(col, rec, "owner", "acme", nil, []memberDiffResult{
+		{Username: "alice", ID: "alice-id", Status: "drift"},
+	})
+
+	if len(rec.perms) == 0 {
+		t.Fatal("expected drift repair to re-grant access")
+	}
+	for _, p := range rec.perms {
+		if p != api.PermissionPull {
+			t.Errorf("drift repair granted %q; gitcollect must only ever grant %q",
+				p, api.PermissionPull)
+		}
+	}
+}
+
+// The permission constant exists so the two call sites cannot drift apart
+// again. Pin its value: changing it silently changes what every member of
+// every collection can do.
+func TestPermissionPull_IsReadOnly(t *testing.T) {
+	if api.PermissionPull != "pull" {
+		t.Errorf("PermissionPull = %q, want \"pull\" — anything else grants write access",
+			api.PermissionPull)
 	}
 }

@@ -3,6 +3,8 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/alby-tomy/gitcollect/v3/internal/api"
@@ -12,7 +14,7 @@ import (
 // transferMock is a minimal api.Client for transfer tests. GetUser returns
 // a controlled result per username; all other methods are stubs.
 type transferMock struct {
-	users   map[string]api.UserInfo // username → resolved identity
+	users      map[string]api.UserInfo // username → resolved identity
 	getUserErr map[string]error
 }
 
@@ -26,18 +28,22 @@ func (m *transferMock) GetUser(username string) (api.UserInfo, error) {
 	}
 	return api.UserInfo{ID: username, Login: username}, nil
 }
-func (m *transferMock) GetRepo(owner, repo string) (api.RepoInfo, error) { return api.RepoInfo{}, nil }
+func (m *transferMock) GetRepo(owner, repo string) (api.RepoInfo, error)               { return api.RepoInfo{}, nil }
 func (m *transferMock) AddCollaborator(owner, repo, username, permission string) error { return nil }
 func (m *transferMock) RemoveCollaborator(owner, repo, username string) error          { return nil }
-func (m *transferMock) CheckCollaborator(owner, repo, username string) (bool, error)   { return false, nil }
-func (m *transferMock) GetPendingInvite(owner, repo, username string) (bool, error)    { return false, nil }
+func (m *transferMock) CheckCollaborator(owner, repo, username string) (bool, error) {
+	return false, nil
+}
+func (m *transferMock) GetPendingInvite(owner, repo, username string) (bool, error) {
+	return false, nil
+}
 func (m *transferMock) ListCommits(owner, repo, branch string, limit int) ([]api.CommitInfo, error) {
 	return nil, nil
 }
 func (m *transferMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{}, nil
 }
-func (m *transferMock) Host() string                    { return "github.com" }
+func (m *transferMock) Host() string                      { return "github.com" }
 func (m *transferMock) GetTokenScopes() ([]string, error) { return []string{}, nil }
 func (m *transferMock) ListOrgTeams(org string) ([]api.TeamInfo, error) {
 	return nil, nil
@@ -51,7 +57,7 @@ func (m *transferMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, erro
 func (m *transferMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
-func (m *transferMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *transferMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
 func (m *transferMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // setupTransferTest creates a saved collection and injects a mock client so
@@ -260,5 +266,115 @@ func TestRemoveStringSlice(t *testing.T) {
 	got = removeStringSlice(nil, "x")
 	if len(got) != 0 {
 		t.Errorf("removeStringSlice(nil) = %v, want []", got)
+	}
+}
+
+// --- regression: transfer must work when the new owner is in a group ---
+
+// withStdin points os.Stdin at a file containing input for the duration of
+// the test, so commands that prompt for confirmation can be driven.
+// Supplies a single answer: output.readLine builds a fresh reader per call,
+// so a second prompt in the same test would not see the rest of the input.
+func withStdin(t *testing.T, input string) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("temp stdin: %v", err)
+	}
+	if _, err := f.WriteString(input); err != nil {
+		t.Fatalf("write stdin: %v", err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatalf("seek stdin: %v", err)
+	}
+	old := os.Stdin
+	os.Stdin = f
+	t.Cleanup(func() {
+		os.Stdin = old
+		f.Close()
+	})
+}
+
+// Transfer removed the new owner from Members, but Validate requires every
+// group member and per-repo grantee to be a member — so Save failed with
+// `group "backend" references "alice-id", who is not a member` for exactly
+// the people most likely to be handed a collection.
+func TestTransfer_SucceedsWhenNewOwnerIsInAGroup(t *testing.T) {
+	col := setupTransferTest(t, "owner-id", "owner",
+		[]string{"alice-id"},
+		map[string]string{"owner-id": "owner", "alice-id": "alice"},
+	)
+	col.Groups = map[string][]string{"backend": {"alice-id"}}
+	col.Repos = []collection.RepoAccess{
+		{Name: "api", Groups: []string{"backend"}, Users: []string{}},
+	}
+	if err := col.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	withStdin(t, "alice\n")
+
+	if err := runTransfer(nil, []string{"acme", "alice"}); err != nil {
+		t.Fatalf("transfer to a grouped member must succeed: %v", err)
+	}
+
+	after, err := collection.Load("acme")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if after.Owner != "alice-id" {
+		t.Errorf("expected alice to own the collection, got %q", after.Owner)
+	}
+	if !after.IsInGroup("alice-id", "backend") {
+		t.Error("new owner should keep their group membership")
+	}
+	if err := after.Validate(); err != nil {
+		t.Errorf("collection must remain valid after transfer: %v", err)
+	}
+}
+
+// The previous owner's login is the namespace the repos actually live
+// under. RepoNamespace falls back to the owner's login when Namespace is
+// empty, so without pinning it the transfer would repoint every API path
+// at the new owner's account, where the repos do not exist.
+func TestTransfer_PinsNamespaceToPreviousOwner(t *testing.T) {
+	col := setupTransferTest(t, "owner-id", "owner",
+		[]string{"alice-id"},
+		map[string]string{"owner-id": "owner", "alice-id": "alice"},
+	)
+	if col.Namespace != "" {
+		t.Fatalf("precondition: namespace should start empty, got %q", col.Namespace)
+	}
+	withStdin(t, "alice\n")
+
+	if err := runTransfer(nil, []string{"acme", "alice"}); err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+
+	after, err := collection.Load("acme")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if after.RepoNamespace() != "owner" {
+		t.Errorf("repos still live under owner; got namespace %q", after.RepoNamespace())
+	}
+}
+
+func TestTransfer_PreviousOwnerBecomesMember(t *testing.T) {
+	setupTransferTest(t, "owner-id", "owner",
+		[]string{"alice-id"},
+		map[string]string{"owner-id": "owner", "alice-id": "alice"},
+	)
+	withStdin(t, "alice\n")
+
+	if err := runTransfer(nil, []string{"acme", "alice"}); err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+
+	after, err := collection.Load("acme")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !after.IsMember("owner-id") {
+		t.Error("previous owner should remain a member with access")
 	}
 }
