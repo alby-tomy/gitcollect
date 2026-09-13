@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alby-tomy/gitcollect/internal/activity"
+	"github.com/alby-tomy/gitcollect/v3/internal/activity"
 )
 
 func TestShortSHA(t *testing.T) {

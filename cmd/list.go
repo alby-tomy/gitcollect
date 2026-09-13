@@ -7,9 +7,9 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/alby-tomy/gitcollect/internal/collection"
-	"github.com/alby-tomy/gitcollect/internal/config"
-	"github.com/alby-tomy/gitcollect/internal/output"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/config"
+	"github.com/alby-tomy/gitcollect/v3/internal/output"
 )
 
 // staleAfter is how long since a collection's UpdatedAt before list/show
@@ -28,9 +28,10 @@ func staleDays(updatedAt time.Time) int {
 }
 
 var (
-	listPrivate bool
-	listPublic  bool
-	listJSON    bool
+	listPrivate          bool
+	listPublic           bool
+	listJSON             bool
+	listIncludeArchived  bool
 )
 
 var listCmd = &cobra.Command{
@@ -50,6 +51,7 @@ func init() {
 	listCmd.Flags().BoolVar(&listPrivate, "private", false, "show only private collections")
 	listCmd.Flags().BoolVar(&listPublic, "public", false, "show only public collections")
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "machine-readable output")
+	listCmd.Flags().BoolVar(&listIncludeArchived, "include-archived", false, "include archived collections")
 	rootCmd.AddCommand(listCmd)
 }
 
@@ -61,6 +63,7 @@ type listRow struct {
 	Description string `json:"description"`
 	Members     int    `json:"members"`
 	Repos       int    `json:"repos"`
+	Archived    bool   `json:"archived,omitempty"`
 	StaleDays   int    `json:"stale_days,omitempty"`
 }
 
@@ -99,6 +102,10 @@ func runList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		if col.Archived && !listIncludeArchived {
+			continue
+		}
+
 		role, ok := roleFor(col)
 		if !ok {
 			continue // not yours
@@ -121,6 +128,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			Description: truncateDesc(col.Description),
 			Members:     len(col.Members),
 			Repos:       len(col.Repos),
+			Archived:    col.Archived,
 			StaleDays:   staleDays(col.UpdatedAt),
 		})
 	}

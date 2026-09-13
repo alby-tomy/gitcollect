@@ -2,15 +2,24 @@ package access
 
 import (
 	"errors"
+	"sync"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 )
 
 // mockClient is an in-memory api.Client for exercising enforce.go without
 // any network access.
+//
+// mu guards collaborators: Collection.SyncCollaborators drives the client
+// from up to maxConcurrentSyncs goroutines at once, so the add/remove/check
+// methods below are called concurrently on the same map. A real api.Client
+// is stateless per call and needs no such lock — this one keeps state, so
+// it has to provide the synchronisation itself or "go test -race" reports a
+// data race in the mock rather than a defect in the code under test.
 type mockClient struct {
+	mu            sync.Mutex
 	collaborators map[string]bool
 	failCheck     bool
 }
@@ -29,14 +38,20 @@ func (m *mockClient) GetUser(username string) (api.UserInfo, error) {
 	return api.UserInfo{ID: username, Login: username}, nil
 }
 func (m *mockClient) AddCollaborator(owner, repo, username, permission string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.collaborators[key(owner, repo, username)] = true
 	return nil
 }
 func (m *mockClient) RemoveCollaborator(owner, repo, username string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.collaborators, key(owner, repo, username))
 	return nil
 }
 func (m *mockClient) CheckCollaborator(owner, repo, username string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.failCheck {
 		return false, errors.New("mock check failure")
 	}
@@ -65,6 +80,8 @@ func (m *mockClient) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error)
 func (m *mockClient) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *mockClient) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *mockClient) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 func newCol(t *testing.T, visibility collection.Visibility) *collection.Collection {
 	t.Helper()

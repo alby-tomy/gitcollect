@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/config"
-	"github.com/alby-tomy/gitcollect/internal/output"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/config"
+	"github.com/alby-tomy/gitcollect/v3/internal/output"
 )
 
 var authHost string

@@ -1,0 +1,87 @@
+name: release
+
+# Releases are cut by pushing a semver tag. Everything below runs before any
+# artifact is published, so a tag that does not build, does not pass tests, or
+# does not live on main can never produce a release.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: verify tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # goreleaser's changelog and "git describe" both need full history,
+          # and the main-containment check below needs the main branch too.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # v3.0.0 was tagged on a commit that existed on no branch at all, so the
+      # released code was absent from main and from a fresh clone. Fail loudly
+      # here instead of shipping that again.
+      - name: tag must be an ancestor of main
+        run: |
+          git fetch origin main --depth=0
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not reachable from main."
+            echo "Merge or fast-forward main to this commit before tagging."
+            exit 1
+          fi
+
+      # The module path must carry the major-version suffix or the Go module
+      # proxy silently ignores the tag and "go install ...@latest" keeps
+      # serving v1. This is what made v2.0.0 through v3.0.0 uninstallable.
+      - name: module path must match the tag's major version
+        run: |
+          major="${GITHUB_REF_NAME%%.*}"   # v3.0.0 -> v3
+          module="$(go list -m)"
+          case "$major" in
+            v0|v1) want_suffix="" ;;
+            *)     want_suffix="/$major" ;;
+          esac
+          if [ "${module%"$want_suffix"}" = "$module" ] && [ -n "$want_suffix" ]; then
+            echo "::error::Module path is '$module' but tag $GITHUB_REF_NAME needs it to end in '$want_suffix'."
+            exit 1
+          fi
+          echo "module '$module' is consistent with tag $GITHUB_REF_NAME"
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test ./... -race
+
+  release:
+    name: goreleaser
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

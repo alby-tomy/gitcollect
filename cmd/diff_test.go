@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 )
 
 // diffMock controls GetRepo and CheckCollaborator responses per repo/member.
@@ -99,6 +99,8 @@ func (m *diffMock) ListTeamRepos(org, slug string) ([]api.RepoInfo, error) { ret
 func (m *diffMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *diffMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *diffMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // setupDiffTest creates a collection on disk with the given repos and members,
 // injects the mock client, and returns the collection for further mutation.

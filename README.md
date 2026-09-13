@@ -107,7 +107,7 @@ tool.
 If you have Go 1.26 or later installed, this is the fastest path:
 
 ```bash
-go install github.com/alby-tomy/gitcollect@latest
+go install github.com/alby-tomy/gitcollect/v3@latest
 ```
 
 The binary lands in `$GOBIN` (defaults to `$GOPATH/bin`, typically `~/go/bin`
@@ -180,7 +180,7 @@ correctly, gitcollect is on your `PATH` and ready to use.
 
 ### Upgrading
 
-**go install:** re-run `go install github.com/alby-tomy/gitcollect@latest` —
+**go install:** re-run `go install github.com/alby-tomy/gitcollect/v3@latest` —
 it replaces the previous binary in-place.
 
 **Binary download:** download the new archive from the

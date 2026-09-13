@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/alby-tomy/gitcollect/internal/access"
-	"github.com/alby-tomy/gitcollect/internal/activity"
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
-	"github.com/alby-tomy/gitcollect/internal/output"
+	"github.com/alby-tomy/gitcollect/v3/internal/access"
+	"github.com/alby-tomy/gitcollect/v3/internal/activity"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/output"
 )
 
 const (
@@ -22,10 +22,11 @@ const (
 )
 
 var (
-	activityRepo  string
-	activitySince string
-	activityLimit int
-	activityJSON  bool
+	activityRepo   string
+	activityAuthor string
+	activitySince  string
+	activityLimit  int
+	activityJSON   bool
 )
 
 var activityCmd = &cobra.Command{
@@ -44,6 +45,7 @@ code changes, not access changes.`,
 
 func init() {
 	activityCmd.Flags().StringVar(&activityRepo, "repo", "", "show activity for only this repo")
+	activityCmd.Flags().StringVar(&activityAuthor, "author", "", "filter to commits by this author login")
 	activityCmd.Flags().StringVar(&activitySince, "since", "", "filter to commits within this duration: 1h, 24h, 7d, 30d, or 90d")
 	activityCmd.Flags().IntVar(&activityLimit, "limit", defaultActivityLimit, "max commits to fetch per repo this run")
 	activityCmd.Flags().BoolVar(&activityJSON, "json", false, "machine-readable output")
@@ -105,11 +107,7 @@ func runActivity(cmd *cobra.Command, args []string) error {
 	}
 
 	combined := mergeActivity(existing, fetched)
-	if activityRepo != "" {
-		combined = activity.Filter(combined, activityRepo, "", since)
-	} else {
-		combined = activity.Filter(combined, "", "", since)
-	}
+	combined = activity.Filter(combined, activityRepo, activityAuthor, since)
 	sort.Slice(combined, func(i, j int) bool {
 		return combined[i].CommittedAt.After(combined[j].CommittedAt)
 	})

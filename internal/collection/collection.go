@@ -15,8 +15,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/config"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/config"
 )
 
 // Visibility controls whether a collection's existence can be discovered by
@@ -147,6 +147,10 @@ type Collection struct {
 	// defaults to the owner's cached login if empty. Set via
 	// "gitcollect init --namespace <org>" when repos live under an org.
 	Namespace string    `yaml:"namespace,omitempty"`
+	// Archived marks the collection as inactive. Archived collections are
+	// hidden from list/sync --all/status --all unless --include-archived is
+	// passed. The YAML is preserved on disk — archive is not delete.
+	Archived  bool      `yaml:"archived,omitempty"`
 	CreatedAt time.Time `yaml:"created_at"`
 	UpdatedAt time.Time `yaml:"updated_at"`
 

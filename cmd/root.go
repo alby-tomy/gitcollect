@@ -8,12 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/alby-tomy/gitcollect/internal/access"
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/audit"
-	"github.com/alby-tomy/gitcollect/internal/collection"
-	"github.com/alby-tomy/gitcollect/internal/config"
-	"github.com/alby-tomy/gitcollect/internal/output"
+	"github.com/alby-tomy/gitcollect/v3/internal/access"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/audit"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/config"
+	"github.com/alby-tomy/gitcollect/v3/internal/output"
 )
 
 // Exit codes, per gitcollect's CLI conventions: 0 success, 1 operational

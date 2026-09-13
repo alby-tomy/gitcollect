@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 )
 
 // transferMock is a minimal api.Client for transfer tests. GetUser returns
@@ -51,6 +51,8 @@ func (m *transferMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, erro
 func (m *transferMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *transferMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *transferMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // setupTransferTest creates a saved collection and injects a mock client so
 // runTransfer can be called directly without a real token file.

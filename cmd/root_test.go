@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alby-tomy/gitcollect/internal/access"
-	"github.com/alby-tomy/gitcollect/internal/api"
-	"github.com/alby-tomy/gitcollect/internal/collection"
-	"github.com/alby-tomy/gitcollect/internal/config"
+	"github.com/alby-tomy/gitcollect/v3/internal/access"
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
+	"github.com/alby-tomy/gitcollect/v3/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/config"
 )
 
 func TestStaleDays(t *testing.T) {
@@ -115,6 +115,8 @@ func (m *rootMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
 func (m *rootMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
+func (m *rootMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *rootMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // resetCallerCache clears the package-level identity cache before a test and
 // restores it to empty afterward, so each test starts from a clean slate.
