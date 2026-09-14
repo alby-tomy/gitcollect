@@ -17,8 +17,11 @@ import (
 
 // doctorCheck holds the result of a single diagnostic check.
 type doctorCheck struct {
-	Label   string `json:"label"`
-	Status  string `json:"status"` // "ok" | "warn" | "error"
+	Label string `json:"label"`
+	// Status is "ok", "info", "warn" or "error". Only "error" affects
+	// the exit code; "info" is a standing note, not a finding, and is
+	// excluded from the warning count.
+	Status  string `json:"status"`
 	Message string `json:"message"`
 	Fix     string `json:"fix,omitempty"`
 }
@@ -87,7 +90,11 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			icon := checkIcon(c.Status)
 			fmt.Fprintf(os.Stderr, "%s %s\n", icon, c.Message)
 			if c.Fix != "" && c.Status != "ok" {
-				fmt.Fprintf(os.Stderr, "  Run: %s\n", c.Fix)
+				label := "Run"
+				if c.Status == "info" {
+					label = "Tip"
+				}
+				fmt.Fprintf(os.Stderr, "  %s: %s\n", label, c.Fix)
 			}
 		}
 		fmt.Fprintln(os.Stderr)
@@ -206,10 +213,15 @@ func runDoctorChecks() []doctorCheck {
 		}
 	}
 
-	// Audit log portability reminder.
+	// Audit log portability reminder. Status "info", not "warn": this is a
+	// standing property of how gitcollect stores audit logs, not something
+	// wrong with this installation that the user could act on. Reporting it
+	// as a warning meant every run ended with at least one warning and the
+	// "all checks passed" result was unreachable — which trains people to
+	// ignore the warning count entirely.
 	checks = append(checks, doctorCheck{
 		Label:   "AUDIT",
-		Status:  "warn",
+		Status:  "info",
 		Message: "Audit logs are stored locally only — not backed up or shared",
 		Fix:     "gitcollect audit <collection> --json > backup.json",
 	})
@@ -230,6 +242,8 @@ func checkIcon(status string) string {
 		return "✓"
 	case "warn":
 		return "⚠"
+	case "info":
+		return "·"
 	default:
 		return "✗"
 	}

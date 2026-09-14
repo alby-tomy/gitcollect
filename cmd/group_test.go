@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/alby-tomy/gitcollect/v3/internal/api"
@@ -367,5 +369,112 @@ func TestAddOneToGroup(t *testing.T) {
 	}
 	if col.IsInGroup("bob", "red-team") {
 		t.Error("expected bob NOT to be in red-team after a failed sync (AddToGroup rolls back)")
+	}
+}
+
+// --- regression: group ordering must be stable across runs ---
+
+func newOrderingCol(t *testing.T) *collection.Collection {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	col, err := collection.New("acme", "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	col.Members = []string{"alice-id"}
+	col.Logins["alice-id"] = "alice"
+	col.Groups = map[string][]string{
+		"zeta":    {"alice-id"},
+		"alpha":   {"alice-id"},
+		"mid":     {},
+		"beta":    {"alice-id"},
+		"omega":   {},
+		"delta":   {"alice-id"},
+		"gamma":   {},
+		"epsilon": {"alice-id"},
+	}
+	return col
+}
+
+// Go randomises map iteration, so ranging over col.Groups directly
+// reordered every rendered list between runs.
+func TestSortedGroupNames_IsSortedAndStable(t *testing.T) {
+	col := newOrderingCol(t)
+
+	want := []string{"alpha", "beta", "delta", "epsilon", "gamma", "mid", "omega", "zeta"}
+	for i := 0; i < 20; i++ {
+		got := sortedGroupNames(col)
+		if len(got) != len(want) {
+			t.Fatalf("expected %d groups, got %d", len(want), len(got))
+		}
+		for j := range want {
+			if got[j] != want[j] {
+				t.Fatalf("iteration %d: group order = %v, want %v", i, got, want)
+			}
+		}
+	}
+}
+
+func TestGroupsForMember_IsSortedAndStable(t *testing.T) {
+	col := newOrderingCol(t)
+
+	want := []string{"alpha", "beta", "delta", "epsilon", "zeta"} // groups alice is in
+	for i := 0; i < 20; i++ {
+		got := groupsForMember(col, "alice-id")
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("iteration %d: groups = %v, want %v", i, got, want)
+		}
+	}
+}
+
+// --- regression: the group-management sentinels must be identifiable ---
+
+func TestCheckGroupManage_OwnerAlwaysAllowed(t *testing.T) {
+	col := newOrderingCol(t)
+	if err := checkGroupManage(col, "owner-id", "group add", "alpha", "acme"); err != nil {
+		t.Errorf("the owner must always be allowed: %v", err)
+	}
+}
+
+// A group admin acting on somebody else's group is a distinct case from
+// having no admin rights at all. The sentinel existed but nothing returned
+// it, so the two were only ever distinguishable by reading the prose.
+func TestCheckGroupManage_WrongGroupIsIdentifiable(t *testing.T) {
+	col := newOrderingCol(t)
+	col.GroupAdminsEnabled = true
+	col.GroupAdmins = map[string][]string{"alpha": {"alice-id"}}
+
+	err := checkGroupManage(col, "alice-id", "group add", "beta", "acme")
+	if err == nil {
+		t.Fatal("expected an admin of another group to be refused")
+	}
+	if !errors.Is(err, collection.ErrWrongGroup) {
+		t.Errorf("expected ErrWrongGroup, got %v", err)
+	}
+}
+
+func TestCheckGroupManage_DisabledTierIsIdentifiable(t *testing.T) {
+	col := newOrderingCol(t) // GroupAdminsEnabled is false
+
+	err := checkGroupManage(col, "alice-id", "group add", "alpha", "acme")
+	if err == nil {
+		t.Fatal("expected a non-owner to be refused when the org tier is off")
+	}
+	if !errors.Is(err, collection.ErrGroupAdminsDisabled) {
+		t.Errorf("expected ErrGroupAdminsDisabled, got %v", err)
+	}
+}
+
+func TestCheckGroupManage_AdminOfThatGroupAllowed(t *testing.T) {
+	col := newOrderingCol(t)
+	col.GroupAdminsEnabled = true
+	col.GroupAdmins = map[string][]string{"alpha": {"alice-id"}}
+
+	if err := checkGroupManage(col, "alice-id", "group add", "alpha", "acme"); err != nil {
+		t.Errorf("an admin of this group must be allowed: %v", err)
 	}
 }

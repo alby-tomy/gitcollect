@@ -316,7 +316,7 @@ func runMemberList(cmd *cobra.Command, args []string) error {
 // IsInGroup.
 func groupsForMember(col *collection.Collection, id string) []string {
 	var groups []string
-	for group := range col.Groups {
+	for _, group := range sortedGroupNames(col) {
 		if col.IsInGroup(id, group) {
 			groups = append(groups, group)
 		}

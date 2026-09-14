@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/fatih/color"
@@ -145,8 +146,30 @@ func ConfirmWord(prompt, word string) bool {
 	return strings.TrimSpace(readLine()) == word
 }
 
+// stdin state for readLine. The reader is kept across calls rather than
+// rebuilt per prompt: bufio reads ahead, so a fresh reader each time
+// discards whatever the previous one buffered. With a terminal that is
+// invisible, but with piped input — `printf 'y\ny\n' | gitcollect ...`, or
+// any script driving a command that asks twice — the second prompt saw
+// EOF and silently took the default.
+//
+// The reader is rebound whenever os.Stdin changes so tests that swap it
+// are not served a reader over the previous file.
+var (
+	stdinMu     sync.Mutex
+	stdinReader *bufio.Reader
+	stdinSource *os.File
+)
+
 func readLine() string {
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	stdinMu.Lock()
+	defer stdinMu.Unlock()
+
+	if stdinReader == nil || stdinSource != os.Stdin {
+		stdinSource = os.Stdin
+		stdinReader = bufio.NewReader(os.Stdin)
+	}
+	line, _ := stdinReader.ReadString('\n')
 	return line
 }
 

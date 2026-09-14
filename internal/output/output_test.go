@@ -261,3 +261,61 @@ func TestClearProgress_WritesEscapeSequence(t *testing.T) {
 	}
 }
 
+// --- regression: consecutive prompts must both see piped input ---
+
+// pipeStdin points os.Stdin at a file containing input for the test.
+func pipeStdin(t *testing.T, input string) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("temp stdin: %v", err)
+	}
+	if _, err := f.WriteString(input); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatalf("seek: %v", err)
+	}
+	old := os.Stdin
+	os.Stdin = f
+	t.Cleanup(func() {
+		os.Stdin = old
+		f.Close()
+	})
+}
+
+// A fresh bufio.Reader per prompt threw away everything the previous one
+// had read ahead, so only the first answer in a pipe was ever seen.
+func TestConfirm_ReadsConsecutivePipedAnswers(t *testing.T) {
+	pipeStdin(t, "y\ny\nn\n")
+
+	if !Confirm("first") {
+		t.Error("first prompt should read y")
+	}
+	if !Confirm("second") {
+		t.Error("second prompt should read the second y, not EOF")
+	}
+	if Confirm("third") {
+		t.Error("third prompt should read n")
+	}
+}
+
+func TestConfirmWord_FollowsAConfirm(t *testing.T) {
+	pipeStdin(t, "y\nmy-collection\n")
+
+	if !Confirm("first") {
+		t.Fatal("first prompt should read y")
+	}
+	if !ConfirmWord("type it", "my-collection") {
+		t.Error("typed confirmation should read the second line")
+	}
+}
+
+// Exhausted input must read as "no", never block or panic.
+func TestConfirm_EOFIsNegative(t *testing.T) {
+	pipeStdin(t, "")
+
+	if Confirm("only prompt") {
+		t.Error("EOF should not be treated as confirmation")
+	}
+}

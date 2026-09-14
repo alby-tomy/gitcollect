@@ -15,9 +15,6 @@ var (
 	ErrWrongGroup = errors.New("you are a group admin but not of this group")
 	// ErrSelfTransfer is returned when a transfer target is the current owner.
 	ErrSelfTransfer = errors.New("cannot transfer ownership to yourself")
-	// ErrAdminPrivilegeEscalation is returned when a group admin tries to
-	// assign another group admin — only the owner can do that.
-	ErrAdminPrivilegeEscalation = errors.New("group admins cannot assign other group admins")
 )
 
 // IsOwner returns true if id is the collection's owner. id is a platform
