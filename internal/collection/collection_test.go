@@ -78,7 +78,7 @@ func (m *mockClient) GetPendingInvite(owner, repo, username string) (bool, error
 func (m *mockClient) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: name, CloneURL: "https://example.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
-func (m *mockClient) Host() string                    { return m.host }
+func (m *mockClient) Host() string                      { return m.host }
 func (m *mockClient) GetTokenScopes() ([]string, error) { return []string{}, nil }
 func (m *mockClient) ListOrgTeams(org string) ([]api.TeamInfo, error) {
 	return nil, nil
@@ -92,7 +92,7 @@ func (m *mockClient) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error)
 func (m *mockClient) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
-func (m *mockClient) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *mockClient) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
 func (m *mockClient) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 func newTestCollection(t *testing.T, visibility Visibility) *Collection {
@@ -581,9 +581,29 @@ func TestWhyCanAccess(t *testing.T) {
 		}
 	}
 
+	// Visibility decides who the collection admits; it never disables a
+	// repo's own restrictions. This block previously asserted the opposite
+	// — that a public collection granted access to "anything", a repo not
+	// even in it — which is how per-repo rules came to be silently inert on
+	// every public collection.
 	pub := newTestCollection(t, VisibilityPublic)
-	if got := pub.WhyCanAccess("anyone", "anything"); got != "open to all members" {
-		t.Errorf("public collection WhyCanAccess = %q, want %q", got, "open to all members")
+	pub.Members = []string{"alice", "bob", "charlie"}
+	pub.Groups = map[string][]string{"red-team": {"alice"}}
+	pub.Repos = []RepoAccess{
+		{Name: "open", Groups: []string{}, Users: []string{}},
+		{Name: "restricted", Groups: []string{"red-team"}, Users: []string{"bob"}},
+	}
+	pubCases := []struct{ username, repo, want string }{
+		{"anyone", "anything", "no access — repo not in collection"},
+		{"anyone", "open", "open to everyone — public collection"},
+		{"charlie", "restricted", "no access — group red-team or individual grant required"},
+		{"alice", "restricted", "member of group red-team"},
+		{"bob", "restricted", "individually granted"},
+	}
+	for _, tc := range pubCases {
+		if got := pub.WhyCanAccess(tc.username, tc.repo); got != tc.want {
+			t.Errorf("public WhyCanAccess(%q, %q) = %q, want %q", tc.username, tc.repo, got, tc.want)
+		}
 	}
 
 	onlyUsers := newTestCollection(t, VisibilityPrivate)
@@ -668,5 +688,21 @@ func TestRepoNamespace_UsesExplicitNamespace(t *testing.T) {
 	}
 	if got := col.RepoNamespace(); got != "acme-corp" {
 		t.Errorf("RepoNamespace() = %q, want acme-corp (explicit namespace)", got)
+	}
+}
+
+// A fix command needs a login to be typeable. Reading a public collection
+// without authenticating has no identity, and every suggestion was being
+// emitted with its username argument missing.
+func TestFixCmd_NoLoginNoSuggestion(t *testing.T) {
+	col := newTestCollection(t, VisibilityPublic)
+	col.Repos = []RepoAccess{{Name: "r", Groups: []string{"g"}, Users: []string{}}}
+	col.Groups = map[string][]string{"g": {}}
+
+	if got := col.FixCmd("", "", "r"); got != "" {
+		t.Errorf("FixCmd with no login = %q, want empty", got)
+	}
+	if got := col.FixCmd("someone", "someone", "r"); got == "" {
+		t.Error("FixCmd with a login should still suggest a command")
 	}
 }

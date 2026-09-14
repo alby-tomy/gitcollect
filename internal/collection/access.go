@@ -65,13 +65,18 @@ func (c *Collection) repoByName(repoName string) (RepoAccess, bool) {
 // CanAccessRepo returns true if id can clone/pull repoName, per the
 // decision table:
 //
-//	caller is owner                         → true  (always, regardless of membership)
-//	collection public                       → true
-//	user not a member                       → false
-//	repo.Groups=[] AND repo.Users=[]         → true  (open to all members)
-//	user in any repo.Groups                 → true
-//	user in repo.Users                      → true
-//	none of the above                       → false
+//	caller is owner                          → true  (always, regardless of membership)
+//	repo not in the collection               → false
+//	repo unrestricted AND collection public  → true  (open to everyone)
+//	repo unrestricted AND caller is a member → true  (open to all members)
+//	repo restricted AND caller not a member  → false
+//	caller in any repo.Groups                → true
+//	caller in repo.Users                     → true
+//	none of the above                        → false
+//
+// Visibility decides who the collection admits, never whether a repo's own
+// restrictions apply: a public collection opens its unrestricted repos to
+// everyone, and leaves group- and user-restricted repos restricted.
 //
 // id is a platform ID once the collection is on CurrentVersion (a legacy
 // username on a still-"1" file) — every list/map it's compared against
@@ -92,19 +97,28 @@ func (c *Collection) CanAccessRepo(id, repoName string) bool {
 	if c.IsOwner(id) {
 		return true
 	}
-	if c.Visibility == VisibilityPublic {
-		return true
-	}
-	if !c.IsMember(id) {
-		return false
-	}
 
 	repo, ok := c.repoByName(repoName)
 	if !ok {
 		return false
 	}
+
+	// An unrestricted repo is reachable by anyone the collection admits:
+	// every member, plus everyone at all when the collection is public.
+	// (IsMember is itself true for everyone on a public collection, so the
+	// membership test covers both — kept explicit for legibility.)
 	if len(repo.Groups) == 0 && len(repo.Users) == 0 {
-		return true
+		return c.Visibility == VisibilityPublic || c.IsMember(id)
+	}
+
+	// A restricted repo requires satisfying one of its rules, whatever the
+	// collection's visibility. Visibility used to short-circuit above this
+	// point, which made every per-repo group and user restriction inert the
+	// moment a collection was made public — show printed "groups: [backend]"
+	// beside "✓ yes" for someone in no group at all, and SyncCollaborators
+	// drove the platform to grant every member access to every repo.
+	if !c.IsMember(id) {
+		return false
 	}
 	for _, g := range repo.Groups {
 		if c.IsInGroup(id, g) {
@@ -141,19 +155,24 @@ func (c *Collection) WhyCanAccess(id, repoName string) string {
 	if c.IsOwner(id) {
 		return "owner — full access"
 	}
-	if c.Visibility == VisibilityPublic {
-		return "open to all members"
-	}
-	if !c.IsMember(id) {
-		return "no access — not a member"
-	}
 
 	repo, ok := c.repoByName(repoName)
 	if !ok {
 		return "no access — repo not in collection"
 	}
+
 	if len(repo.Groups) == 0 && len(repo.Users) == 0 {
+		if c.Visibility == VisibilityPublic {
+			return "open to everyone — public collection"
+		}
+		if !c.IsMember(id) {
+			return "no access — not a member"
+		}
 		return "open to all members"
+	}
+
+	if !c.IsMember(id) {
+		return "no access — not a member"
 	}
 	for _, g := range repo.Groups {
 		if c.IsInGroup(id, g) {
@@ -229,6 +248,13 @@ func (c *Collection) GroupAdminOf(callerID string) []string {
 // instead of just an explanation.
 func (c *Collection) FixCmd(id, login, repoName string) string {
 	if c.CanAccessRepo(id, repoName) {
+		return ""
+	}
+	// Without a login there is no typeable command to offer. This happens
+	// on a public collection read with no cached identity, where every
+	// suggestion would otherwise be emitted with its username argument
+	// missing ("gitcollect group add payments backend ").
+	if login == "" {
 		return ""
 	}
 	if !c.IsMember(id) {
