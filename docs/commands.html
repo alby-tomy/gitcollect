@@ -785,6 +785,12 @@ carol    —            3</span>
         <h2 class="section-title">Repo access control <span class="pill pill-org">Org</span></h2>
         <p class="section-sub">By default every member can reach every repo. Narrow that with per-repo rules: restrict to groups, specific users, or reopen to everyone.</p>
 
+        <p class="note"><strong>Per-repo rules outrank visibility.</strong> A public collection opens its
+          <em>unrestricted</em> repos to everyone, and leaves group- and user-restricted repos restricted. Marking a
+          collection public is not a way to grant blanket access. <em>Changed in v3.1.0</em> — earlier versions
+          ignored per-repo rules entirely on public collections and <code>sync</code> pushed the resulting grants to
+          the platform; run <code>gitcollect diff</code> after upgrading.</p>
+
         <div class="term">
           <div class="term-header">
             <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
