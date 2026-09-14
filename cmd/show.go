@@ -154,9 +154,19 @@ func runShow(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Printf("  You can't access %d repo(s):\n", len(denied))
 		for _, d := range denied {
+			if d.fixCmd == "" {
+				fmt.Printf("    %-20s (%s)\n", d.repo, d.reason)
+				continue
+			}
 			fmt.Printf("    %-20s (%s) → %s\n", d.repo, d.reason, d.fixCmd)
 		}
-		output.Suggestion(fmt.Sprintf("gitcollect inspect %s --user %s", name, caller))
+		// caller is empty when a public collection was read without
+		// authenticating; there is no username to inspect by.
+		if caller != "" {
+			output.Suggestion(fmt.Sprintf("gitcollect inspect %s --user %s", name, caller))
+		} else {
+			output.Suggestion("gitcollect auth   # to see your own access")
+		}
 	}
 
 	return nil

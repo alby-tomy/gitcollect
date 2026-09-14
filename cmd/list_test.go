@@ -72,12 +72,8 @@ func TestRoleFor_V2_Owner(t *testing.T) {
 		t.Fatalf("collection.New: %v", err)
 	}
 
-	role, ok := roleFor(col)
-	if !ok {
-		t.Fatal("roleFor returned ok=false for the collection owner")
-	}
-	if role != "owner" {
-		t.Errorf("role = %q, want owner", role)
+	if got := roleFor(col); got != "owner" {
+		t.Errorf("role = %q, want owner", got)
 	}
 }
 
@@ -96,12 +92,8 @@ func TestRoleFor_V2_Member(t *testing.T) {
 	col.Members = append(col.Members, "alice-id")
 	col.Logins["alice-id"] = "alice"
 
-	role, ok := roleFor(col)
-	if !ok {
-		t.Fatal("roleFor returned ok=false for a collection member")
-	}
-	if role != "member" {
-		t.Errorf("role = %q, want member", role)
+	if got := roleFor(col); got != "member" {
+		t.Errorf("role = %q, want member", got)
 	}
 }
 
@@ -120,9 +112,10 @@ func TestRoleFor_V2_NotMember(t *testing.T) {
 	col.Members = append(col.Members, "alice-id")
 	col.Logins["alice-id"] = "alice"
 
-	_, ok := roleFor(col)
-	if ok {
-		t.Error("roleFor returned ok=true for someone not in the collection")
+	// A private collection the caller is not part of has no role for
+	// them, but the row is still listed — the file is on their disk.
+	if got := roleFor(col); got != "—" {
+		t.Errorf("for someone not in the collection: role = %q, want \u2014", got)
 	}
 }
 
@@ -137,9 +130,10 @@ func TestRoleFor_V2_NoIDCached(t *testing.T) {
 		t.Fatalf("collection.New: %v", err)
 	}
 
-	_, ok := roleFor(col)
-	if ok {
-		t.Error("roleFor returned ok=true when no user ID is cached — user has not authenticated")
+	// A private collection the caller is not part of has no role for
+	// them, but the row is still listed — the file is on their disk.
+	if got := roleFor(col); got != "—" {
+		t.Errorf("when no user ID is cached — user has not authenticated: role = %q, want \u2014", got)
 	}
 }
 
@@ -159,12 +153,8 @@ func TestRoleFor_V1_Owner(t *testing.T) {
 		t.Fatalf("collection.Load: %v", err)
 	}
 
-	role, ok := roleFor(col)
-	if !ok {
-		t.Fatal("roleFor returned ok=false for the v1 collection owner")
-	}
-	if role != "owner" {
-		t.Errorf("role = %q, want owner", role)
+	if got := roleFor(col); got != "owner" {
+		t.Errorf("role = %q, want owner", got)
 	}
 }
 
@@ -182,12 +172,8 @@ func TestRoleFor_V1_Member(t *testing.T) {
 		t.Fatalf("collection.Load: %v", err)
 	}
 
-	role, ok := roleFor(col)
-	if !ok {
-		t.Fatal("roleFor returned ok=false for a v1 collection member")
-	}
-	if role != "member" {
-		t.Errorf("role = %q, want member", role)
+	if got := roleFor(col); got != "member" {
+		t.Errorf("role = %q, want member", got)
 	}
 }
 
@@ -205,9 +191,10 @@ func TestRoleFor_V1_NotMember(t *testing.T) {
 		t.Fatalf("collection.Load: %v", err)
 	}
 
-	_, ok := roleFor(col)
-	if ok {
-		t.Error("roleFor returned ok=true for someone not in a v1 collection")
+	// A private collection the caller is not part of has no role for
+	// them, but the row is still listed — the file is on their disk.
+	if got := roleFor(col); got != "—" {
+		t.Errorf("for someone not in a v1 collection: role = %q, want \u2014", got)
 	}
 }
 
@@ -239,14 +226,11 @@ func TestRoleFor_V1_V2_SameHost(t *testing.T) {
 		t.Fatalf("collection.New: %v", err)
 	}
 
-	v1role, ok := roleFor(v1col)
-	if !ok || v1role != "owner" {
-		t.Errorf("v1 collection: role=%q ok=%v, want owner/true", v1role, ok)
+	if got := roleFor(v1col); got != "owner" {
+		t.Errorf("v1 collection: role=%q, want owner", got)
 	}
-
-	v2role, ok := roleFor(v2col)
-	if !ok || v2role != "owner" {
-		t.Errorf("v2 collection: role=%q ok=%v, want owner/true", v2role, ok)
+	if got := roleFor(v2col); got != "owner" {
+		t.Errorf("v2 collection: role=%q, want owner", got)
 	}
 }
 
@@ -334,5 +318,100 @@ func TestList_JSON_IncludesDescription(t *testing.T) {
 
 	if !strings.Contains(out, `"description"`) || !strings.Contains(out, `"json desc"`) {
 		t.Errorf("JSON output = %q, want description field with value", out)
+	}
+}
+
+// --- regression: list must never hide a collection that is on disk ---
+
+func writeListCol(t *testing.T, name string, vis collection.Visibility, members []string) {
+	t.Helper()
+	col, err := collection.New(name, "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, vis)
+	if err != nil {
+		t.Fatalf("collection.New: %v", err)
+	}
+	for _, m := range members {
+		col.Members = append(col.Members, m)
+		col.Logins[m] = m
+	}
+	if err := col.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+}
+
+// Rows used to be dropped whenever no role could be determined, so list
+// printed an empty table before "gitcollect auth" had ever run — exactly
+// the state a new joiner is in right after pull-config or join.
+func TestList_ShowsCollectionsWithoutAuth(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	t.Cleanup(func() { listJSON = false; listPrivate = false; listPublic = false })
+
+	writeListCol(t, "payments", collection.VisibilityPrivate, nil)
+
+	out := captureListStdout(t, func() {
+		if err := runList(listCmd, nil); err != nil {
+			t.Errorf("runList: %v", err)
+		}
+	})
+	if !strings.Contains(out, "payments") {
+		t.Errorf("a collection on disk must be listed even with no cached identity, got:\n%s", out)
+	}
+}
+
+func TestRoleFor_NoIdentityIsUnknownNotHidden(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+
+	col, err := collection.New("c", "github.com",
+		api.UserInfo{ID: "someone-else", Login: "someone"}, collection.VisibilityPrivate)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := roleFor(col); got != "—" {
+		t.Errorf("roleFor with no cached identity = %q, want %q", got, "—")
+	}
+}
+
+// A public collection the caller is not listed in is still theirs to see;
+// show renders it without any identity at all.
+func TestRoleFor_PublicNonMember(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	if err := config.SaveUserID("github.com", "stranger"); err != nil {
+		t.Fatalf("SaveUserID: %v", err)
+	}
+
+	col, err := collection.New("c", "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPublic)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := roleFor(col); got != "public" {
+		t.Errorf("roleFor(public, non-member) = %q, want %q", got, "public")
+	}
+}
+
+func TestRoleFor_MemberBeatsPublic(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	if err := config.SaveUserID("github.com", "bob-id"); err != nil {
+		t.Fatalf("SaveUserID: %v", err)
+	}
+
+	col, err := collection.New("c", "github.com",
+		api.UserInfo{ID: "owner-id", Login: "owner"}, collection.VisibilityPublic)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	col.Members = []string{"bob-id"}
+	col.Logins["bob-id"] = "bob"
+
+	if got := roleFor(col); got != "member" {
+		t.Errorf("a listed member of a public collection should read as member, got %q", got)
 	}
 }
