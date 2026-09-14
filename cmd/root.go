@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -349,6 +350,19 @@ func loginsFor(col *collection.Collection, ids []string) []string {
 		}
 	}
 	return logins
+}
+
+// sortedGroupNames returns col's group names in a stable, alphabetical
+// order. Go randomises map iteration deliberately, so every display that
+// ranged over col.Groups directly reordered its rows between runs — which
+// makes output impossible to diff, scan, or assert on in a test.
+func sortedGroupNames(col *collection.Collection) []string {
+	names := make([]string, 0, len(col.Groups))
+	for g := range col.Groups {
+		names = append(names, g)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // suggestCollectionName returns the closest existing local collection name

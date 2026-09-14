@@ -116,7 +116,8 @@ func runShow(cmd *cobra.Command, args []string) error {
 			headers = append(headers, "ADMINS")
 		}
 		rows := make([][]string, 0, len(col.Groups))
-		for group, users := range col.Groups {
+		for _, group := range sortedGroupNames(col) {
+			users := col.Groups[group]
 			row := []string{group, fmt.Sprintf("%d", len(users))}
 			if col.GroupAdminsEnabled {
 				adminLogins := loginsFor(col, col.GroupAdmins[group])

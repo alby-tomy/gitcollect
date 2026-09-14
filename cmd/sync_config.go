@@ -235,6 +235,13 @@ func pruneDepartedMembers(col *collection.Collection, retained map[string]bool) 
 }
 
 func runSyncConfig(_ *cobra.Command, args []string) error {
+	// --all was declared but never read, so "sync-config --all my-collection"
+	// silently synced only my-collection. Every other bulk command in the
+	// CLI (sync, status, pull) rejects that combination; match them.
+	if syncConfigAll && len(args) == 1 {
+		return NewUsageError(fmt.Errorf("sync-config: use either <collection> or --all, not both"))
+	}
+
 	// Gather collection names to sync.
 	var names []string
 	if len(args) == 1 {

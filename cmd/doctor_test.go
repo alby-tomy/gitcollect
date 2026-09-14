@@ -148,3 +148,77 @@ func TestDoctor_ExitCode_OneOnErrors(t *testing.T) {
 		})
 	})
 }
+
+// --- regression: doctor must be able to report success ---
+
+// An unconditional "warn" reminder meant every run ended with at least one
+// warning, so the "all checks passed" branch was unreachable and the
+// warning count carried no signal.
+func TestDoctor_AllOkChecksReportSuccess(t *testing.T) {
+	prev := doctorCheckFn
+	doctorCheckFn = func() []doctorCheck {
+		return []doctorCheck{
+			{Label: "AUTH/github.com", Status: "ok", Message: "authenticated"},
+			{Label: "AUDIT", Status: "info", Message: "stored locally only"},
+		}
+	}
+	t.Cleanup(func() { doctorCheckFn = prev })
+
+	// The summary line goes to stdout (output.Success); the per-check
+	// listing and any warnings go to stderr. Capture both.
+	var errOut string
+	stdOut := captureStdout(func() {
+		errOut = captureStderr(func() {
+			if err := runDoctor(nil, nil); err != nil {
+				t.Fatalf("runDoctor: %v", err)
+			}
+		})
+	})
+
+	if !strings.Contains(stdOut, "all checks passed") {
+		t.Errorf("expected a clean run to report success, got stdout:\n%s", stdOut)
+	}
+	if strings.Contains(stdOut+errOut, "warning(s)") {
+		t.Errorf("an info note must not be counted as a warning:\nstdout:\n%s\nstderr:\n%s", stdOut, errOut)
+	}
+}
+
+func TestDoctor_InfoDoesNotAffectExitCode(t *testing.T) {
+	prev := doctorCheckFn
+	doctorCheckFn = func() []doctorCheck {
+		return []doctorCheck{{Label: "AUDIT", Status: "info", Message: "note"}}
+	}
+	t.Cleanup(func() { doctorCheckFn = prev })
+
+	if err := runDoctor(nil, nil); err != nil {
+		t.Errorf("an info-only run must exit 0, got: %v", err)
+	}
+}
+
+func TestDoctor_ErrorStillFails(t *testing.T) {
+	prev := doctorCheckFn
+	doctorCheckFn = func() []doctorCheck {
+		return []doctorCheck{
+			{Label: "AUTH/github.com", Status: "error", Message: "no token stored"},
+			{Label: "AUDIT", Status: "info", Message: "note"},
+		}
+	}
+	t.Cleanup(func() { doctorCheckFn = prev })
+
+	if err := runDoctor(nil, nil); err == nil {
+		t.Error("expected a failing check to produce an error")
+	}
+}
+
+// The real check list must not reintroduce a permanent warning.
+func TestDoctorChecks_AuditNoteIsInformational(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	for _, c := range runDoctorChecks() {
+		if c.Label == "AUDIT" && c.Status != "info" {
+			t.Errorf("AUDIT note should be informational, got status %q", c.Status)
+		}
+	}
+}
