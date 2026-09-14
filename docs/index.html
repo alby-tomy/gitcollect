@@ -1861,6 +1861,15 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
             <p class="sig"><span class="prog">gitcollect</span> visibility &lt;collection&gt; &lt;public|private&gt;</p>
             <p class="desc">Change a collection's visibility. Switching to public prompts for confirmation, since it
               makes the collection's existence discoverable to non-members.</p>
+            <p class="desc">Visibility controls who the collection <em>admits</em> — it does not switch off a repo's own
+              rules. A public collection opens its unrestricted repos to everyone, and leaves repos restricted to a
+              group or to named users exactly as restricted as they were. Making a collection public is not a way to
+              grant blanket access.</p>
+            <p class="note"><strong>Changed in v3.1.0.</strong> Earlier versions short-circuited on visibility: making a
+              collection public granted every member access to <em>every</em> repo in it, including group-restricted
+              ones, and <code>sync</code> pushed those grants to the platform. If you have public collections with
+              restricted repos, run <code>gitcollect diff</code> after upgrading — some members will lose access they
+              should never have had.</p>
           </div>
 
           <div class="cmd-block">
