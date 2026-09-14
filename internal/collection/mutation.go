@@ -264,7 +264,7 @@ func (c *Collection) SyncCollaborators(client api.Client, onProgress func(curren
 
 			switch {
 			case j.shouldHave && !has:
-				if addErr := client.AddCollaborator(ownerLogin, j.repo, memberLogin, "pull"); addErr != nil {
+				if addErr := client.AddCollaborator(ownerLogin, j.repo, memberLogin, api.PermissionPull); addErr != nil {
 					mu.Lock()
 					errs = append(errs, fmt.Errorf("%s/%s: grant %s: %w", ownerLogin, j.repo, memberLogin, addErr))
 					mu.Unlock()

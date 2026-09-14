@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/alby-tomy/gitcollect/v3/internal/api"
 	"github.com/alby-tomy/gitcollect/v3/internal/audit"
 	"github.com/alby-tomy/gitcollect/v3/internal/collection"
 	"github.com/alby-tomy/gitcollect/v3/internal/output"
@@ -42,7 +43,11 @@ func runTransfer(cmd *cobra.Command, args []string) error {
 	// Resolve new owner's platform identity.
 	newOwner, err := client.GetUser(newOwnerUsername)
 	if err != nil {
-		if errors.Is(err, collection.ErrNotFound) {
+		// api.ErrUserNotFound, not collection.ErrNotFound — GetUser is an
+		// API call and never returns the collection package's sentinel, so
+		// testing for that one made this branch unreachable and a typo'd
+		// username surfaced as a raw "resolve" error instead.
+		if errors.Is(err, api.ErrUserNotFound) {
 			return fmt.Errorf("transfer: user %q not found on %s", newOwnerUsername, col.Host)
 		}
 		return fmt.Errorf("transfer: resolve %s: %w", newOwnerUsername, err)
@@ -84,6 +89,16 @@ func runTransfer(cmd *cobra.Command, args []string) error {
 
 	// Apply the transfer: previous owner becomes a regular member.
 	previousOwnerID := col.Owner
+
+	// Pin the namespace before the owner changes. RepoNamespace() falls
+	// back to the owner's login when Namespace is empty, so transferring
+	// would otherwise silently repoint every API path at the new owner's
+	// account — where the repos do not live. Transferring a collection
+	// does not move repositories on the platform.
+	if col.Namespace == "" {
+		col.Namespace = col.Logins[previousOwnerID]
+	}
+
 	col.Owner = newOwner.ID
 	col.Logins[newOwner.ID] = newOwner.Login
 
@@ -99,8 +114,14 @@ func runTransfer(cmd *cobra.Command, args []string) error {
 		col.Members = append(col.Members, previousOwnerID)
 	}
 
-	// Remove new owner from Members (they are now the owner, not a member).
-	col.Members = removeStringSlice(col.Members, newOwner.ID)
+	// The new owner stays in Members. Removing them broke every transfer
+	// to anyone who belonged to a group or held an individual repo grant:
+	// Validate requires each group member and each RepoAccess.User to
+	// appear in Members, so Save failed with "group X references Y, who is
+	// not a member" — which is the common case, since the natural
+	// successor is an established team member. Owner and member are not
+	// exclusive anywhere else in the model either: CanAccessRepo passes
+	// the owner regardless, so the extra entry grants nothing new.
 
 	if err := col.Save(); err != nil {
 		return fmt.Errorf("transfer: %w", err)

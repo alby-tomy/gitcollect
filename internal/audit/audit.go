@@ -6,6 +6,7 @@ package audit
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,12 +27,52 @@ type AuditEntry struct {
 	Result     string    `json:"result"`
 }
 
+// ErrInvalidLogName is returned when a name cannot be reduced to a safe
+// single-segment log filename.
+var ErrInvalidLogName = errors.New("invalid audit log name")
+
+// safeLogName reduces name to a single path segment suitable for use as a
+// filename. Every character outside [A-Za-z0-9._-] becomes a dash, and a
+// leading dot is dropped so a name can never produce a dotfile or one of
+// the "." / ".." specials.
+//
+// This is enforced here rather than trusted from callers because the
+// Collection field is not always a validated collection name: publish and
+// pull-config record a repository spec, and "owner/name" joined into the
+// audit directory pointed at ~/.gitcollect/audit/owner/name.log — a
+// directory that does not exist, so every publish silently failed to
+// audit. A field that becomes a filesystem path has to sanitise itself.
+func safeLogName(name string) (string, error) {
+	cleaned := make([]rune, 0, len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-':
+			cleaned = append(cleaned, r)
+		default:
+			cleaned = append(cleaned, '-')
+		}
+	}
+	// Trim dots and dashes together: trimming them in sequence leaves a
+	// name like "../../etc/passwd" as "..-etc-passwd", which is safe but
+	// needlessly ugly.
+	out := strings.Trim(string(cleaned), ".-")
+	if out == "" {
+		return "", fmt.Errorf("%w: %q", ErrInvalidLogName, name)
+	}
+	return out, nil
+}
+
 func logPath(collection string) (string, error) {
 	dir, err := config.AuditDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, collection+".log"), nil
+	name, err := safeLogName(collection)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name+".log"), nil
 }
 
 // Append writes entry as one line of newline-delimited JSON to the

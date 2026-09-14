@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -61,12 +62,12 @@ func runPRList(_ *cobra.Command, args []string) error {
 	}
 
 	ns := col.RepoNamespace()
-	prs := fetchOpenPRs(client, ns, accessible)
+	prs, failed := fetchOpenPRs(client, ns, accessible)
 
 	if prAuthor != "" {
 		filtered := prs[:0]
 		for _, p := range prs {
-			if p.Author == prAuthor {
+			if strings.EqualFold(p.Author, prAuthor) {
 				filtered = append(filtered, p)
 			}
 		}
@@ -89,11 +90,17 @@ func runPRList(_ *cobra.Command, args []string) error {
 				UpdatedAt: p.UpdatedAt.Format("2006-01-02"),
 			})
 		}
+		reportUnreadableRepos(failed)
 		return output.JSON(rows)
 	}
 
 	if len(prs) == 0 {
-		output.Info("no open PRs found in %s", name)
+		if prAuthor != "" {
+			output.Info("no open PRs by %s in %s", prAuthor, name)
+		} else {
+			output.Info("no open PRs found in %s", name)
+		}
+		reportUnreadableRepos(failed)
 		return nil
 	}
 
@@ -108,14 +115,22 @@ func runPRList(_ *cobra.Command, args []string) error {
 		})
 	}
 	output.Table([]string{"REPO", "#", "TITLE", "AUTHOR", "UPDATED"}, tableRows)
-	output.Dim("%d open PR(s) across %d repo(s)", len(prs), len(accessible))
+	output.Dim("%d open PR(s) across %d repo(s)", len(prs), len(accessible)-len(failed))
+	reportUnreadableRepos(failed)
 	return nil
 }
 
-// fetchOpenPRs fetches open PRs for all accessible repos concurrently.
-func fetchOpenPRs(client api.Client, ns string, repos []collection.RepoAccess) []api.PRInfo {
+// fetchOpenPRs fetches open PRs for all accessible repos concurrently,
+// returning everything it could reach plus the repos it could not.
+//
+// The failures are returned rather than discarded because a 403, a rate
+// limit and a genuinely empty repo used to render identically: as no open
+// PRs. Under-reporting without saying so is worse than refusing to render,
+// so the caller names the repos it could not read.
+func fetchOpenPRs(client api.Client, ns string, repos []collection.RepoAccess) (prs []api.PRInfo, failed []string) {
 	type result struct {
 		prs []api.PRInfo
+		err error
 	}
 	results := make([]result, len(repos))
 
@@ -128,23 +143,27 @@ func fetchOpenPRs(client api.Client, ns string, repos []collection.RepoAccess) [
 		go func(i int, repoName string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			prs, err := client.ListOpenPRs(ns, repoName)
+			found, err := client.ListOpenPRs(ns, repoName)
 			if err != nil {
+				results[i] = result{err: err}
 				return
 			}
-			for j := range prs {
-				prs[j].Repo = repoName
+			for j := range found {
+				found[j].Repo = repoName
 			}
-			results[i] = result{prs: prs}
+			results[i] = result{prs: found}
 		}(i, repo.Name)
 	}
 	wg.Wait()
 
-	var all []api.PRInfo
-	for _, r := range results {
-		all = append(all, r.prs...)
+	for i, r := range results {
+		if r.err != nil {
+			failed = append(failed, repos[i].Name)
+			continue
+		}
+		prs = append(prs, r.prs...)
 	}
-	return all
+	return prs, failed
 }
 
 func truncatePRTitle(s string) string {
@@ -153,4 +172,14 @@ func truncatePRTitle(s string) string {
 		return s
 	}
 	return string(runes[:50]) + "..."
+}
+
+// reportUnreadableRepos warns about repos whose PR listing failed, so an
+// incomplete result is never mistaken for an empty one.
+func reportUnreadableRepos(failed []string) {
+	if len(failed) == 0 {
+		return
+	}
+	output.Warn("could not read PRs for %d repo(s): %s", len(failed), strings.Join(failed, ", "))
+	output.Dim("  The counts above exclude them.")
 }

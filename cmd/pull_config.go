@@ -20,6 +20,7 @@ var (
 	pullConfigBranch     string
 	pullConfigPath       string
 	pullConfigOverwrite  bool
+	pullConfigHost       string
 )
 
 var pullConfigCmd = &cobra.Command{
@@ -39,6 +40,7 @@ func init() {
 	pullConfigCmd.Flags().StringVar(&pullConfigBranch, "branch", "main", "branch to fetch from")
 	pullConfigCmd.Flags().StringVar(&pullConfigPath, "path", "collections/", "directory in the repo that contains collection files")
 	pullConfigCmd.Flags().BoolVar(&pullConfigOverwrite, "overwrite", false, "overwrite existing local collections")
+	pullConfigCmd.Flags().StringVar(&pullConfigHost, "host", config.DefaultHost, "platform host the config repo lives on")
 	rootCmd.AddCommand(pullConfigCmd)
 }
 
@@ -50,8 +52,9 @@ func runPullConfig(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("pull-config: %w", err)
 	}
 
-	host := config.DefaultHost
+	host := pullConfigHost
 	cloneURL := repoCloneURL(host, pullConfigRepo)
+	token := gitTokenFor(host)
 
 	output.Info("Fetching collections from %s...", pullConfigRepo)
 
@@ -62,14 +65,13 @@ func runPullConfig(_ *cobra.Command, _ []string) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	if err := git.ShallowClone(cloneURL, tmpDir); err != nil {
-		return fmt.Errorf("pull-config: could not clone %s: %w", cloneURL, err)
-	}
-
-	if pullConfigBranch != "main" && pullConfigBranch != "" {
-		if err := git.Checkout(tmpDir, pullConfigBranch); err != nil {
-			return fmt.Errorf("pull-config: could not checkout branch %q: %w", pullConfigBranch, err)
-		}
+	// Branch is selected during the clone: --depth=1 fetches only the
+	// branch it clones, so a later checkout has nothing to switch to.
+	// publish and pull-config now treat --branch identically; pull-config
+	// previously skipped the checkout entirely whenever the branch was
+	// "main", so the two disagreed about the same flag.
+	if err := git.ShallowCloneBranch(cloneURL, tmpDir, pullConfigBranch, token); err != nil {
+		return fmt.Errorf("pull-config: could not clone %s (branch %q): %w", cloneURL, pullConfigBranch, err)
 	}
 
 	srcDir := filepath.Join(tmpDir, filepath.FromSlash(pullConfigPath))
@@ -142,7 +144,7 @@ func runPullConfig(_ *cobra.Command, _ []string) error {
 	if err == nil {
 		caller, _ := currentUser(client)
 		recordAudit(audit.AuditEntry{
-			Collection: pullConfigRepo,
+			Collection: auditLogPublish,
 			Actor:      caller,
 			Action:     "pull-config",
 			Target:     pullConfigRepo,

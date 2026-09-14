@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -91,6 +92,12 @@ func runHealth(_ *cobra.Command, args []string) error {
 			prs, err := client.ListOpenPRs(ns, repo.Name)
 			if err == nil {
 				r.openPRs = len(prs)
+			} else {
+				// Record the failure instead of leaving openPRs at zero: an
+				// unreadable repo and a repo with no open PRs are not the
+				// same answer, and a dashboard that conflates them quietly
+				// under-reports.
+				r.err = err
 			}
 
 			results[i] = r
@@ -99,8 +106,12 @@ func runHealth(_ *cobra.Command, args []string) error {
 	wg.Wait()
 
 	var cloned, dirty, behind, totalPRs int
+	var unreadable []string
 	rows := make([][]string, 0, len(results))
 	for _, r := range results {
+		if r.err != nil {
+			unreadable = append(unreadable, r.name)
+		}
 		if r.cloned {
 			cloned++
 		}
@@ -125,7 +136,10 @@ func runHealth(_ *cobra.Command, args []string) error {
 			behindStr = fmt.Sprintf("%d", r.behind)
 		}
 		prStr := ""
-		if r.openPRs > 0 {
+		switch {
+		case r.err != nil:
+			prStr = "?"
+		case r.openPRs > 0:
 			prStr = fmt.Sprintf("%d", r.openPRs)
 		}
 		rows = append(rows, []string{r.name, clonedMark, dirtyMark, behindStr, prStr})
@@ -144,6 +158,11 @@ func runHealth(_ *cobra.Command, args []string) error {
 		fmt.Printf("  Behind remote    : %d\n", behind)
 	}
 	fmt.Printf("  Open PRs/MRs     : %d\n", totalPRs)
+	if len(unreadable) > 0 {
+		fmt.Println()
+		output.Warn("could not read PRs for %d repo(s): %s", len(unreadable), strings.Join(unreadable, ", "))
+		output.Dim("  Shown as \"?\" above; the PR total excludes them.")
+	}
 
 	if cloned < len(accessible) {
 		fmt.Println()

@@ -1,0 +1,42 @@
+name: ci
+
+# Same checks the release workflow gates a tag on, run earlier — so a
+# problem surfaces on the pull request instead of at tag time, when
+# goreleaser is already cutting artifacts.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: build, vet, test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # internal/git shells out to git and its test harness has to write
+        # a fake one; that harness was Windows-only for most of this
+        # project's life and nobody noticed, because CI did not exist.
+        # Running both keeps it honest in each direction.
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test ./... -race
