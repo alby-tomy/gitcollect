@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -27,9 +28,19 @@ func CheckInstalled() error {
 // run executes git with args in dir (if dir is non-empty) and returns
 // trimmed stdout, or a combined error including stderr on failure.
 func run(dir string, args ...string) (string, error) {
+	return runEnv(dir, nil, args...)
+}
+
+// runEnv is run with extra environment variables appended to the inherited
+// environment. Kept separate so only the calls that actually need to pass
+// a secret do so — see tokenEnv.
+func runEnv(dir string, extraEnv []string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	if dir != "" {
 		cmd.Dir = dir
+	}
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -46,13 +57,65 @@ func run(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// Clone clones cloneURL into dest. cloneURL must be HTTPS — gitcollect
-// never clones over SSH.
+// tokenEnvVar names the environment variable the inline credential helper
+// below reads the token out of.
+const tokenEnvVar = "GITCOLLECT_GIT_TOKEN"
+
+// credentialArgs returns the git -c flags that let a clone authenticate
+// with token, or nil when there is no token to pass.
+//
+// The token is handed over through the environment rather than any of the
+// more obvious routes, all of which leak it:
+//
+//   - in the URL (https://user:token@host/...) git writes it permanently
+//     into .git/config and echoes it back in error messages;
+//   - in -c http.extraHeader=... it lands in argv, and /proc/<pid>/cmdline
+//     is readable by other users on the machine by default;
+//   - in a credential-helper script it has to be written to disk.
+//
+// /proc/<pid>/environ, by contrast, is readable only by the process owner.
+// The first, empty credential.helper drops any helper the user has
+// configured globally, so ours is the only one consulted and a stale
+// cached credential cannot silently win.
+//
+// The username is a placeholder: GitHub and GitLab both authenticate on
+// the token in the password field and ignore what precedes it.
+func credentialArgs(token string) []string {
+	if token == "" {
+		return nil
+	}
+	helper := `!f() { echo username=x-access-token; echo "password=$` + tokenEnvVar + `"; }; f`
+	return []string{"-c", "credential.helper=", "-c", "credential.helper=" + helper}
+}
+
+// tokenEnv returns the environment entry carrying token, or nil when empty.
+func tokenEnv(token string) []string {
+	if token == "" {
+		return nil
+	}
+	return []string{tokenEnvVar + "=" + token}
+}
+
+// Clone clones cloneURL into dest using whatever credentials git already
+// has configured. cloneURL must be HTTPS — gitcollect never clones over
+// SSH. Prefer CloneWithToken: a private repo cannot be cloned this way
+// unless the user happens to have a credential helper set up, which is
+// why clone used to prompt or fail for exactly the repos gitcollect
+// exists to manage.
 func Clone(cloneURL, dest string) error {
+	return CloneWithToken(cloneURL, dest, "")
+}
+
+// CloneWithToken clones cloneURL into dest, authenticating with token.
+// An empty token behaves exactly like Clone. The token is passed to git
+// through the environment and never reaches argv or the cloned repo's
+// config — see credentialArgs.
+func CloneWithToken(cloneURL, dest, token string) error {
 	if !strings.HasPrefix(cloneURL, "https://") {
 		return fmt.Errorf("refusing to clone non-HTTPS URL: %s", cloneURL)
 	}
-	if _, err := run("", "clone", cloneURL, dest); err != nil {
+	args := append(credentialArgs(token), "clone", cloneURL, dest)
+	if _, err := runEnv("", tokenEnv(token), args...); err != nil {
 		return err
 	}
 	return nil
@@ -101,13 +164,32 @@ func PullWithSummary(dir string) (newCommits int, err error) {
 }
 
 // ShallowClone clones cloneURL into dest with depth 1 (only the latest
-// commit). Faster than a full clone for the publish/pull-config flow where
-// only the file tree matters and full history is not needed.
+// commit), using whatever credentials git already has configured. Faster
+// than a full clone for the publish/pull-config flow where only the file
+// tree matters and full history is not needed.
 func ShallowClone(cloneURL, dest string) error {
+	return ShallowCloneBranch(cloneURL, dest, "", "")
+}
+
+// ShallowCloneBranch clones cloneURL into dest at depth 1, authenticating
+// with token and checking out branch. An empty branch takes the remote's
+// default; an empty token behaves like ShallowClone.
+//
+// The branch is selected during the clone rather than checked out
+// afterwards because --depth=1 fetches only the branch it clones: a later
+// "git checkout <other>" has nothing to switch to and fails. That is why
+// publish could not push to any branch but the remote's default, despite
+// offering a --branch flag.
+func ShallowCloneBranch(cloneURL, dest, branch, token string) error {
 	if !strings.HasPrefix(cloneURL, "https://") {
 		return fmt.Errorf("refusing to clone non-HTTPS URL: %s", cloneURL)
 	}
-	if _, err := run("", "clone", "--depth=1", cloneURL, dest); err != nil {
+	args := append(credentialArgs(token), "clone", "--depth=1")
+	if branch != "" {
+		args = append(args, "--branch", branch)
+	}
+	args = append(args, cloneURL, dest)
+	if _, err := runEnv("", tokenEnv(token), args...); err != nil {
 		return err
 	}
 	return nil
@@ -139,9 +221,20 @@ func Commit(dir, message string) error {
 	return err
 }
 
-// Push pushes the current branch inside dir to its upstream remote.
+// Push pushes the current branch inside dir to its upstream remote using
+// whatever credentials git already has configured.
 func Push(dir string) error {
-	if _, err := run(dir, "push"); err != nil {
+	return PushWithToken(dir, "")
+}
+
+// PushWithToken pushes the current branch inside dir, authenticating with
+// token. An empty token behaves exactly like Push. Needed because publish
+// writes to a config repository that is usually private — without a
+// credential the push prompts or fails, which is the same gap CloneWithToken
+// closes on the way in.
+func PushWithToken(dir, token string) error {
+	args := append(credentialArgs(token), "push")
+	if _, err := runEnv(dir, tokenEnv(token), args...); err != nil {
 		return err
 	}
 	return nil

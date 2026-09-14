@@ -92,6 +92,30 @@ func init() {
 	rootCmd.AddCommand(groupCmd)
 }
 
+// checkGroupManage reports whether callerID may change the membership of
+// group, wrapping the matching sentinel so callers and tests can identify
+// the case with errors.Is rather than matching on message text. The
+// sentinels existed but nothing ever returned them, so the distinction
+// between "you administer a different group" and "you administer none"
+// was only ever expressed in prose.
+func checkGroupManage(col *collection.Collection, callerID, verb, group, name string) error {
+	if col.CanManageGroup(callerID, group) {
+		return nil
+	}
+	if groups := col.GroupAdminOf(callerID); len(groups) > 0 {
+		return fmt.Errorf(
+			"%s: %w — you administer %s, not %q\n  Only the collection owner (%s) can manage %s membership.",
+			verb, collection.ErrWrongGroup, strings.Join(groups, ", "), group, col.Logins[col.Owner], group,
+		)
+	}
+	if !col.GroupAdminsEnabled {
+		return fmt.Errorf("%s: %w\n  Only %s (the owner) can manage groups in %q",
+			verb, collection.ErrGroupAdminsDisabled, col.Logins[col.Owner], name)
+	}
+	return fmt.Errorf("%s: only %s (the owner) can manage groups in %q",
+		verb, col.Logins[col.Owner], name)
+}
+
 // requireOwner loads name, resolves the caller (login + platform ID), and
 // confirms the caller is the collection's owner — every group mutation in
 // this file is owner-only. Built on loadForOwner, the shared helper every
@@ -198,16 +222,8 @@ func runGroupAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if !col.CanManageGroup(callerID, group) {
-		if col.GroupAdminsEnabled {
-			if groups := col.GroupAdminOf(callerID); len(groups) > 0 {
-				return fmt.Errorf(
-					"group add: you are a group admin of %s, not %q\n  Only the collection owner (%s) can manage %s membership.",
-					strings.Join(groups, ", "), group, col.Logins[col.Owner], group,
-				)
-			}
-		}
-		return fmt.Errorf("group add: only %s (the owner) can manage groups in %q", col.Logins[col.Owner], name)
+	if err := checkGroupManage(col, callerID, "group add", group, name); err != nil {
+		return err
 	}
 
 	var failed []string
@@ -268,16 +284,8 @@ func runGroupRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if !col.CanManageGroup(callerID, group) {
-		if col.GroupAdminsEnabled {
-			if groups := col.GroupAdminOf(callerID); len(groups) > 0 {
-				return fmt.Errorf(
-					"group remove: you are a group admin of %s, not %q\n  Only the collection owner (%s) can manage %s membership.",
-					strings.Join(groups, ", "), group, col.Logins[col.Owner], group,
-				)
-			}
-		}
-		return fmt.Errorf("group remove: only %s (the owner) can manage groups in %q", col.Logins[col.Owner], name)
+	if err := checkGroupManage(col, callerID, "group remove", group, name); err != nil {
+		return err
 	}
 
 	if err := col.RemoveFromGroup(username, group, client); err != nil {
@@ -319,7 +327,8 @@ func runGroupList(cmd *cobra.Command, args []string) error {
 	}
 
 	rows := make([][]string, 0, len(col.Groups))
-	for group, ids := range col.Groups {
+	for _, group := range sortedGroupNames(col) {
+		ids := col.Groups[group]
 		memberList := "—"
 		if len(ids) > 0 {
 			memberList = strings.Join(loginsFor(col, ids), ", ")
@@ -414,7 +423,7 @@ func runGroupAdminAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("group admin add: only %s (the owner) can assign group admins in %q", col.Logins[col.Owner], name)
 	}
 	if !col.GroupAdminsEnabled {
-		return fmt.Errorf("group admin add: group admin support not enabled for %s — run: gitcollect scale %s organisation", name, name)
+		return fmt.Errorf("group admin add: %w (for %s)", collection.ErrGroupAdminsDisabled, name)
 	}
 	if _, ok := col.Groups[group]; !ok {
 		return fmt.Errorf("group admin add: group %q does not exist in %s", group, name)

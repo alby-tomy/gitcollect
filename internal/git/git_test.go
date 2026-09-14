@@ -262,3 +262,120 @@ func TestStatus_ReturnsTrimmedOutput(t *testing.T) {
 		t.Errorf("expected log to record status --short, got %q", log)
 	}
 }
+
+// --- token handling: a credential must never reach argv or the clone ---
+
+func TestCredentialArgs_EmptyTokenAddsNothing(t *testing.T) {
+	if got := credentialArgs(""); got != nil {
+		t.Errorf("expected no -c flags without a token, got %v", got)
+	}
+	if got := tokenEnv(""); got != nil {
+		t.Errorf("expected no env entry without a token, got %v", got)
+	}
+}
+
+// The whole point of routing the token through the environment is that
+// /proc/<pid>/cmdline is readable by other users while /proc/<pid>/environ
+// is not. If the token ever appears in an argument, that protection is gone.
+func TestCredentialArgs_TokenNeverAppearsInArgs(t *testing.T) {
+	const token = "ghp_supersecrettokenvalue"
+	for _, arg := range credentialArgs(token) {
+		if strings.Contains(arg, token) {
+			t.Fatalf("token leaked into git arguments: %q", arg)
+		}
+	}
+	// It must reach git some other way, or authentication cannot work.
+	env := tokenEnv(token)
+	if len(env) != 1 || !strings.Contains(env[0], token) {
+		t.Fatalf("expected the token to be carried in the environment, got %v", env)
+	}
+}
+
+// An empty helper is prepended so a credential helper the user configured
+// globally cannot answer first with a stale or wrong credential.
+func TestCredentialArgs_ClearsInheritedHelper(t *testing.T) {
+	args := credentialArgs("t")
+	if len(args) < 2 || args[0] != "-c" || args[1] != "credential.helper=" {
+		t.Errorf("expected the inherited credential helper to be cleared first, got %v", args)
+	}
+}
+
+func TestCloneWithToken_DoesNotPassTokenToGit(t *testing.T) {
+	const token = "ghp_supersecrettokenvalue"
+	logPath := filepath.Join(t.TempDir(), "log.txt")
+	installFakeGit(t, logPath, false)
+
+	dest := filepath.Join(t.TempDir(), "dest")
+	if err := CloneWithToken("https://example.com/owner/repo.git", dest, token); err != nil {
+		t.Fatalf("CloneWithToken: %v", err)
+	}
+
+	log := readLog(t, logPath)
+	if strings.Contains(log, token) {
+		t.Errorf("token appeared in git's argument vector: %q", log)
+	}
+	if !strings.Contains(log, "clone") {
+		t.Errorf("expected the clone to run, got %q", log)
+	}
+}
+
+func TestCloneWithToken_RejectsNonHTTPS(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "log.txt")
+	installFakeGit(t, logPath, false)
+
+	err := CloneWithToken("git@github.com:owner/repo.git", filepath.Join(t.TempDir(), "dest"), "tok")
+	if err == nil || !strings.Contains(err.Error(), "non-HTTPS") {
+		t.Fatalf("expected non-HTTPS rejection, got %v", err)
+	}
+}
+
+// --depth=1 fetches only the branch it clones, so the branch has to be
+// chosen during the clone rather than checked out afterwards.
+func TestShallowCloneBranch_SelectsBranchDuringClone(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "log.txt")
+	installFakeGit(t, logPath, false)
+
+	dest := filepath.Join(t.TempDir(), "dest")
+	if err := ShallowCloneBranch("https://example.com/o/r.git", dest, "release", ""); err != nil {
+		t.Fatalf("ShallowCloneBranch: %v", err)
+	}
+
+	log := readLog(t, logPath)
+	for _, want := range []string{"--depth=1", "--branch", "release"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("expected %q in the git invocation, got %q", want, log)
+		}
+	}
+	if strings.Contains(log, "checkout") {
+		t.Errorf("branch must be selected by the clone, not a later checkout: %q", log)
+	}
+}
+
+func TestShallowCloneBranch_EmptyBranchTakesDefault(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "log.txt")
+	installFakeGit(t, logPath, false)
+
+	if err := ShallowCloneBranch("https://example.com/o/r.git", filepath.Join(t.TempDir(), "d"), "", ""); err != nil {
+		t.Fatalf("ShallowCloneBranch: %v", err)
+	}
+	if log := readLog(t, logPath); strings.Contains(log, "--branch") {
+		t.Errorf("no --branch should be passed when none was requested: %q", log)
+	}
+}
+
+func TestPushWithToken_DoesNotPassTokenToGit(t *testing.T) {
+	const token = "glpat-anothersecret"
+	logPath := filepath.Join(t.TempDir(), "log.txt")
+	installFakeGit(t, logPath, false)
+
+	if err := PushWithToken(t.TempDir(), token); err != nil {
+		t.Fatalf("PushWithToken: %v", err)
+	}
+	log := readLog(t, logPath)
+	if strings.Contains(log, token) {
+		t.Errorf("token appeared in git's argument vector: %q", log)
+	}
+	if !strings.Contains(log, "push") {
+		t.Errorf("expected the push to run, got %q", log)
+	}
+}

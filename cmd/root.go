@@ -4,6 +4,8 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"runtime"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -88,8 +90,25 @@ func NewUsageError(err error) error {
 
 // SetVersion records the build version for use by the version command.
 // Must be called once, before Execute, by main.
+//
+// Setting rootCmd.Version is what makes "gitcollect --version" and its
+// "-v" shorthand work: cobra adds that flag to the root command when
+// Version is non-empty, and picks up "-v" automatically because no other
+// root flag claims it. The template is a plain string rather than a
+// cobra-rendered one so the output is byte-for-byte identical to
+// "gitcollect version" — two ways of asking the same question should not
+// answer it in two different formats.
 func SetVersion(v string) {
 	appVersion = v
+	rootCmd.Version = v
+	rootCmd.SetVersionTemplate(versionLine(v))
+}
+
+// versionLine renders the single line both "gitcollect version" and
+// "gitcollect --version" print. Kept here next to SetVersion so the two
+// cannot drift; cmd/version.go calls it too.
+func versionLine(v string) string {
+	return fmt.Sprintf("gitcollect %s %s/%s\n", v, runtime.GOOS, runtime.GOARCH)
 }
 
 // Execute runs the root command and returns the process exit code to use.
@@ -333,6 +352,19 @@ func loginsFor(col *collection.Collection, ids []string) []string {
 	return logins
 }
 
+// sortedGroupNames returns col's group names in a stable, alphabetical
+// order. Go randomises map iteration deliberately, so every display that
+// ranged over col.Groups directly reordered its rows between runs — which
+// makes output impossible to diff, scan, or assert on in a test.
+func sortedGroupNames(col *collection.Collection) []string {
+	names := make([]string, 0, len(col.Groups))
+	for g := range col.Groups {
+		names = append(names, g)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // suggestCollectionName returns the closest existing local collection name
 // to name (Levenshtein distance <= 2), or "" if none is close enough or
 // the lookup itself fails. Only ever compared against your OWN local
@@ -485,6 +517,20 @@ func loadForGit(name string) (col *collection.Collection, caller, callerID strin
 		return nil, "", "", nil, err
 	}
 	return col, caller, callerID, client, nil
+}
+
+// gitTokenFor returns the stored token for host, or "" when none is saved.
+//
+// Used only to hand git a credential for clone/push. An empty result is
+// not an error: git falls back to whatever credential helper the user has
+// configured, which is exactly the behaviour gitcollect had before it
+// passed a token at all. Callers therefore never need to branch on this.
+func gitTokenFor(host string) string {
+	token, err := config.LoadToken(host)
+	if err != nil {
+		return ""
+	}
+	return token
 }
 
 // recordAudit appends entry to the collection's audit log. It is called

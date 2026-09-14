@@ -941,6 +941,7 @@
         <li><a href="#inspect-cmds">Inspect, audit &amp; activity</a></li>
         <li><a href="#git-cmds">Git ops</a></li>
         <li><a href="#import-cmds">Org import</a></li>
+        <li><a href="#discovery-cmds">Discovery &amp; dashboards</a></li>
         <li><a href="#system-cmds">System</a></li>
         <li><a href="#org-import-walkthrough">Org import walkthrough</a></li>
       </ul>
@@ -1074,6 +1075,10 @@
             default after a standard Go installation — gitcollect is immediately available. To upgrade, run the same
             command again with <code>@latest</code>.
           </p>
+          <p class="note"><strong>The <code>/v3</code> suffix is required.</strong> Go resolves a module's major
+            version from its import path, so <code>go install github.com/alby-tomy/gitcollect@latest</code> — without
+            it — installs v1.0.0 and exits successfully, giving you a binary several versions behind with no warning.
+            Check what you got with <code>gitcollect --version</code>.</p>
         </div>
 
         <div class="install-method">
@@ -1087,36 +1092,38 @@
           </div>
           <div class="tab-panel active" id="tab-linux">
             <div class="code-block">
-              <pre><span class="comment"># Get the latest version tag</span>
-VERSION=$(curl -sL https://api.github.com/repos/alby-tomy/gitcollect/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+              <pre><span class="comment"># Latest tag is vX.Y.Z; the archive names drop the leading "v"</span>
+TAG=$(curl -sL https://api.github.com/repos/alby-tomy/gitcollect/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+VERSION=${TAG#v}
 
 <span class="comment"># Intel/AMD (amd64)</span>
-curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${VERSION}/gitcollect_${VERSION}_linux_amd64.tar.gz" | tar xz
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${TAG}/gitcollect_${VERSION}_linux_amd64.tar.gz" | tar xz
 sudo mv gitcollect /usr/local/bin/
 
 <span class="comment"># ARM64 (e.g. Raspberry Pi, AWS Graviton)</span>
-curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${VERSION}/gitcollect_${VERSION}_linux_arm64.tar.gz" | tar xz
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${TAG}/gitcollect_${VERSION}_linux_arm64.tar.gz" | tar xz
 sudo mv gitcollect /usr/local/bin/
 
 <span class="comment"># Verify</span>
-gitcollect version</pre>
+gitcollect --version</pre>
             </div>
           </div>
           <div class="tab-panel" id="tab-macos">
             <div class="code-block">
-              <pre><span class="comment"># Get the latest version tag</span>
-VERSION=$(curl -sL https://api.github.com/repos/alby-tomy/gitcollect/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+              <pre><span class="comment"># Latest tag is vX.Y.Z; the archive names drop the leading "v"</span>
+TAG=$(curl -sL https://api.github.com/repos/alby-tomy/gitcollect/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+VERSION=${TAG#v}
 
 <span class="comment"># Apple Silicon (M1/M2/M3 — arm64)</span>
-curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${VERSION}/gitcollect_${VERSION}_darwin_arm64.tar.gz" | tar xz
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${TAG}/gitcollect_${VERSION}_darwin_arm64.tar.gz" | tar xz
 sudo mv gitcollect /usr/local/bin/
 
 <span class="comment"># Intel Mac (amd64)</span>
-curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${VERSION}/gitcollect_${VERSION}_darwin_amd64.tar.gz" | tar xz
+curl -L "https://github.com/alby-tomy/gitcollect/releases/download/${TAG}/gitcollect_${VERSION}_darwin_amd64.tar.gz" | tar xz
 sudo mv gitcollect /usr/local/bin/
 
 <span class="comment"># Verify</span>
-gitcollect version</pre>
+gitcollect --version</pre>
             </div>
             <p class="note">If macOS blocks the binary with "cannot be opened because the developer cannot be verified",
               run: <code>xattr -d com.apple.quarantine /usr/local/bin/gitcollect</code></p>
@@ -1139,8 +1146,8 @@ gitcollect version</pre>
                   <li>Click OK on all dialogs</li>
                 </ol>
               </li>
-              <li>Open a new terminal (the old one won't see the updated PATH) and run: <code>gitcollect version</code>
-              </li>
+              <li>Open a new terminal (the old one won't see the updated PATH) and run:
+                <code>gitcollect --version</code></li>
             </ol>
             <p class="note">Windows support is provided as a best-effort build. If you encounter any Windows-specific
               issues, please <a href="https://github.com/alby-tomy/gitcollect/issues" target="_blank"
@@ -2488,12 +2495,54 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
 
         </div>
 
+        <div class="group" id="discovery-cmds">
+          <h3>Discovery &amp; dashboards</h3>
+
+          <div class="cmd-block">
+            <p class="sig"><span class="prog">gitcollect</span> scan <span class="flag">--org</span>
+              <span class="arg">&lt;org&gt;</span> <span class="flag">[--group-by prefix|flat] [--dry-run] [--apply]
+                [--no-archived] [--verify]</span></p>
+            <p class="desc">Read every repository in an org or group and bucket them by the first segment of their
+              name, so <code>payments-api</code> and <code>payments-gateway</code> become one
+              <code>payments</code> collection. Prints a preview by default; <code>--apply</code> writes the collection
+              files and <strong>never overwrites an existing one</strong>, so re-running it cannot lose members, groups
+              or access rules. <code>--verify</code> reports what the current token could actually see — repositories
+              it cannot reach are absent from the count entirely.</p>
+          </div>
+
+          <div class="cmd-block">
+            <p class="sig"><span class="prog">gitcollect</span> pr <span class="arg">&lt;collection&gt;</span>
+              <span class="flag">[--author &lt;login&gt;] [--json]</span></p>
+            <p class="desc">Open pull requests (GitHub) or merge requests (GitLab) across every repo you can reach in
+              the collection, newest first. <code>--author</code> matches case-insensitively. Repos the platform
+              refuses are named rather than counted as zero.</p>
+          </div>
+
+          <div class="cmd-block">
+            <p class="sig"><span class="prog">gitcollect</span> health <span class="arg">&lt;collection&gt;</span>
+              <span class="flag">[--dest &lt;dir&gt;]</span></p>
+            <p class="desc">One dashboard for a whole collection: which repos are cloned, which have uncommitted
+              changes, which are behind their remote, and how many pull requests are open across all of them. Repos
+              whose PR listing fails show <code>?</code> rather than <code>0</code>.</p>
+          </div>
+        </div>
+
         <div class="group" id="system-cmds">
           <h3>System</h3>
 
           <div class="cmd-block">
-            <p class="sig"><span class="prog">gitcollect</span> version</p>
-            <p class="desc">Print the build version and platform (<code>GOOS/GOARCH</code>).</p>
+            <p class="sig"><span class="prog">gitcollect</span> version <span class="flag">[--json]</span></p>
+            <p class="desc">Print the build version and platform (<code>GOOS/GOARCH</code>). <code>gitcollect -v</code>
+              and <code>gitcollect --version</code> print the identical line; <code>--json</code> adds the Go runtime
+              version. A binary from <code>go install</code> reports the module version it was built from.</p>
+          </div>
+
+          <div class="cmd-block">
+            <p class="sig"><span class="prog">gitcollect</span> archive <span class="arg">&lt;collection&gt;</span></p>
+            <p class="desc">Hide a collection from <code>list</code>, <code>sync --all</code> and
+              <code>status --all</code> without deleting anything — the YAML, its repos and every access rule stay
+              exactly as they were. Pass <code>--include-archived</code> to those commands to see it again, or
+              <code>gitcollect unarchive</code> to restore it. Owner only.</p>
           </div>
 
           <div class="cmd-block">

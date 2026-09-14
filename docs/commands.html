@@ -489,6 +489,7 @@
         <li><a href="#verify">Verify</a></li>
         <li><a href="#audit">Audit log</a></li>
         <li><a href="#export">Export &amp; import</a></li>
+        <li><a href="#discovery">Discovery &amp; dashboards</a></li>
         <li><a href="#all-commands">All commands</a></li>
       </ul>
     </div>
@@ -1085,6 +1086,104 @@ Run: gitcollect sync payments-team   to clone new repos and pull existing</span>
     </section>
 
     <!-- ── ALL COMMANDS ── -->
+    <section id="discovery" class="section">
+      <div class="container">
+        <div class="section-label">v3</div>
+        <h2 class="section-title">Discovery &amp; dashboards <span class="pill pill-both">All users</span></h2>
+        <p class="section-sub">Four commands added in v3: find repos to collect, then see across them.</p>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            scan — group an org's repos by name prefix
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect scan</span> <span class="f">--org</span> <span class="a">acme-corp</span>
+<span class="o">Scanning github.com/acme-corp...</span>
+<span class="s">✓ Found 9 repositories in github.com/acme-corp</span>
+
+<span class="o">Groups discovered (3):</span>
+<span class="o">  payments                 4 repos</span>
+<span class="o">      • payments-api</span>
+<span class="o">      • payments-gateway</span>
+<span class="o">      • payments-ledger</span>
+<span class="o">      • payments-webhooks</span>
+<span class="o">  auth                     3 repos</span>
+<span class="o">  website                  2 repos</span>
+
+<span class="d">Use --apply to write collection files, or --dry-run to preview them.</span>
+
+<span class="d"># Write one collection per discovered group</span>
+<span class="p">$</span> <span class="c">gitcollect scan</span> <span class="f">--org</span> <span class="a">acme-corp</span> <span class="f">--apply</span>
+<span class="s">✓   acme-corp-payments                       (4 repos)</span>
+<span class="s">✓   acme-corp-auth                           (3 repos)</span>
+<span class="d">1 collection already existed and was skipped.</span></div>
+        </div>
+
+        <p class="note"><strong>scan never overwrites.</strong> A collection that already exists is skipped, so re-running <code>--apply</code> cannot lose members, groups or per-repo access rules. Use <code>--group-by flat</code> to put every repo in a single collection instead of splitting by prefix.</p>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            pr — open pull requests across every repo you can reach
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect pr</span> <span class="a">payments-team</span>
+<span class="o">REPO               #     TITLE                            AUTHOR   UPDATED</span>
+<span class="o">payments-gateway   #214  Retry idempotency keys           priya    2026-09-12</span>
+<span class="o">payments-api       #87   Drop the legacy /v1 charge route  sam      2026-09-11</span>
+<span class="o">payments-ledger    #41   Backfill reconciliation job       priya    2026-09-08</span>
+<span class="d">3 open PR(s) across 4 repo(s)</span>
+
+<span class="d"># Filter by author (case-insensitive), or emit JSON</span>
+<span class="p">$</span> <span class="c">gitcollect pr</span> <span class="a">payments-team</span> <span class="f">--author</span> <span class="a">priya</span>
+<span class="p">$</span> <span class="c">gitcollect pr</span> <span class="a">payments-team</span> <span class="f">--json</span></div>
+        </div>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            health — one dashboard for a whole collection
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect health</span> <span class="a">payments-team</span>
+<span class="s">✓ Access verified (priya · backend)</span>
+<span class="o">  4 of 4 repos accessible</span>
+
+<span class="o">REPO               CLONED  DIRTY  BEHIND  OPEN PRS</span>
+<span class="o">payments-api       yes            2       1</span>
+<span class="o">payments-gateway   yes     yes            1</span>
+<span class="o">payments-ledger    yes                    1</span>
+<span class="o">payments-webhooks  no</span>
+
+<span class="o">Summary for payments-team:</span>
+<span class="o">  Repos accessible : 4 / 4</span>
+<span class="o">  Cloned locally   : 3 / 4</span>
+<span class="o">  Dirty (local changes): 1</span>
+<span class="o">  Behind remote    : 1</span>
+<span class="o">  Open PRs/MRs     : 3</span>
+
+<span class="d">Run: gitcollect sync payments-team  # to clone missing repos</span></div>
+        </div>
+
+        <p class="note"><strong>Unreadable repos are named, not counted as zero.</strong> If the platform refuses a repo — a 403, or a rate limit — <code>pr</code> and <code>health</code> say which repos they could not read and exclude them from the totals, rather than silently reporting no open PRs.</p>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            archive — retire a collection without deleting it
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect archive</span> <span class="a">legacy-billing</span>
+<span class="s">✓ Archived legacy-billing</span>
+<span class="d">  Pass --include-archived to list/sync/status to include it.</span>
+
+<span class="d"># Hidden from the everyday views, still fully intact on disk</span>
+<span class="p">$</span> <span class="c">gitcollect list</span> <span class="f">--include-archived</span>
+<span class="p">$</span> <span class="c">gitcollect unarchive</span> <span class="a">legacy-billing</span>
+<span class="s">✓ Unarchived legacy-billing</span></div>
+        </div>
+
+        <p class="note"><strong>Archive is not delete.</strong> The YAML file, its repos and every access rule stay exactly as they were — only the collection's visibility in <code>list</code>, <code>sync --all</code> and <code>status --all</code> changes. Only the collection owner can archive or unarchive.</p>
+      </div>
+    </section>
+
     <section id="all-commands" class="section">
       <div class="container">
         <div class="section-label">Reference</div>
@@ -1131,7 +1230,23 @@ Run: gitcollect sync payments-team   to clone new repos and pull existing</span>
               <tr><td>gitcollect doctor</td><td><span class="pill pill-both">Both</span></td><td>Health-check auth and collections</td></tr>
               <tr><td>gitcollect delete</td><td><span class="pill pill-both">Both</span></td><td>Delete a collection (revokes all access)</td></tr>
               <tr><td>gitcollect concepts</td><td><span class="pill pill-both">Both</span></td><td>Explain core concepts and mental model</td></tr>
-              <tr><td>gitcollect version</td><td><span class="pill pill-both">Both</span></td><td>Print build version</td></tr>
+              <tr><td>gitcollect status</td><td><span class="pill pill-both">Both</span></td><td>git status across every cloned repo</td></tr>
+              <tr><td>gitcollect diff</td><td><span class="pill pill-org">Org</span></td><td>Compare the manifest against platform reality</td></tr>
+              <tr><td>gitcollect find</td><td><span class="pill pill-both">Both</span></td><td>Search local collections for a repo or member</td></tr>
+              <tr><td>gitcollect scan</td><td><span class="pill pill-org">Org</span></td><td>Discover org repos and group them by name prefix</td></tr>
+              <tr><td>gitcollect pr</td><td><span class="pill pill-both">Both</span></td><td>Open pull/merge requests across a collection</td></tr>
+              <tr><td>gitcollect health</td><td><span class="pill pill-both">Both</span></td><td>Cloned / dirty / behind / open-PR dashboard</td></tr>
+              <tr><td>gitcollect archive</td><td><span class="pill pill-both">Both</span></td><td>Hide a collection from list/sync/status (owner only)</td></tr>
+              <tr><td>gitcollect unarchive</td><td><span class="pill pill-both">Both</span></td><td>Restore an archived collection (owner only)</td></tr>
+              <tr><td>gitcollect activity</td><td><span class="pill pill-both">Both</span></td><td>Recent commits across a collection <em>(experimental)</em></td></tr>
+              <tr><td>gitcollect describe</td><td><span class="pill pill-both">Both</span></td><td>Set or clear a collection's description</td></tr>
+              <tr><td>gitcollect rename</td><td><span class="pill pill-both">Both</span></td><td>Rename a collection</td></tr>
+              <tr><td>gitcollect copy</td><td><span class="pill pill-both">Both</span></td><td>Copy a collection to a new name</td></tr>
+              <tr><td>gitcollect move</td><td><span class="pill pill-both">Both</span></td><td>Move a repo between collections</td></tr>
+              <tr><td>gitcollect transfer</td><td><span class="pill pill-org">Org</span></td><td>Transfer ownership to another member</td></tr>
+              <tr><td>gitcollect scale</td><td><span class="pill pill-org">Org</span></td><td>Switch between team and organisation tier</td></tr>
+              <tr><td>gitcollect completion</td><td><span class="pill pill-both">Both</span></td><td>Shell completion for bash/zsh/fish/powershell</td></tr>
+              <tr><td>gitcollect version</td><td><span class="pill pill-both">Both</span></td><td>Print build version — also <code>-v</code> / <code>--version</code></td></tr>
             </tbody>
           </table>
         </div>

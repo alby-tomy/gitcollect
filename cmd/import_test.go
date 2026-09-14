@@ -14,23 +14,23 @@ import (
 // importMock is a minimal api.Client for import tests. All three new list
 // methods are controllable; everything else is a fixed stub.
 type importMock struct {
-	host        string
-	teams       []api.TeamInfo
-	membersBySlug  map[string][]api.UserInfo // slug → all members
-	maintBySlug    map[string][]api.UserInfo // slug → maintainers
-	reposBySlug    map[string][]api.RepoInfo // slug → repos
-	scopeErr    error
-	scopes      []string
-	teamsErr    error
+	host          string
+	teams         []api.TeamInfo
+	membersBySlug map[string][]api.UserInfo // slug → all members
+	maintBySlug   map[string][]api.UserInfo // slug → maintainers
+	reposBySlug   map[string][]api.RepoInfo // slug → repos
+	scopeErr      error
+	scopes        []string
+	teamsErr      error
 }
 
 func newImportMock() *importMock {
 	return &importMock{
-		host:        "github.com",
-		membersBySlug:  map[string][]api.UserInfo{},
-		maintBySlug:    map[string][]api.UserInfo{},
-		reposBySlug:    map[string][]api.RepoInfo{},
-		scopes:      []string{"read:org", "repo"},
+		host:          "github.com",
+		membersBySlug: map[string][]api.UserInfo{},
+		maintBySlug:   map[string][]api.UserInfo{},
+		reposBySlug:   map[string][]api.RepoInfo{},
+		scopes:        []string{"read:org", "repo"},
 	}
 }
 
@@ -63,7 +63,7 @@ func (m *importMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error)
 func (m *importMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
-func (m *importMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *importMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
 func (m *importMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // Stubs for the rest of the Client interface.
@@ -73,7 +73,7 @@ func (m *importMock) GetAuthenticatedUser() (api.UserInfo, error) {
 func (m *importMock) GetUser(username string) (api.UserInfo, error) {
 	return api.UserInfo{ID: username + "-id", Login: username}, nil
 }
-func (m *importMock) GetRepo(owner, repo string) (api.RepoInfo, error) { return api.RepoInfo{}, nil }
+func (m *importMock) GetRepo(owner, repo string) (api.RepoInfo, error)               { return api.RepoInfo{}, nil }
 func (m *importMock) AddCollaborator(owner, repo, username, permission string) error { return nil }
 func (m *importMock) RemoveCollaborator(owner, repo, username string) error          { return nil }
 func (m *importMock) CheckCollaborator(owner, repo, username string) (bool, error)   { return false, nil }
@@ -476,8 +476,11 @@ func TestImport_BuildCollectionFromTeam_Valid(t *testing.T) {
 		t.Fatalf("buildCollectionFromTeam = %v", err)
 	}
 
-	if col.Name != "payments-team" {
-		t.Errorf("Name = %q, want payments-team", col.Name)
+	// Org-prefixed, matching the file the collection is written to. A bare
+	// team slug here is the H7 defect: list displayed Name while every other
+	// command addressed the collection by its file name.
+	if col.Name != "acme-corp-payments-team" {
+		t.Errorf("Name = %q, want acme-corp-payments-team", col.Name)
 	}
 	if col.Host != "github.com" {
 		t.Errorf("Host = %q, want github.com", col.Host)
@@ -570,5 +573,36 @@ func TestImport_LoginsMapComplete(t *testing.T) {
 		if got := col.Logins[id]; got != wantLogin {
 			t.Errorf("Logins[%q] = %q, want %q", id, got, wantLogin)
 		}
+	}
+}
+
+// The collection's Name and its file name are one identifier. When they
+// diverged, "gitcollect list" printed a name that clone, show and sync all
+// rejected — so pin them together.
+func TestImport_NameMatchesFileName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	col, err := buildCollectionFromTeam(
+		api.TeamInfo{Name: "Payments", Slug: "payments-team"},
+		[]api.UserInfo{{ID: "1", Login: "alice"}}, nil, nil,
+		"acme-corp", "payments-team", "acme-corp", "github.com",
+		false, "caller-id", "caller",
+	)
+	if err != nil {
+		t.Fatalf("buildCollectionFromTeam: %v", err)
+	}
+	if err := col.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Loading by the collection's own Name must find the file it wrote.
+	loaded, err := collection.Load(col.Name)
+	if err != nil {
+		t.Fatalf("a collection must be loadable by its own Name (%q): %v", col.Name, err)
+	}
+	if loaded.Name != col.Name {
+		t.Errorf("round-trip changed Name: %q -> %q", col.Name, loaded.Name)
 	}
 }

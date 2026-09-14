@@ -87,7 +87,7 @@ func runJoin(_ *cobra.Command, _ []string) error {
 		}
 		defer removeTemp()
 
-		if err := git.ShallowClone(cloneURL, tmpDir); err != nil {
+		if err := git.ShallowCloneBranch(cloneURL, tmpDir, "", gitTokenFor(host)); err != nil {
 			return fmt.Errorf("join: could not clone %s: %w", joinRepo, err)
 		}
 
@@ -135,7 +135,7 @@ func runJoin(_ *cobra.Command, _ []string) error {
 		Actor:      caller.Login,
 		Action:     "join",
 		Target:     joinOrg + "/" + joinTeam,
-		Detail:     fmt.Sprintf("Joined %s/%s via %s", joinOrg, joinTeam, func() string {
+		Detail: fmt.Sprintf("Joined %s/%s via %s", joinOrg, joinTeam, func() string {
 			if joinRepo != "" {
 				return joinRepo
 			}
@@ -171,7 +171,7 @@ func runJoin(_ *cobra.Command, _ []string) error {
 		}
 		destDir := filepath.Join(joinDest, r.Name)
 		output.Progress(i+1, len(accessible), "Cloning "+r.Name+"...")
-		if err := git.Clone(info.CloneURL, destDir); err != nil {
+		if err := git.CloneWithToken(info.CloneURL, destDir, gitTokenFor(host)); err != nil {
 			output.Warn("  could not clone %s: %v", r.Name, err)
 			continue
 		}

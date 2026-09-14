@@ -28,10 +28,10 @@ func staleDays(updatedAt time.Time) int {
 }
 
 var (
-	listPrivate          bool
-	listPublic           bool
-	listJSON             bool
-	listIncludeArchived  bool
+	listPrivate         bool
+	listPublic          bool
+	listJSON            bool
+	listIncludeArchived bool
 )
 
 var listCmd = &cobra.Command{
@@ -106,10 +106,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		role, ok := roleFor(col)
-		if !ok {
-			continue // not yours
-		}
+		role := roleFor(col)
 
 		if filterVisibility {
 			if listPrivate && col.Visibility != collection.VisibilityPrivate {
@@ -155,8 +152,9 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// roleFor determines the caller's role in col ("owner"/"member"), or ""
-// (ok=false) if col isn't theirs — without ever touching the network, since
+// roleFor determines the caller's role in col: "owner", "member", "public"
+// for a public collection they are not listed in, or "—" when no identity
+// is cached at all. It never touches the network, since
 // list must stay usable offline across however many different hosts the
 // caller's local collections span (its own doc comment promises "no
 // network calls are made"). A col already on CurrentVersion compares the
@@ -168,32 +166,54 @@ func runList(cmd *cobra.Command, args []string) error {
 // don't need to know which format they're being called with: as long as
 // the caller passes the matching kind of value (ID for a CurrentVersion
 // col, login for a "1" col), plain string equality is correct either way.
-func roleFor(col *collection.Collection) (role string, ok bool) {
-	if col.Version == collection.CurrentVersion {
-		id, err := config.LoadUserID(col.Host)
-		if err != nil || id == "" {
-			return "", false
+//
+// Every local collection is listed. Rows used to be dropped whenever a
+// role could not be determined, which meant list printed an empty table
+// before "gitcollect auth" had ever run — right after pull-config or join
+// fetched a team's collections, when a new joiner most needs to see them.
+// The files are on the caller's own disk and show renders a public one
+// without any identity at all, so hiding the row concealed nothing and
+// only made the command look broken.
+func roleFor(col *collection.Collection) string {
+	identity := func() string {
+		if col.Version == collection.CurrentVersion {
+			id, err := config.LoadUserID(col.Host)
+			if err != nil {
+				return ""
+			}
+			return id
 		}
-		switch {
-		case col.IsOwner(id):
-			return "owner", true
-		case col.IsMember(id):
-			return "member", true
-		default:
-			return "", false
+		username, err := config.LoadUser(col.Host)
+		if err != nil {
+			return ""
 		}
-	}
+		return username
+	}()
 
-	username, err := config.LoadUser(col.Host)
-	if err != nil || username == "" {
-		return "", false
+	if identity == "" {
+		// No cached identity for this host yet.
+		return "—"
 	}
 	switch {
-	case username == col.Owner:
-		return "owner", true
-	case col.IsMember(username):
-		return "member", true
+	case col.IsOwner(identity):
+		return "owner"
+	case isListedMember(col, identity):
+		return "member"
+	case col.Visibility == collection.VisibilityPublic:
+		return "public"
 	default:
-		return "", false
+		return "—"
 	}
+}
+
+// isListedMember reports whether identity appears in col.Members, without
+// collection.IsMember's public-collection shortcut — list needs to tell a
+// real member apart from someone merely admitted by public visibility.
+func isListedMember(col *collection.Collection, identity string) bool {
+	for _, m := range col.Members {
+		if m == identity {
+			return true
+		}
+	}
+	return false
 }
