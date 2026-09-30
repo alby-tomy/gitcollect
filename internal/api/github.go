@@ -476,7 +476,14 @@ func (c *githubClient) ListOpenPRs(owner, repo string) ([]PRInfo, error) {
 }
 
 func (c *githubClient) ListOrgRepos(org string) ([]RepoInfo, error) {
-	startURL := fmt.Sprintf("%s/orgs/%s/repos?type=all&per_page=100", githubBaseURL, url.PathEscape(org))
+	return c.listRepoPages(fmt.Sprintf("%s/orgs/%s/repos?type=all&per_page=%d",
+		githubBaseURL, url.PathEscape(org), perPageMax))
+}
+
+// listRepoPages walks a repository listing endpoint and decodes every page.
+// The org and user listings differ only in their URL, so they share this
+// rather than each carrying a copy of the response shape.
+func (c *githubClient) listRepoPages(startURL string) ([]RepoInfo, error) {
 	var repos []RepoInfo
 	err := c.paginate(startURL, func(body []byte) error {
 		var page []struct {
@@ -501,6 +508,20 @@ func (c *githubClient) ListOrgRepos(org string) ([]RepoInfo, error) {
 		return nil
 	})
 	return repos, err
+}
+
+func (c *githubClient) ListUserRepos(user string) ([]RepoInfo, error) {
+	// /user/repos is the authenticated account's own listing and is the
+	// only one of the two that includes private repositories; /users/{u}
+	// is someone else's and shows only what the token may see. "affiliation
+	// =owner" and "type=owner" both exclude repos merely collaborated on,
+	// which belong to whoever owns them, not to this scan.
+	startURL := fmt.Sprintf("%s/user/repos?affiliation=owner&per_page=%d", githubBaseURL, perPageMax)
+	if user != "" {
+		startURL = fmt.Sprintf("%s/users/%s/repos?type=owner&per_page=%d",
+			githubBaseURL, url.PathEscape(user), perPageMax)
+	}
+	return c.listRepoPages(startURL)
 }
 
 func (c *githubClient) ListOrgTeams(org string) ([]TeamInfo, error) {

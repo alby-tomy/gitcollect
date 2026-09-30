@@ -81,6 +81,7 @@ func (m *mockClient) SearchRepos(org, pattern, topic string, limit int) ([]api.R
 	return nil, nil
 }
 func (m *mockClient) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
+func (m *mockClient) ListUserRepos(user string) ([]api.RepoInfo, error)    { return nil, nil }
 func (m *mockClient) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 func newCol(t *testing.T, visibility collection.Visibility) *collection.Collection {

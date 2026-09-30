@@ -58,6 +58,7 @@ func (m *transferMock) SearchRepos(org, pattern, topic string, limit int) ([]api
 	return nil, nil
 }
 func (m *transferMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
+func (m *transferMock) ListUserRepos(user string) ([]api.RepoInfo, error)    { return nil, nil }
 func (m *transferMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // setupTransferTest creates a saved collection and injects a mock client so
@@ -273,8 +274,9 @@ func TestRemoveStringSlice(t *testing.T) {
 
 // withStdin points os.Stdin at a file containing input for the duration of
 // the test, so commands that prompt for confirmation can be driven.
-// Supplies a single answer: output.readLine builds a fresh reader per call,
-// so a second prompt in the same test would not see the rest of the input.
+// Multiple answers may be supplied, one per line: output.readLine keeps its
+// reader across calls, so a second prompt in the same test sees the rest of
+// the input rather than EOF.
 func withStdin(t *testing.T, input string) {
 	t.Helper()
 	f, err := os.CreateTemp(t.TempDir(), "stdin")

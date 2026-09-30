@@ -64,6 +64,7 @@ func (m *importMock) SearchRepos(org, pattern, topic string, limit int) ([]api.R
 	return nil, nil
 }
 func (m *importMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
+func (m *importMock) ListUserRepos(user string) ([]api.RepoInfo, error)    { return nil, nil }
 func (m *importMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // Stubs for the rest of the Client interface.

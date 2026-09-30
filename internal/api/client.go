@@ -35,6 +35,17 @@ type Client interface {
 	// GitLab has no equivalent state — project membership added via its
 	// API takes effect immediately — so gitlabClient always returns false.
 	GetPendingInvite(owner, repo, username string) (bool, error)
+	// ListUserRepos returns repositories owned by a personal account,
+	// which is what "gitcollect scan --user" walks. An org and a user are
+	// different endpoints on both platforms — asking for a user through
+	// the org endpoint simply 404s — so a personal account could not be
+	// scanned at all until this existed.
+	//
+	// An empty user means the authenticated account, which is the case
+	// that can also see its own private repositories; naming someone else
+	// returns only what the token is allowed to see, typically just their
+	// public repos.
+	ListUserRepos(user string) ([]RepoInfo, error)
 	// ListCommits returns the most recent commits on branch, newest first,
 	// capped at limit. Used by "gitcollect activity" to report code changes
 	// — distinct from the collaborator methods above, which gitcollect's

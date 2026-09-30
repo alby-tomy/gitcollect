@@ -101,6 +101,7 @@ func (m *diffMock) SearchRepos(org, pattern, topic string, limit int) ([]api.Rep
 	return nil, nil
 }
 func (m *diffMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
+func (m *diffMock) ListUserRepos(user string) ([]api.RepoInfo, error)    { return nil, nil }
 func (m *diffMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // setupDiffTest creates a collection on disk with the given repos and members,

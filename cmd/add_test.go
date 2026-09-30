@@ -53,6 +53,7 @@ func (m *addTestMock) SearchRepos(org, pattern, topic string, limit int) ([]api.
 	return nil, nil
 }
 func (m *addTestMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
+func (m *addTestMock) ListUserRepos(user string) ([]api.RepoInfo, error)    { return nil, nil }
 func (m *addTestMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 func (m *addTestMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {

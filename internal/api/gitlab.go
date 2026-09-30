@@ -496,6 +496,41 @@ func (c *gitlabClient) ListOrgRepos(org string) ([]RepoInfo, error) {
 
 // ListOrgTeams returns the direct subgroups of the given GitLab group,
 // mapped onto TeamInfo. The group slug is used as the Slug field.
+func (c *gitlabClient) ListUserRepos(user string) ([]RepoInfo, error) {
+	// owned=true on /projects is the authenticated account's own listing,
+	// private projects included; /users/{u}/projects is someone else's and
+	// shows only what the token may see.
+	startURL := fmt.Sprintf("%s/projects?owned=true&per_page=%d", c.baseURL, perPageMax)
+	if user != "" {
+		startURL = fmt.Sprintf("%s/users/%s/projects?per_page=%d",
+			c.baseURL, url.PathEscape(user), perPageMax)
+	}
+	var repos []RepoInfo
+	err := c.paginateGitLab(startURL, func(body []byte) error {
+		var page []struct {
+			Name          string `json:"name"`
+			HTTPURLToRepo string `json:"http_url_to_repo"`
+			DefaultBranch string `json:"default_branch"`
+			Visibility    string `json:"visibility"`
+			Archived      bool   `json:"archived"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, r := range page {
+			repos = append(repos, RepoInfo{
+				Name:          r.Name,
+				CloneURL:      r.HTTPURLToRepo,
+				DefaultBranch: r.DefaultBranch,
+				Private:       r.Visibility != "public",
+				Archived:      r.Archived,
+			})
+		}
+		return nil
+	})
+	return repos, err
+}
+
 func (c *gitlabClient) ListOrgTeams(org string) ([]TeamInfo, error) {
 	startURL := fmt.Sprintf("%s/groups/%s/subgroups?per_page=100",
 		c.baseURL, url.PathEscape(org))
