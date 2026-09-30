@@ -2,7 +2,7 @@
 
 ![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos%20%7C%20windows-informational)
-![License](https://img.shields.io/badge/license-unspecified-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
 Group your GitHub and GitLab repositories into named collections — with
 per-repo access control neither platform gives you natively.
@@ -658,8 +658,4 @@ were made, not just what the code does.
 
 ## License
 
-No `LICENSE` file currently exists in this repository, so no license
-terms have actually been granted yet — the badge above reflects that
-honestly rather than assuming one. If you're the maintainer, add a
-`LICENSE` file before treating this as open source in any legal sense;
-until then, all rights are reserved by default under copyright law.
+MIT. See [LICENSE](LICENSE).
