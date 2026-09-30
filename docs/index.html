@@ -313,6 +313,15 @@
       color: var(--muted);
     }
 
+    .story-link {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin: 0 0 20px; padding: 8px 14px;
+      font-family: var(--mono); font-size: 13px;
+      border: 1px solid var(--lime); border-radius: 20px;
+      color: var(--lime); text-decoration: none;
+    }
+    .story-link:hover { background: var(--ink2); text-decoration: none; }
+
     .hero-actions {
       display: flex;
       gap: 12px;
@@ -1058,8 +1067,9 @@
           collection level (membership) and the repo level (which groups or
           individuals can reach which repos).
         </p>
+        <a class="story-link" href="https://recallrun.dev/posts/gitcollect-group-repos-access-control/" target="_blank" rel="noopener">Why I built gitcollect: read the full story on RecallRun &rarr;</a>
         <div class="badges">
-          <span class="badge">Go 1.26+</span>
+          <span class="badge">Go 1.26.4+</span>
           <span class="badge">GitHub &amp; GitLab</span>
           <span class="badge">No daemon, no DB</span>
           <span class="badge">HTTPS-only clone</span>

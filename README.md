@@ -7,6 +7,8 @@
 Group your GitHub and GitLab repositories into named collections — with
 per-repo access control neither platform gives you natively.
 
+**[Read the full story on RecallRun](https://recallrun.dev/posts/gitcollect-group-repos-access-control/)** — why gitcollect exists and how its access model works.
+
 **[Full command reference & docs](https://alby-tomy.github.io/gitcollect/)**
 — every command and flag, plus a worked two-person walkthrough of sharing a
 collection end to end.
@@ -172,7 +174,7 @@ brew install alby-tomy/tap/gitcollect
 
 ```
 $ gitcollect version
-gitcollect v1.0.0 linux/amd64
+gitcollect v3.1.0 linux/amd64
 ```
 
 The OS and architecture come from the binary itself. If `version` prints
