@@ -1158,3 +1158,47 @@ func TestGitHubListCommits_NonPositiveLimit(t *testing.T) {
 		t.Error("limit 0 should not reach the network")
 	}
 }
+
+// --- rate-limit classification ---
+
+// GitHub reports an exhausted primary rate limit as 403 with
+// X-RateLimit-Remaining: 0, not as 429. Classifying on the status code alone
+// reported "insufficient permissions", which sends the user to audit token
+// scopes when the real answer is to wait for the quota to reset.
+func TestClassifyResponse_ExhaustedRateLimitIsNotForbidden(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		header map[string]string
+		want   error
+	}{
+		{"github primary limit spent", 403, map[string]string{"X-RateLimit-Remaining": "0"}, ErrRateLimit},
+		{"gitlab header spelling", 403, map[string]string{"RateLimit-Remaining": "0"}, ErrRateLimit},
+		{"genuinely forbidden", 403, map[string]string{"X-RateLimit-Remaining": "4987"}, ErrForbidden},
+		{"forbidden with no quota header", 403, nil, ErrForbidden},
+		{"secondary limit still 429", 429, nil, ErrRateLimit},
+		{"unauthorised unaffected", 401, map[string]string{"X-RateLimit-Remaining": "0"}, ErrUnauthorized},
+		{"not found unaffected", 404, nil, ErrNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &http.Response{StatusCode: tc.status, Header: http.Header{}}
+			for k, v := range tc.header {
+				resp.Header.Set(k, v)
+			}
+			if got := classifyResponse(resp); !errors.Is(got, tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A malformed header must not be read as "quota spent" and turn a real
+// permissions error into a misleading rate-limit one.
+func TestClassifyResponse_GarbageHeaderIsIgnored(t *testing.T) {
+	resp := &http.Response{StatusCode: 403, Header: http.Header{}}
+	resp.Header.Set("X-RateLimit-Remaining", "not-a-number")
+	if got := classifyResponse(resp); !errors.Is(got, ErrForbidden) {
+		t.Errorf("got %v, want ErrForbidden", got)
+	}
+}

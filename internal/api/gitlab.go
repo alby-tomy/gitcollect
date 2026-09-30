@@ -84,7 +84,7 @@ func (c *gitlabClient) GetAuthenticatedUser() (UserInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return UserInfo{}, classifyStatus(resp.StatusCode)
+		return UserInfo{}, classifyResponse(resp)
 	}
 
 	var out struct {
@@ -125,7 +125,7 @@ func (c *gitlabClient) GetRepo(owner, repo string) (RepoInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return RepoInfo{}, classifyStatus(resp.StatusCode)
+		return RepoInfo{}, classifyResponse(resp)
 	}
 
 	var out struct {
@@ -157,7 +157,7 @@ func (c *gitlabClient) lookupUserID(username string) (int, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, classifyStatus(resp.StatusCode)
+		return 0, classifyResponse(resp)
 	}
 
 	var out []struct {
@@ -194,7 +194,7 @@ func (c *gitlabClient) AddCollaborator(owner, repo, username, permission string)
 		// Already a member: update their access level instead.
 		return c.updateCollaborator(owner, repo, userID, permission)
 	default:
-		return classifyStatus(resp.StatusCode)
+		return classifyResponse(resp)
 	}
 }
 
@@ -209,7 +209,7 @@ func (c *gitlabClient) updateCollaborator(owner, repo string, userID int, permis
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return classifyStatus(resp.StatusCode)
+		return classifyResponse(resp)
 	}
 	return nil
 }
@@ -234,7 +234,7 @@ func (c *gitlabClient) RemoveCollaborator(owner, repo, username string) error {
 	case http.StatusNoContent, http.StatusOK, http.StatusNotFound:
 		return nil
 	default:
-		return classifyStatus(resp.StatusCode)
+		return classifyResponse(resp)
 	}
 }
 
@@ -316,7 +316,7 @@ func (c *gitlabClient) CreateRepo(owner, name string, private bool, description 
 	case http.StatusForbidden, http.StatusNotFound:
 		return RepoInfo{}, ErrForbidden
 	default:
-		return RepoInfo{}, classifyStatus(resp.StatusCode)
+		return RepoInfo{}, classifyResponse(resp)
 	}
 
 	var out struct {
@@ -356,7 +356,7 @@ func (c *gitlabClient) CheckCollaborator(owner, repo, username string) (bool, er
 	case http.StatusNotFound:
 		return false, nil
 	default:
-		return false, classifyStatus(resp.StatusCode)
+		return false, classifyResponse(resp)
 	}
 }
 
@@ -399,7 +399,7 @@ func (c *gitlabClient) paginateGitLab(startURL string, fn func([]byte) error) er
 			return err
 		}
 		if resp.StatusCode != http.StatusOK {
-			return classifyStatus(resp.StatusCode)
+			return classifyResponse(resp)
 		}
 		if err := fn(body); err != nil {
 			if errors.Is(err, errStopPagination) {

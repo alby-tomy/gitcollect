@@ -78,7 +78,7 @@ func (c *githubClient) GetAuthenticatedUser() (UserInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return UserInfo{}, classifyStatus(resp.StatusCode)
+		return UserInfo{}, classifyResponse(resp)
 	}
 
 	var out struct {
@@ -106,7 +106,7 @@ func (c *githubClient) GetUser(username string) (UserInfo, error) {
 		return UserInfo{}, fmt.Errorf("%w: %s", ErrUserNotFound, username)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return UserInfo{}, classifyStatus(resp.StatusCode)
+		return UserInfo{}, classifyResponse(resp)
 	}
 
 	var out struct {
@@ -128,7 +128,7 @@ func (c *githubClient) GetRepo(owner, repo string) (RepoInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return RepoInfo{}, classifyStatus(resp.StatusCode)
+		return RepoInfo{}, classifyResponse(resp)
 	}
 
 	var out struct {
@@ -162,7 +162,7 @@ func (c *githubClient) AddCollaborator(owner, repo, username, permission string)
 	case http.StatusCreated, http.StatusNoContent, http.StatusOK:
 		return nil
 	default:
-		return classifyStatus(resp.StatusCode)
+		return classifyResponse(resp)
 	}
 }
 
@@ -178,7 +178,7 @@ func (c *githubClient) RemoveCollaborator(owner, repo, username string) error {
 	case http.StatusNoContent, http.StatusOK:
 		return nil
 	default:
-		return classifyStatus(resp.StatusCode)
+		return classifyResponse(resp)
 	}
 }
 
@@ -285,7 +285,7 @@ func (c *githubClient) CreateRepo(owner, name string, private bool, description 
 	case http.StatusForbidden, http.StatusNotFound:
 		return RepoInfo{}, ErrForbidden
 	default:
-		return RepoInfo{}, classifyStatus(resp.StatusCode)
+		return RepoInfo{}, classifyResponse(resp)
 	}
 
 	var out struct {
@@ -317,7 +317,7 @@ func (c *githubClient) CheckCollaborator(owner, repo, username string) (bool, er
 	case http.StatusNotFound:
 		return false, nil
 	default:
-		return false, classifyStatus(resp.StatusCode)
+		return false, classifyResponse(resp)
 	}
 }
 
@@ -408,7 +408,7 @@ func (c *githubClient) paginate(startURL string, fn func([]byte) error) error {
 			return err
 		}
 		if resp.StatusCode != http.StatusOK {
-			return classifyStatus(resp.StatusCode)
+			return classifyResponse(resp)
 		}
 		if err := fn(body); err != nil {
 			if errors.Is(err, errStopPagination) {
@@ -683,7 +683,7 @@ func (c *githubClient) SearchRepos(org, pattern, topic string, limit int) ([]Rep
 	case http.StatusOK:
 		// handled below
 	default:
-		return nil, classifyStatus(resp.StatusCode)
+		return nil, classifyResponse(resp)
 	}
 
 	var out struct {
@@ -723,7 +723,7 @@ func (c *githubClient) GetPendingInvite(owner, repo, username string) (bool, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false, classifyStatus(resp.StatusCode)
+		return false, classifyResponse(resp)
 	}
 
 	var out []struct {

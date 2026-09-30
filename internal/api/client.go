@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -223,4 +225,36 @@ func classifyStatus(statusCode int) error {
 	default:
 		return fmt.Errorf("unexpected status %d", statusCode)
 	}
+}
+
+// classifyResponse is classifyStatus with the headers in hand, which is the
+// only way to tell two very different 403s apart.
+//
+// GitHub answers an exhausted *primary* rate limit with 403 and
+// X-RateLimit-Remaining: 0, not with 429 - 429 is reserved for secondary
+// limits. Classifying on the status code alone therefore reported "insufficient
+// permissions" the moment a large sync ran out of quota, sending the user to
+// audit their token scopes when the real answer was to wait for the reset.
+// That is not a rare corner: a sync costs one call per member-repo pair, so a
+// collection of any size can reach the limit in a single run.
+func classifyResponse(resp *http.Response) error {
+	if resp.StatusCode == http.StatusForbidden && rateLimitExhausted(resp) {
+		return ErrRateLimit
+	}
+	return classifyStatus(resp.StatusCode)
+}
+
+// rateLimitExhausted reports whether the response says the quota is spent.
+// GitHub spells the header X-RateLimit-Remaining and GitLab RateLimit-
+// Remaining; Header.Get is case-insensitive, so both are covered by asking
+// for each spelling.
+func rateLimitExhausted(resp *http.Response) bool {
+	for _, h := range []string{"X-RateLimit-Remaining", "RateLimit-Remaining"} {
+		if v := resp.Header.Get(h); v != "" {
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n <= 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
