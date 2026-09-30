@@ -174,7 +174,7 @@ brew install alby-tomy/tap/gitcollect
 
 ```
 $ gitcollect version
-gitcollect v3.1.0 linux/amd64
+gitcollect v3.3.0 linux/amd64
 ```
 
 The OS and architecture come from the binary itself. If `version` prints
