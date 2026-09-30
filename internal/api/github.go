@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,12 @@ import (
 	"strings"
 	"time"
 )
+
+// perPageMax is the largest page size the GitHub API honours. Larger values
+// are silently clamped rather than rejected, so asking for more than this in
+// one request quietly returns fewer results than the caller wanted; a caller
+// that needs more must paginate.
+const perPageMax = 100
 
 // githubBaseURL is a var, not a const, so api_test.go can point it at an
 // httptest.Server. gitlabClient already has an equivalent per-instance
@@ -180,47 +187,54 @@ func (c *githubClient) RemoveCollaborator(owner, repo, username string) error {
 // verified GitHub user; Author falls back to the raw commit author name
 // when GitHub couldn't make that link (author is null in the response).
 func (c *githubClient) ListCommits(owner, repo, branch string, limit int) ([]CommitInfo, error) {
-	path := fmt.Sprintf("/repos/%s/%s/commits?sha=%s&per_page=%d",
-		url.PathEscape(owner), url.PathEscape(repo), url.QueryEscape(branch), limit)
-	resp, err := c.do(http.MethodGet, path, nil)
+	if limit < 1 {
+		return nil, nil
+	}
+	// per_page caps at perPageMax, and a larger value is clamped silently
+	// rather than refused, so a limit above it has to be met by walking
+	// pages. Requesting limit directly returned at most perPageMax commits
+	// while reporting nothing amiss.
+	startURL := fmt.Sprintf("%s/repos/%s/%s/commits?sha=%s&per_page=%d",
+		githubBaseURL, url.PathEscape(owner), url.PathEscape(repo),
+		url.QueryEscape(branch), min(limit, perPageMax))
+
+	commits := make([]CommitInfo, 0, min(limit, perPageMax))
+	err := c.paginate(startURL, func(body []byte) error {
+		var out []struct {
+			SHA    string `json:"sha"`
+			Author *struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Commit struct {
+				Message string `json:"message"`
+				Author  struct {
+					Name string    `json:"name"`
+					Date time.Time `json:"date"`
+				} `json:"author"`
+			} `json:"commit"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return fmt.Errorf("could not parse response: %w", err)
+		}
+		for _, c := range out {
+			author := c.Commit.Author.Name
+			if c.Author != nil && c.Author.Login != "" {
+				author = c.Author.Login
+			}
+			commits = append(commits, CommitInfo{
+				SHA:         c.SHA,
+				Author:      author,
+				Message:     firstLine(c.Commit.Message),
+				CommittedAt: c.Commit.Author.Date,
+			})
+			if len(commits) >= limit {
+				return errStopPagination
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, classifyStatus(resp.StatusCode)
-	}
-
-	var out []struct {
-		SHA    string `json:"sha"`
-		Author *struct {
-			Login string `json:"login"`
-		} `json:"author"`
-		Commit struct {
-			Message string `json:"message"`
-			Author  struct {
-				Name string    `json:"name"`
-				Date time.Time `json:"date"`
-			} `json:"author"`
-		} `json:"commit"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("could not parse response: %w", err)
-	}
-
-	commits := make([]CommitInfo, 0, len(out))
-	for _, c := range out {
-		author := c.Commit.Author.Name
-		if c.Author != nil && c.Author.Login != "" {
-			author = c.Author.Login
-		}
-		commits = append(commits, CommitInfo{
-			SHA:         c.SHA,
-			Author:      author,
-			Message:     firstLine(c.Commit.Message),
-			CommittedAt: c.Commit.Author.Date,
-		})
 	}
 	return commits, nil
 }
@@ -397,6 +411,9 @@ func (c *githubClient) paginate(startURL string, fn func([]byte) error) error {
 			return classifyStatus(resp.StatusCode)
 		}
 		if err := fn(body); err != nil {
+			if errors.Is(err, errStopPagination) {
+				return nil
+			}
 			return err
 		}
 		pageURL = nextPageURL(resp.Header.Get("Link"))

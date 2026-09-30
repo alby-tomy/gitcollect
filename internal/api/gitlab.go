@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -243,37 +244,42 @@ func (c *gitlabClient) RemoveCollaborator(owner, repo, username string) error {
 // recorded in the commit itself — so Author is always the commit author
 // name here, never a resolved GitLab account.
 func (c *gitlabClient) ListCommits(owner, repo, branch string, limit int) ([]CommitInfo, error) {
+	if limit < 1 {
+		return nil, nil
+	}
+	// GitLab clamps per_page to perPageMax exactly as GitHub does, so a
+	// larger limit has to be met by walking pages rather than asking for it
+	// in one request.
 	id := url.QueryEscape(owner + "/" + repo)
-	path := fmt.Sprintf("/projects/%s/repository/commits?ref_name=%s&per_page=%s",
-		id, url.QueryEscape(branch), strconv.Itoa(limit))
-	resp, err := c.do(http.MethodGet, path, nil)
+	startURL := fmt.Sprintf("%s/projects/%s/repository/commits?ref_name=%s&per_page=%d",
+		c.baseURL, id, url.QueryEscape(branch), min(limit, perPageMax))
+
+	commits := make([]CommitInfo, 0, min(limit, perPageMax))
+	err := c.paginateGitLab(startURL, func(body []byte) error {
+		var out []struct {
+			ID            string    `json:"id"`
+			Title         string    `json:"title"`
+			AuthorName    string    `json:"author_name"`
+			CommittedDate time.Time `json:"committed_date"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return fmt.Errorf("could not parse response: %w", err)
+		}
+		for _, c := range out {
+			commits = append(commits, CommitInfo{
+				SHA:         c.ID,
+				Author:      c.AuthorName,
+				Message:     c.Title,
+				CommittedAt: c.CommittedDate,
+			})
+			if len(commits) >= limit {
+				return errStopPagination
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, classifyStatus(resp.StatusCode)
-	}
-
-	var out []struct {
-		ID            string    `json:"id"`
-		Title         string    `json:"title"`
-		AuthorName    string    `json:"author_name"`
-		CommittedDate time.Time `json:"committed_date"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("could not parse response: %w", err)
-	}
-
-	commits := make([]CommitInfo, 0, len(out))
-	for _, c := range out {
-		commits = append(commits, CommitInfo{
-			SHA:         c.ID,
-			Author:      c.AuthorName,
-			Message:     c.Title,
-			CommittedAt: c.CommittedDate,
-		})
 	}
 	return commits, nil
 }
@@ -396,6 +402,9 @@ func (c *gitlabClient) paginateGitLab(startURL string, fn func([]byte) error) er
 			return classifyStatus(resp.StatusCode)
 		}
 		if err := fn(body); err != nil {
+			if errors.Is(err, errStopPagination) {
+				return nil
+			}
 			return err
 		}
 		// nextPageURL is defined in github.go (same package) and parses the

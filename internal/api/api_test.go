@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1028,5 +1030,131 @@ func TestGitHubSearchRepos_RateLimit(t *testing.T) {
 	_, err = client403forbidden.SearchRepos("acme", "payments-*", "", 50)
 	if !errors.Is(err, ErrForbidden) {
 		t.Errorf("403 non-rate-limit body: expected ErrForbidden, got %v", err)
+	}
+}
+
+// --- ListCommits pagination ---
+
+// commitPageServer serves `total` commits across pages of at most
+// perPageMax, emitting a Link: rel="next" header exactly as GitHub does,
+// and clamping any per_page above perPageMax the way the real API does
+// rather than honouring it.
+func commitPageServer(t *testing.T, total int, requested *[]int) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		per, _ := strconv.Atoi(q.Get("per_page"))
+		if per <= 0 || per > perPageMax {
+			per = perPageMax // the silent clamp that caused the bug
+		}
+		*requested = append(*requested, per)
+
+		page, _ := strconv.Atoi(q.Get("page"))
+		if page < 1 {
+			page = 1
+		}
+		start := (page - 1) * per
+		end := min(start+per, total)
+
+		var b strings.Builder
+		b.WriteString("[")
+		for i := start; i < end; i++ {
+			if i > start {
+				b.WriteString(",")
+			}
+			fmt.Fprintf(&b, `{"sha":"sha%04d","author":{"login":"alice"},`+
+				`"commit":{"message":"commit %d","author":{"name":"Alice","date":"2026-01-01T00:00:00Z"}}}`, i, i)
+		}
+		b.WriteString("]")
+
+		if end < total {
+			next := *r.URL
+			nq := next.Query()
+			nq.Set("page", strconv.Itoa(page+1))
+			nq.Set("per_page", strconv.Itoa(per))
+			next.RawQuery = nq.Encode()
+			w.Header().Set("Link", fmt.Sprintf(`<%s%s?%s>; rel="next"`,
+				githubBaseURL, next.Path, next.RawQuery))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, b.String())
+	}
+}
+
+// A limit above perPageMax must be satisfied by walking pages. The API
+// clamps per_page silently instead of rejecting it, so asking for the full
+// limit in one request returned at most perPageMax commits while reporting
+// nothing wrong - the caller simply believed it had all it asked for.
+func TestGitHubListCommits_LimitAbovePerPageMaxPaginates(t *testing.T) {
+	var requested []int
+	c := withGitHubServer(t, commitPageServer(t, 250, &requested))
+
+	commits, err := c.ListCommits("acme", "repo", "main", 250)
+	if err != nil {
+		t.Fatalf("ListCommits: %v", err)
+	}
+	if len(commits) != 250 {
+		t.Errorf("got %d commits, want 250", len(commits))
+	}
+	for _, p := range requested {
+		if p > perPageMax {
+			t.Errorf("requested per_page=%d, above the %d the API honours", p, perPageMax)
+		}
+	}
+	if len(requested) < 3 {
+		t.Errorf("expected at least 3 pages for 250 commits, made %d request(s)", len(requested))
+	}
+	// Ordering must survive pagination.
+	if commits[0].SHA != "sha0000" || commits[249].SHA != "sha0249" {
+		t.Errorf("page boundaries corrupted order: first=%s last=%s", commits[0].SHA, commits[249].SHA)
+	}
+}
+
+// Pagination must stop as soon as the limit is met, not drain the repo.
+func TestGitHubListCommits_StopsAtLimit(t *testing.T) {
+	var requested []int
+	c := withGitHubServer(t, commitPageServer(t, 5000, &requested))
+
+	commits, err := c.ListCommits("acme", "repo", "main", 120)
+	if err != nil {
+		t.Fatalf("ListCommits: %v", err)
+	}
+	if len(commits) != 120 {
+		t.Errorf("got %d commits, want exactly 120", len(commits))
+	}
+	if len(requested) != 2 {
+		t.Errorf("120 commits needs 2 pages, made %d request(s)", len(requested))
+	}
+}
+
+// A limit under the page size must still ask for only that many.
+func TestGitHubListCommits_SmallLimitIsOneRequest(t *testing.T) {
+	var requested []int
+	c := withGitHubServer(t, commitPageServer(t, 5000, &requested))
+
+	commits, err := c.ListCommits("acme", "repo", "main", 7)
+	if err != nil {
+		t.Fatalf("ListCommits: %v", err)
+	}
+	if len(commits) != 7 {
+		t.Errorf("got %d commits, want 7", len(commits))
+	}
+	if len(requested) != 1 || requested[0] != 7 {
+		t.Errorf("expected a single per_page=7 request, got %v", requested)
+	}
+}
+
+func TestGitHubListCommits_NonPositiveLimit(t *testing.T) {
+	called := false
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = io.WriteString(w, "[]")
+	})
+	commits, err := c.ListCommits("acme", "repo", "main", 0)
+	if err != nil || len(commits) != 0 {
+		t.Errorf("limit 0 should return no commits and no error, got %d/%v", len(commits), err)
+	}
+	if called {
+		t.Error("limit 0 should not reach the network")
 	}
 }
