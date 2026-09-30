@@ -1100,6 +1100,15 @@
             API to completion <em>before</em> the local YAML is written. If the API call
             fails, the YAML does not change. There is no in-between state, and no
             shadow permission system.</p>
+          <p>The same rule decides what happens when gitcollect <em>cannot reach</em> the platform to
+            confirm a grant. Before a read, it checks that the collaborator grant is really in place —
+            purely so a missing one reads as <em>“access has not synced yet”</em> instead of a bare git
+            authentication failure. That check is a courtesy, not the boundary. When it cannot be
+            answered — a spent rate limit, a token scope, a refused endpoint — gitcollect says so and
+            continues, because the platform enforces the operation regardless of what gitcollect
+            believes. Treating an <em>unanswerable</em> check as a denial would add no safety and would
+            lock out precisely the read-only members the tool exists to serve. A definite “not a
+            collaborator” is still a refusal; the rules in your manifest always apply either way.</p>
           <p>Identity is based on immutable platform user IDs, not usernames.
             Renaming a GitHub or GitLab account never breaks collection
             ownership or membership — gitcollect resolves and caches the

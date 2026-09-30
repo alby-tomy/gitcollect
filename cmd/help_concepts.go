@@ -37,6 +37,13 @@ Access control — two independent layers
   Repo level        which groups or individual users can reach each repo
   Both checks must pass. Passing one is not enough.
 
+  gitcollect also confirms the platform grant before an operation, purely
+  so a missing one reads as "access has not synced yet" rather than a bare
+  git authentication failure. That confirmation is a courtesy, not the
+  boundary: when the platform cannot answer it — a spent rate limit, a
+  token scope, a refused endpoint — gitcollect says so and continues, and
+  the platform enforces the operation itself.
+
 Identity
   gitcollect stores your platform's permanent numeric user ID, not your
   username. Renaming your GitHub or GitLab account never breaks access.
