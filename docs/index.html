@@ -2048,14 +2048,34 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
 
           <div class="cmd-block">
             <p class="sig"><span class="prog">gitcollect</span> move &lt;source-collection&gt; &lt;repo&gt;
-              &lt;dest-collection&gt;</p>
+              &lt;dest-collection&gt;<br>
+              <span class="prog">gitcollect</span> move &lt;source-collection&gt; &lt;dest-collection&gt;
+              <span class="flag">--group &lt;name&gt;</span></p>
             <p class="desc">Move a repo from one collection to another atomically. Grants access to members of the
               destination collection; revokes access from members of the source collection who are not also in the
               destination. Always shows the access diff before executing. Caller must own both collections.</p>
+            <p class="desc"><strong>Moving a whole module.</strong> <code>--group &lt;name&gt;</code> moves every repo
+              that group can reach, which is what handing a module from one team to another actually means — twenty
+              pricing repos in one operation rather than twenty moves that can be left half-done. Note the positional
+              arguments: with <code>--group</code> there is no repo name, so it is
+              <code>move &lt;source&gt; &lt;dest&gt; --group &lt;name&gt;</code>. Every repo is validated before
+              anything moves; if even one already exists in the destination, nothing is moved.</p>
+            <p class="warn"><strong>A move revokes real access for real people</strong>, so it asks you to type the
+              name back before it does anything — the module name for a <code>--group</code> move, the repo name
+              otherwise — the same confirmation GitHub asks for when deleting a repository. Use <code>--yes</code>
+              in scripts. <code>--dry-run</code> never prompts, because it changes nothing.</p>
             <table class="flags">
+              <tr>
+                <td class="flagname">--group</td>
+                <td class="flagdesc">move every repo this group can reach, instead of one named repo</td>
+              </tr>
               <tr>
                 <td class="flagname">--dry-run</td>
                 <td class="flagdesc">preview access changes without executing</td>
+              </tr>
+              <tr>
+                <td class="flagname">--yes</td>
+                <td class="flagdesc">skip the typed confirmation</td>
               </tr>
             </table>
           </div>
