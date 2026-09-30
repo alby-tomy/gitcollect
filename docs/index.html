@@ -25,6 +25,52 @@
       scroll-behavior: smooth;
     }
 
+    /* ── ANCHOR LANDING ──
+       Without this, a sidebar jump parks the target's first line flush
+       against the top edge, where it reads as "the page happens to start
+       here" rather than "this is the section you asked for". Dropping it
+       clear of the edge makes the landing point obvious. clamp keeps the
+       offset sane on short viewports, where a flat vh value would push the
+       heading most of the way down the screen. */
+    section[id],
+    .group[id] {
+      scroll-margin-top: clamp(24px, 16vh, 150px);
+    }
+
+    /* Brief wash over whatever was just routed to, so the eye is handed the
+       right block instead of hunting for it. Purely additive: it animates
+       back to transparent and the class is removed, so nothing is left
+       behind and the untouched page looks exactly as before. Background and
+       inset shadow only - no padding or border changes, which would shift
+       the layout as the highlight came and went. */
+    @keyframes routeFlash {
+      0%,
+      60% {
+        background: rgba(200, 255, 87, 0.09);
+        box-shadow: inset 3px 0 0 var(--lime);
+      }
+
+      100% {
+        background: transparent;
+        box-shadow: inset 3px 0 0 transparent;
+      }
+    }
+
+    .route-flash {
+      animation: routeFlash 1.9s ease-out 1;
+      border-radius: 4px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      .route-flash {
+        animation-duration: 1ms;
+      }
+    }
+
     :root {
       --ink: #0A0E14;
       --ink2: #111720;
@@ -2621,6 +2667,62 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
       });
     }, { threshold: 0.3 });
     sections.forEach(s => s.id && observer.observe(s));
+
+    /* ── ROUTE HIGHLIGHT ──
+       Flash whatever the reader just routed to. Paired with the
+       scroll-margin-top above: the target lands clear of the top edge, and
+       this says which block it is. */
+    (function () {
+      const FLASH = 'route-flash';
+      let timer = null;
+      let current = null;
+
+      function flash(id) {
+        if (!id) return;
+        let el = null;
+        try {
+          el = document.getElementById(decodeURIComponent(id));
+        } catch (err) {
+          el = document.getElementById(id); // malformed escape in the hash
+        }
+        if (!el) return;
+
+        // Clear any in-flight highlight first, so routing twice in quick
+        // succession never leaves the previous target tinted.
+        if (timer) clearTimeout(timer);
+        if (current) current.classList.remove(FLASH);
+
+        el.classList.remove(FLASH);
+        void el.offsetWidth; // reflow, so the animation restarts on a repeat click
+        el.classList.add(FLASH);
+        current = el;
+        timer = setTimeout(function () {
+          el.classList.remove(FLASH);
+          current = null;
+          timer = null;
+        }, 2000);
+      }
+
+      // Clicking a link whose hash is already current fires no hashchange,
+      // so the click is handled directly rather than relying on that event.
+      document.addEventListener('click', function (e) {
+        const t = e.target;
+        const a = t && t.closest ? t.closest('a[href^="#"]') : null;
+        if (!a) return;
+        flash(a.getAttribute('href').slice(1));
+      });
+
+      window.addEventListener('hashchange', function () {
+        flash(location.hash.slice(1));
+      });
+
+      // Arriving on a deep link counts as routing too.
+      if (location.hash.length > 1) {
+        window.addEventListener('load', function () {
+          flash(location.hash.slice(1));
+        });
+      }
+    })();
   </script>
 </body>
 
