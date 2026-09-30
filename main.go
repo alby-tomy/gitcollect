@@ -41,5 +41,9 @@ func resolveVersion() string {
 
 func main() {
 	cmd.SetVersion(resolveVersion())
+	// Whether ldflags supplied the version is how get-update tells a
+	// release binary (goreleaser injects it) from a "go install" build
+	// (which does not), and therefore how it can be upgraded safely.
+	cmd.SetBuildSource(version != "dev" && version != "")
 	os.Exit(cmd.Execute())
 }
