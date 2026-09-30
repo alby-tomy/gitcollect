@@ -37,28 +37,79 @@
       scroll-margin-top: clamp(24px, 16vh, 150px);
     }
 
-    /* Brief wash over whatever was just routed to, so the eye is handed the
-       right block instead of hunting for it. Purely additive: it animates
-       back to transparent and the class is removed, so nothing is left
-       behind and the untouched page looks exactly as before. Background and
-       inset shadow only - no padding or border changes, which would shift
-       the layout as the highlight came and went. */
-    @keyframes routeFlash {
-      0%,
-      60% {
-        background: rgba(200, 255, 87, 0.09);
-        box-shadow: inset 3px 0 0 var(--lime);
-      }
+    /* ── ROUTE HIGHLIGHT ──
+       Marks the block just routed to. A flat background tint was the
+       obvious approach and the wrong one: it smeared colour behind the
+       prose and the flag tables and made both harder to read, which is the
+       opposite of helping someone find their place.
 
-      100% {
-        background: transparent;
-        box-shadow: inset 3px 0 0 transparent;
-      }
+       Instead the highlight is drawn as a card *behind* the content
+       (z-index -1 on the overlay), inset outward so it reads as a frame
+       around the block rather than a stain across it: a hairline lime ring,
+       a soft outer glow, and a tint faint enough that body text keeps its
+       contrast. A solid accent bar down the left edge does the actual
+       pointing.
+
+       Nothing here affects layout - the overlay is absolutely positioned
+       and pointer-events:none, so it cannot shift content or swallow
+       clicks as it comes and goes. */
+    .route-flash {
+      position: relative;
+      /* Does not create a containing block for anything real: the only
+         absolutely positioned element on the page lives inside
+         .setup-steps, which establishes its own. */
     }
 
-    .route-flash {
-      animation: routeFlash 1.9s ease-out 1;
-      border-radius: 4px;
+    .route-flash::after {
+      content: '';
+      position: absolute;
+      inset: -16px -20px;
+      z-index: -1;
+      pointer-events: none;
+      border-radius: 10px;
+      border: 1px solid rgba(200, 255, 87, 0.28);
+      background:
+        linear-gradient(160deg,
+          rgba(200, 255, 87, 0.07) 0%,
+          rgba(200, 255, 87, 0.03) 42%,
+          rgba(200, 255, 87, 0) 78%);
+      box-shadow:
+        0 0 0 1px rgba(200, 255, 87, 0.05),
+        0 12px 44px -12px rgba(200, 255, 87, 0.2);
+      animation: routeCard 2.4s cubic-bezier(0.22, 1, 0.36, 1) 1 forwards;
+    }
+
+    .route-flash::before {
+      content: '';
+      position: absolute;
+      left: -20px;
+      top: -16px;
+      bottom: -16px;
+      width: 2px;
+      z-index: -1;
+      pointer-events: none;
+      border-radius: 2px;
+      background: var(--lime);
+      box-shadow: 0 0 12px rgba(200, 255, 87, 0.45);
+      animation: routeBar 2.4s cubic-bezier(0.22, 1, 0.36, 1) 1 forwards;
+    }
+
+    /* Arrive quickly so the eye is caught, hold, then leave unhurriedly -
+       a highlight that vanishes as fast as it appears reads as a glitch. */
+    @keyframes routeCard {
+      0%   { opacity: 0; }
+      7%   { opacity: 1; }
+      55%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* The bar wipes down from the heading rather than fading in flat, which
+       points at where the section starts. */
+    @keyframes routeBar {
+      0%   { opacity: 0; transform: scaleY(0.25); transform-origin: top; }
+      18%  { opacity: 1; transform: scaleY(1); transform-origin: top; }
+      55%  { opacity: 1; transform: scaleY(1); transform-origin: top; }
+      100% { opacity: 0; transform: scaleY(1); transform-origin: top; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -66,8 +117,10 @@
         scroll-behavior: auto;
       }
 
-      .route-flash {
+      .route-flash::after,
+      .route-flash::before {
         animation-duration: 1ms;
+        animation-fill-mode: none;
       }
     }
 
@@ -2687,6 +2740,15 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
         }
         if (!el) return;
 
+        // A <section> spans the full width of .page-body, whose left edge
+        // butts against the fixed sidebar - the accent bar would be drawn
+        // underneath the nav and never seen. Sections wrap their content in
+        // .container, so highlight that instead: the card then frames the
+        // text column, exactly as it does for a .group.
+        if (el.matches('section')) {
+          el = el.querySelector(':scope > .container') || el;
+        }
+
         // Clear any in-flight highlight first, so routing twice in quick
         // succession never leaves the previous target tinted.
         if (timer) clearTimeout(timer);
@@ -2700,7 +2762,7 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
           el.classList.remove(FLASH);
           current = null;
           timer = null;
-        }, 2000);
+        }, 2500); // matches the 2.4s highlight animation
       }
 
       // Clicking a link whose hash is already current fires no hashchange,
