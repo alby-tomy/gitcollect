@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,18 +15,55 @@ import (
 	"github.com/alby-tomy/gitcollect/v3/internal/output"
 )
 
-var moveDryRun bool
+var (
+	moveDryRun bool
+	moveGroup  string
+	moveYes    bool
+)
 
 var moveCmd = &cobra.Command{
 	Use:   "move <source-collection> <repo> <dest-collection>",
-	Short: "Move a repo from one collection to another",
-	Args:  cobra.ExactArgs(3),
-	RunE:  runMove,
+	Short: "Move a repo, or a whole module, from one collection to another",
+	Long: `Move repositories between collections, carrying their platform access with
+them: members of the destination gain access, members of only the source
+lose it.
+
+Name a single repo, or use --group to move every repo a group can reach -
+a whole module handed from one team to another in one operation, rather
+than repo by repo.
+
+Because a move revokes real access for real people, it asks you to type the
+name back before anything happens, the way GitHub does for deleting a repo.
+--yes skips that for scripts; --dry-run previews and never prompts.
+
+Examples:
+  gitcollect move platform-team checkout-api payments-team
+  gitcollect move platform-team payments-team --group pricing
+  gitcollect move platform-team payments-team --group pricing --dry-run`,
+	Args: moveArgs,
+	RunE: runMove,
 }
 
 func init() {
 	moveCmd.Flags().BoolVar(&moveDryRun, "dry-run", false, "preview access changes without executing")
+	moveCmd.Flags().StringVar(&moveGroup, "group", "", "move every repo this group can reach, instead of one named repo")
+	moveCmd.Flags().BoolVar(&moveYes, "yes", false, "skip the typed confirmation")
 	rootCmd.AddCommand(moveCmd)
+}
+
+// moveArgs accepts the repo form and the group form, which differ by one
+// positional: --group replaces the repo name rather than adding to it.
+func moveArgs(_ *cobra.Command, args []string) error {
+	if moveGroup != "" {
+		if len(args) != 2 {
+			return fmt.Errorf("move --group takes <source-collection> <dest-collection>, got %d argument(s)", len(args))
+		}
+		return nil
+	}
+	if len(args) != 3 {
+		return fmt.Errorf("move takes <source-collection> <repo> <dest-collection>, got %d argument(s)", len(args))
+	}
+	return nil
 }
 
 // moveDestSaveFn and moveSrcSaveFn are the functions used to persist the
@@ -36,10 +74,19 @@ var (
 	moveSrcSaveFn  = func(col *collection.Collection) error { return col.Save() }
 )
 
-func runMove(cmd *cobra.Command, args []string) error {
-	srcName, repoName, dstName := args[0], args[1], args[2]
+func runMove(_ *cobra.Command, args []string) error {
+	var srcName, dstName, repoArg string
+	if moveGroup != "" {
+		srcName, dstName = args[0], args[1]
+	} else {
+		srcName, repoArg, dstName = args[0], args[1], args[2]
+	}
 
 	// ── Phase 1: Validate ──────────────────────────────────────────────────
+
+	if srcName == dstName {
+		return NewUsageError(fmt.Errorf("move: source and destination are both %q", srcName))
+	}
 
 	srcCol, caller, callerID, client, err := loadForOwner("move", srcName)
 	if err != nil {
@@ -59,17 +106,42 @@ func runMove(cmd *cobra.Command, args []string) error {
 			srcName, dstName, caller, dstName)
 	}
 
-	if !collectionHasRepo(srcCol, repoName) {
-		return fmt.Errorf("move: repo %q not found in %q", repoName, srcName)
+	// Resolve what is being moved. Every repo is checked before anything is
+	// mutated: a half-moved module is far worse than a refused one.
+	repoNames, err := resolveMoveTargets(srcCol, repoArg, moveGroup)
+	if err != nil {
+		return err
 	}
-	if collectionHasRepo(dstCol, repoName) {
-		return fmt.Errorf("move: repo %q already exists in %q", repoName, dstName)
+	for _, name := range repoNames {
+		if collectionHasRepo(dstCol, name) {
+			return fmt.Errorf("move: repo %q already exists in %q", name, dstName)
+		}
 	}
 
 	// ── Phase 2: Calculate access diff ────────────────────────────────────
 
 	srcMemberSet := memberIDSet(srcCol)
 	dstMemberSet := memberIDSet(dstCol)
+
+	// losingByRepo is per-repo because access is per-repo: a member may
+	// reach one repo of a module and not another.
+	losingByRepo := make(map[string][]string, len(repoNames))
+	losingAny := make(map[string]bool)
+	for _, name := range repoNames {
+		for id := range srcMemberSet {
+			if _, inDst := dstMemberSet[id]; inDst {
+				continue
+			}
+			if !srcCol.CanAccessRepo(id, name) {
+				continue
+			}
+			if login := srcCol.Logins[id]; login != "" {
+				losingByRepo[name] = append(losingByRepo[name], login)
+				losingAny[login] = true
+			}
+		}
+		sort.Strings(losingByRepo[name])
+	}
 
 	var gaining, losing, unchanged []string
 	for id := range dstMemberSet {
@@ -79,14 +151,8 @@ func runMove(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-	for id := range srcMemberSet {
-		if _, inDst := dstMemberSet[id]; !inDst {
-			if srcCol.CanAccessRepo(id, repoName) {
-				if login := srcCol.Logins[id]; login != "" {
-					losing = append(losing, login)
-				}
-			}
-		}
+	for login := range losingAny {
+		losing = append(losing, login)
 	}
 	for id := range srcMemberSet {
 		if _, inDst := dstMemberSet[id]; inDst {
@@ -95,10 +161,24 @@ func runMove(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+	sort.Strings(gaining)
+	sort.Strings(losing)
+	sort.Strings(unchanged)
 
 	// ── Phase 3: Preview ──────────────────────────────────────────────────
 
-	fmt.Printf("Moving %s: %s → %s\n\n", repoName, srcName, dstName)
+	what := repoArg
+	if moveGroup != "" {
+		what = fmt.Sprintf("module %q (%d repo%s)", moveGroup, len(repoNames), plural(len(repoNames), "", "s"))
+	}
+	fmt.Printf("Moving %s: %s → %s\n\n", what, srcName, dstName)
+	if moveGroup != "" {
+		fmt.Println("Repos:")
+		for _, name := range repoNames {
+			fmt.Printf("  • %s\n", name)
+		}
+		fmt.Println()
+	}
 	fmt.Println("Access changes:")
 	if len(gaining) > 0 {
 		fmt.Printf("  + Gaining access (in %s, not in %s):\n", dstName, srcName)
@@ -122,47 +202,55 @@ func runMove(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// A move revokes real access on real repositories, so it is confirmed
+	// the way GitHub confirms deleting one: by typing the name back. The
+	// word is the module name for a group move and the repo name otherwise,
+	// so what you type is what you are actually moving.
+	confirmWord := repoArg
+	if moveGroup != "" {
+		confirmWord = moveGroup
+	}
+	if !moveYes && !moveConfirmFn(fmt.Sprintf("This moves %s out of %q", what, srcName), confirmWord) {
+		output.Info("Not moving.")
+		return nil
+	}
+
 	// ── Phase 4: Execute ──────────────────────────────────────────────────
 
 	fmt.Println("Applying...")
 
 	// Backup source state before any mutation (for rollback).
 	sourceBackup := *srcCol
+	backupRepos := append([]collection.RepoAccess(nil), srcCol.Repos...)
+	sourceBackup.Repos = backupRepos
 
-	// Add repo to dest collection with open access.
-	dstCol.Repos = append(dstCol.Repos, collection.RepoAccess{
-		Name:   repoName,
-		Groups: []string{},
-		Users:  []string{},
-	})
+	for _, name := range repoNames {
+		dstCol.Repos = append(dstCol.Repos, collection.RepoAccess{
+			Name:   name,
+			Groups: []string{},
+			Users:  []string{},
+		})
+	}
 	dstCol.UpdatedAt = time.Now().UTC()
 
-	// Grant access to dest members who are gaining (dest-only members).
+	// One sync covers every repo just added.
 	if _, _, syncErr := access.SyncCollaborators(dstCol, client, false); syncErr != nil {
 		output.Warn("could not sync collaborator access for %s: %v", dstName, syncErr)
 	} else if len(gaining) > 0 {
 		output.Dim("  ✓ Granted access: %s", joinLogins(gaining))
 	}
 
-	// Remove repo from source collection.
-	srcCol.Repos = removeRepoByName(srcCol.Repos, repoName)
+	for _, name := range repoNames {
+		srcCol.Repos = removeRepoByName(srcCol.Repos, name)
+	}
 	srcCol.UpdatedAt = time.Now().UTC()
 
-	// Revoke access for members losing access (src-only members who had access).
 	ns := srcCol.RepoNamespace()
-	for id := range srcMemberSet {
-		if _, inDst := dstMemberSet[id]; inDst {
-			continue // shared member — no change
-		}
-		if !sourceBackup.CanAccessRepo(id, repoName) {
-			continue // didn't have access anyway
-		}
-		login := srcCol.Logins[id]
-		if login == "" {
-			continue
-		}
-		if rmErr := client.RemoveCollaborator(ns, repoName, login); rmErr != nil {
-			output.Warn("could not revoke %s from %s/%s: %v", login, ns, repoName, rmErr)
+	for _, name := range repoNames {
+		for _, login := range losingByRepo[name] {
+			if rmErr := client.RemoveCollaborator(ns, name, login); rmErr != nil {
+				output.Warn("could not revoke %s from %s/%s: %v", login, ns, name, rmErr)
+			}
 		}
 	}
 	if len(losing) > 0 {
@@ -185,7 +273,7 @@ func runMove(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "✗ move: critical: source collection may be in inconsistent state\n")
 			fmt.Fprintf(os.Stderr, "  dest collection was written but source collection could not be updated\n")
 			fmt.Fprintf(os.Stderr, "  Manual fix: remove %s from ~/.gitcollect/collections/%s.yaml\n",
-				repoName, srcName)
+				joinLogins(repoNames), srcName)
 			return errors.Join(err, rollbackErr)
 		}
 		return fmt.Errorf("move: could not save %q (dest written, source rolled back): %w", srcName, err)
@@ -193,26 +281,77 @@ func runMove(cmd *cobra.Command, args []string) error {
 
 	// ── Audit ──────────────────────────────────────────────────────────────
 
-	recordAudit(audit.AuditEntry{
-		Collection: srcName,
-		Actor:      caller,
-		Action:     "repo.move.out",
-		Target:     repoName,
-		Detail:     fmt.Sprintf("Moved %q from %q to %q", repoName, srcName, dstName),
-		Result:     "ok",
-	})
-	recordAudit(audit.AuditEntry{
-		Collection: dstName,
-		Actor:      caller,
-		Action:     "repo.move.in",
-		Target:     repoName,
-		Detail:     fmt.Sprintf("Received %q moved from %q", repoName, srcName),
-		Result:     "ok",
-	})
+	for _, name := range repoNames {
+		detail := fmt.Sprintf("Moved %q from %q to %q", name, srcName, dstName)
+		if moveGroup != "" {
+			detail = fmt.Sprintf("Moved %q from %q to %q as part of module %q", name, srcName, dstName, moveGroup)
+		}
+		recordAudit(audit.AuditEntry{
+			Collection: srcName,
+			Actor:      caller,
+			Action:     "repo.move.out",
+			Target:     name,
+			Detail:     detail,
+			Result:     "ok",
+		})
+		recordAudit(audit.AuditEntry{
+			Collection: dstName,
+			Actor:      caller,
+			Action:     "repo.move.in",
+			Target:     name,
+			Detail:     fmt.Sprintf("Received %q moved from %q", name, srcName),
+			Result:     "ok",
+		})
+	}
 
-	output.Success("%s moved to %s", repoName, dstName)
+	if moveGroup != "" {
+		output.Success("module %q (%d repo%s) moved to %s", moveGroup,
+			len(repoNames), plural(len(repoNames), "", "s"), dstName)
+	} else {
+		output.Success("%s moved to %s", repoArg, dstName)
+	}
 	output.Suggestion(fmt.Sprintf("gitcollect show %s  to verify", dstName))
 	return nil
+}
+
+// moveConfirmFn is the typed confirmation, injectable so tests can drive it
+// without a terminal.
+var moveConfirmFn = func(prompt, word string) bool { return output.ConfirmWord(prompt, word) }
+
+// resolveMoveTargets returns the repos a move should carry: one named repo,
+// or every repo the named group can reach.
+//
+// Moving a module is the operation a team hand-off actually needs — "these
+// twenty pricing repos now belong to that team" — and doing it repo by repo
+// is both tedious and easy to leave half-done.
+func resolveMoveTargets(srcCol *collection.Collection, repoArg, group string) ([]string, error) {
+	if group == "" {
+		if !collectionHasRepo(srcCol, repoArg) {
+			return nil, fmt.Errorf("move: repo %q not found in %q", repoArg, srcCol.Name)
+		}
+		return []string{repoArg}, nil
+	}
+
+	if _, ok := srcCol.Groups[group]; !ok {
+		return nil, fmt.Errorf("move: group %q not found in %q\n  Run: gitcollect show %s",
+			group, srcCol.Name, srcCol.Name)
+	}
+
+	var names []string
+	for _, r := range srcCol.Repos {
+		for _, g := range r.Groups {
+			if g == group {
+				names = append(names, r.Name)
+				break
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("move: group %q reaches no repos in %q — nothing to move",
+			group, srcCol.Name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // collectionHasRepo returns true if col has a repo named name.

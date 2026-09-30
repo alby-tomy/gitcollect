@@ -29,10 +29,19 @@ func setupMoveTest(
 	cachedClient = mock
 	cachedUser = "owner"
 	cachedUserID = "owner-id"
+
+	// move now asks for the name to be typed back before it revokes
+	// anyone's access. These tests exercise the move itself, so the prompt
+	// is answered for them; the prompt has its own tests below.
+	prevConfirm, prevGroup, prevYes, prevDry := moveConfirmFn, moveGroup, moveYes, moveDryRun
+	moveConfirmFn = func(string, string) bool { return true }
+	moveGroup, moveYes, moveDryRun = "", false, false
+
 	t.Cleanup(func() {
 		cachedClient = nil
 		cachedUser = ""
 		cachedUserID = ""
+		moveConfirmFn, moveGroup, moveYes, moveDryRun = prevConfirm, prevGroup, prevYes, prevDry
 	})
 
 	owner := api.UserInfo{ID: "owner-id", Login: "owner"}
@@ -355,5 +364,226 @@ func TestMove_AuditBothCollections(t *testing.T) {
 	}
 	if !foundDst {
 		t.Error("expected repo.move.in audit entry on dest collection")
+	}
+}
+
+// --- module (group) moves ---
+
+// setupModuleMove builds a source collection whose "pricing" group reaches
+// three repos and whose "search" group reaches one, so a group move can be
+// checked to carry exactly its own repos and nothing else.
+func setupModuleMove(t *testing.T, mock *multiAddMock) (*collection.Collection, *collection.Collection) {
+	t.Helper()
+	src, dst := setupMoveTest(t, "platform", "payments", mock,
+		[]string{"eu-pricing", "us-pricing", "china-pricing", "search-indexer"},
+		nil, []string{"alice"}, []string{"diana"})
+
+	src.Groups["pricing"] = []string{"alice-id"}
+	src.Groups["search"] = []string{"alice-id"}
+	for i := range src.Repos {
+		switch src.Repos[i].Name {
+		case "eu-pricing", "us-pricing", "china-pricing":
+			src.Repos[i].Groups = []string{"pricing"}
+		case "search-indexer":
+			src.Repos[i].Groups = []string{"search"}
+		}
+	}
+	if err := src.Save(); err != nil {
+		t.Fatalf("save src: %v", err)
+	}
+	return src, dst
+}
+
+func TestMove_GroupMovesWholeModule(t *testing.T) {
+	mock := newMultiAddMock()
+	setupModuleMove(t, mock)
+	moveGroup = "pricing"
+
+	captureStdout(func() {
+		if err := runMove(nil, []string{"platform", "payments"}); err != nil {
+			t.Fatalf("runMove: %v", err)
+		}
+	})
+
+	src, err := collection.Load("platform")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := collection.Load("payments")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The module left, and only the module.
+	for _, name := range []string{"eu-pricing", "us-pricing", "china-pricing"} {
+		if collectionHasRepo(src, name) {
+			t.Errorf("%s should have left the source", name)
+		}
+		if !collectionHasRepo(dst, name) {
+			t.Errorf("%s should have arrived in the dest", name)
+		}
+	}
+	if !collectionHasRepo(src, "search-indexer") {
+		t.Error("a repo outside the moved group must stay put")
+	}
+	if collectionHasRepo(dst, "search-indexer") {
+		t.Error("a repo outside the moved group must not be carried along")
+	}
+}
+
+// The typed confirmation is the safeguard for exactly this: a group move
+// revokes access on several repos at once.
+func TestMove_GroupRequiresTypedGroupName(t *testing.T) {
+	mock := newMultiAddMock()
+	setupModuleMove(t, mock)
+	moveGroup = "pricing"
+
+	var asked string
+	moveConfirmFn = func(_, word string) bool { asked = word; return false }
+
+	captureStdout(func() {
+		if err := runMove(nil, []string{"platform", "payments"}); err != nil {
+			t.Fatalf("declining is not an error: %v", err)
+		}
+	})
+
+	if asked != "pricing" {
+		t.Errorf("confirmation should require the module name, asked for %q", asked)
+	}
+	src, err := collection.Load("platform")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !collectionHasRepo(src, "eu-pricing") {
+		t.Error("declining the confirmation must move nothing")
+	}
+}
+
+func TestMove_SingleRepoRequiresTypedRepoName(t *testing.T) {
+	mock := newMultiAddMock()
+	setupMoveTest(t, "src", "dst", mock, []string{"repo-to-move"}, nil, nil, nil)
+
+	var asked string
+	moveConfirmFn = func(_, word string) bool { asked = word; return false }
+
+	captureStdout(func() {
+		if err := runMove(nil, []string{"src", "repo-to-move", "dst"}); err != nil {
+			t.Fatalf("declining is not an error: %v", err)
+		}
+	})
+
+	if asked != "repo-to-move" {
+		t.Errorf("confirmation should require the repo name, asked for %q", asked)
+	}
+	src, err := collection.Load("src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !collectionHasRepo(src, "repo-to-move") {
+		t.Error("declining the confirmation must move nothing")
+	}
+}
+
+// --dry-run must never prompt: it changes nothing, so there is nothing to
+// confirm, and prompting would make previewing a move annoying enough to skip.
+func TestMove_DryRunDoesNotPrompt(t *testing.T) {
+	mock := newMultiAddMock()
+	setupModuleMove(t, mock)
+	moveGroup = "pricing"
+	moveDryRun = true
+
+	prompted := false
+	moveConfirmFn = func(string, string) bool { prompted = true; return true }
+
+	captureStdout(func() {
+		if err := runMove(nil, []string{"platform", "payments"}); err != nil {
+			t.Fatalf("runMove: %v", err)
+		}
+	})
+
+	if prompted {
+		t.Error("--dry-run must not prompt")
+	}
+	src, err := collection.Load("platform")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !collectionHasRepo(src, "eu-pricing") {
+		t.Error("--dry-run must not move anything")
+	}
+}
+
+func TestMove_UnknownGroupIsRefused(t *testing.T) {
+	mock := newMultiAddMock()
+	setupModuleMove(t, mock)
+	moveGroup = "nonexistent"
+
+	err := runMove(nil, []string{"platform", "payments"})
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected an unknown-group error, got %v", err)
+	}
+}
+
+// A group that exists but reaches nothing is a no-op worth naming, not a
+// silent success that looks like a completed hand-off.
+func TestMove_GroupWithNoReposIsRefused(t *testing.T) {
+	mock := newMultiAddMock()
+	src, _ := setupModuleMove(t, mock)
+	src.Groups["empty"] = []string{}
+	if err := src.Save(); err != nil {
+		t.Fatal(err)
+	}
+	moveGroup = "empty"
+
+	err := runMove(nil, []string{"platform", "payments"})
+	if err == nil || !strings.Contains(err.Error(), "no repos") {
+		t.Errorf("expected a nothing-to-move error, got %v", err)
+	}
+}
+
+// A module must not be half-moved: if any repo already exists in the
+// destination, nothing is moved at all.
+func TestMove_GroupRefusedWhenAnyRepoAlreadyInDest(t *testing.T) {
+	mock := newMultiAddMock()
+	_, dst := setupModuleMove(t, mock)
+	dst.Repos = append(dst.Repos, collection.RepoAccess{Name: "us-pricing", Groups: []string{}, Users: []string{}})
+	if err := dst.Save(); err != nil {
+		t.Fatal(err)
+	}
+	moveGroup = "pricing"
+
+	err := runMove(nil, []string{"platform", "payments"})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected a conflict error, got %v", err)
+	}
+	src, loadErr := collection.Load("platform")
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	for _, name := range []string{"eu-pricing", "china-pricing"} {
+		if !collectionHasRepo(src, name) {
+			t.Errorf("%s moved despite the conflict — the module was half-moved", name)
+		}
+	}
+}
+
+func TestMoveArgs_AcceptsBothForms(t *testing.T) {
+	prev := moveGroup
+	t.Cleanup(func() { moveGroup = prev })
+
+	moveGroup = ""
+	if err := moveArgs(nil, []string{"a", "b", "c"}); err != nil {
+		t.Errorf("repo form should take 3 args: %v", err)
+	}
+	if err := moveArgs(nil, []string{"a", "b"}); err == nil {
+		t.Error("repo form should refuse 2 args")
+	}
+
+	moveGroup = "pricing"
+	if err := moveArgs(nil, []string{"a", "b"}); err != nil {
+		t.Errorf("group form should take 2 args: %v", err)
+	}
+	if err := moveArgs(nil, []string{"a", "b", "c"}); err == nil {
+		t.Error("group form should refuse 3 args")
 	}
 }
