@@ -1182,9 +1182,10 @@
           <p>This compiles gitcollect on your machine and places the binary in <code>~/go/bin/</code> (Linux/Mac) or
             <code>%USERPROFILE%\go\bin\</code> (Windows). If that directory is already on your PATH — which it is by
             default after a standard Go installation — gitcollect is immediately available. To upgrade, run the same
-            command again with <code>@latest</code>. From the next release onward you can also let gitcollect do it:
-            <code>gitcollect get-update</code> re-runs the right command for however you installed it. That command is
-            not in v3.1.0 yet.
+            command again with <code>@latest</code>, or let gitcollect do it:
+            <code>gitcollect get-update</code> re-runs the right command for however you installed it.
+            That command requires <strong>v3.2.0 or newer</strong> — on an older binary, upgrade with
+            <code>@latest</code> once and it is available from then on.
           </p>
           <p class="note"><strong>The <code>/v3</code> suffix is required.</strong> Go resolves a module's major
             version from its import path, so <code>go install github.com/alby-tomy/gitcollect@latest</code> — without
@@ -2660,9 +2661,9 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
             <p class="desc">Print the build version and platform (<code>GOOS/GOARCH</code>). <code>gitcollect -v</code>
               and <code>gitcollect --version</code> print the identical line; <code>--json</code> adds the Go runtime
               version. A binary from <code>go install</code> reports the module version it was built from.</p>
-            <p>From the next release onward, <code>gitcollect get-update --check</code> reports whether you are
-              behind without changing anything, and <code>gitcollect get-update</code> upgrades in place — a release
-              binary is replaced only after its published SHA-256 checksum verifies. Not available in v3.1.0.</p>
+            <p><code>gitcollect get-update --check</code> reports whether you are behind without changing
+              anything, and <code>gitcollect get-update</code> upgrades in place — a release binary is replaced
+              only after its published SHA-256 checksum verifies. Requires <strong>v3.2.0 or newer</strong>.</p>
           </div>
 
           <div class="cmd-block">
