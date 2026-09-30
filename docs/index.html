@@ -2625,15 +2625,33 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
           <h3>Discovery &amp; dashboards</h3>
 
           <div class="cmd-block">
-            <p class="sig"><span class="prog">gitcollect</span> scan <span class="flag">--org</span>
-              <span class="arg">&lt;org&gt;</span> <span class="flag">[--group-by prefix|flat] [--dry-run] [--apply]
-                [--no-archived] [--verify]</span></p>
-            <p class="desc">Read every repository in an org or group and bucket them by the first segment of their
-              name, so <code>payments-api</code> and <code>payments-gateway</code> become one
-              <code>payments</code> collection. Prints a preview by default; <code>--apply</code> writes the collection
-              files and <strong>never overwrites an existing one</strong>, so re-running it cannot lose members, groups
-              or access rules. <code>--verify</code> reports what the current token could actually see — repositories
-              it cannot reach are absent from the count entirely.</p>
+            <p class="sig"><span class="prog">gitcollect</span> scan <span class="flag">(--org</span>
+              <span class="arg">&lt;org&gt;</span> <span class="flag">| --user</span> <span class="arg">&lt;login&gt;</span><span class="flag">)
+                [--from github|gitlab] [--group-by token|prefix|flat] [--interactive]
+                [--dry-run] [--apply] [--no-archived] [--verify]</span></p>
+            <p class="desc">Read every repository in an org or group — or, with <code>--user</code>, in a personal
+              account — and bucket them into collections by the words in their names. Prints a preview by default;
+              <code>--apply</code> writes the collection files and <strong>never overwrites an existing one</strong>,
+              so re-running it cannot lose members, groups or access rules. <code>--verify</code> reports what the
+              current token could actually see — repositories it cannot reach are absent from the count entirely.</p>
+            <p class="desc"><strong>Grouping strategies.</strong> <code>token</code> (the default) uses the most
+              widely shared meaningful word <em>wherever it appears in the name</em>, so <code>china-pricing</code>,
+              <code>eu-pricing</code> and <code>us-pricing</code> all land in one <code>pricing</code> collection.
+              A word must be shared by at least two repos before it can name a group, and generic terms
+              (<code>service</code>, <code>api</code>, <code>core</code>, …) are ignored so <code>cart-service</code>
+              and <code>search-service</code> are not collapsed into a meaningless <code>service</code> bucket.
+              <code>prefix</code> uses only the first hyphenated segment — right for a deliberate namespace prefix
+              like <code>payments-gateway</code>, but it splits <code>china-pricing</code> and <code>eu-pricing</code>
+              apart. <code>flat</code> puts everything in one collection.</p>
+            <p class="note"><strong>Scanning a personal account.</strong> An org and a user are different endpoints,
+              so <code>--user</code> is required for a personal account — <code>--org</code> against a username simply
+              fails. Passing your own login includes your private repos; naming someone else returns only what your
+              token can see.</p>
+            <p class="note"><strong>Grouping by name is a guess.</strong> Pass <code>--interactive</code> to confirm
+              each repo before anything is written: press Enter to accept the suggested category, <code>d</code> to
+              drop the repo, or type a different category name to file it there instead. Useful when one account
+              holds unrelated projects — an e-commerce set and a CRM, say — and you want to check each repo really
+              belongs to the project it was matched to.</p>
           </div>
 
           <div class="cmd-block">

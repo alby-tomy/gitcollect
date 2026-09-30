@@ -1160,7 +1160,7 @@ Run: gitcollect sync payments-team   to clone new repos and pull existing</span>
         <div class="term">
           <div class="term-header">
             <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
-            scan — group an org's repos by name prefix
+            scan — group repos into collections by shared name
           </div>
           <div class="term-body"><span class="p">$</span> <span class="c">gitcollect scan</span> <span class="f">--org</span> <span class="a">acme-corp</span>
 <span class="o">Scanning github.com/acme-corp...</span>
@@ -1181,10 +1181,31 @@ Run: gitcollect sync payments-team   to clone new repos and pull existing</span>
 <span class="p">$</span> <span class="c">gitcollect scan</span> <span class="f">--org</span> <span class="a">acme-corp</span> <span class="f">--apply</span>
 <span class="s">✓   acme-corp-payments                       (4 repos)</span>
 <span class="s">✓   acme-corp-auth                           (3 repos)</span>
-<span class="d">1 collection already existed and was skipped.</span></div>
+<span class="d">1 collection already existed and was skipped.</span>
+
+<span class="d"># A module split by region: the shared word is the category, not the prefix</span>
+<span class="p">$</span> <span class="c">gitcollect scan</span> <span class="f">--org</span> <span class="a">acme-corp</span>
+<span class="o">  pricing                  3 repos</span>
+<span class="o">      • china-pricing</span>
+<span class="o">      • eu-pricing</span>
+<span class="o">      • us-pricing</span>
+
+<span class="d"># Your own account, private repos included</span>
+<span class="p">$</span> <span class="c">gitcollect scan</span> <span class="f">--user</span> <span class="a">jsmith</span> <span class="f">--interactive</span>
+<span class="o">  eu-pricing [pricing]: </span>
+<span class="o">  customer-tickets [pricing]: </span><span class="c">crm</span>
+<span class="d">    customer-tickets → crm</span>
+<span class="o">  old-spike [pricing]: </span><span class="c">d</span>
+<span class="d">    dropped old-spike</span></div>
         </div>
 
-        <p class="note"><strong>scan never overwrites.</strong> A collection that already exists is skipped, so re-running <code>--apply</code> cannot lose members, groups or per-repo access rules. Use <code>--group-by flat</code> to put every repo in a single collection instead of splitting by prefix.</p>
+        <p class="note"><strong>scan never overwrites.</strong> A collection that already exists is skipped, so re-running <code>--apply</code> cannot lose members, groups or per-repo access rules.</p>
+
+        <p class="note"><strong>Choosing a grouping strategy.</strong> <code>token</code> (the default) buckets on the most widely shared meaningful word wherever it sits in the name, so <code>china-pricing</code>, <code>eu-pricing</code> and <code>us-pricing</code> form one <code>pricing</code> collection. A word must appear in at least two repos to name a group, and generic terms (<code>service</code>, <code>api</code>, <code>core</code>, …) are skipped so <code>cart-service</code> and <code>search-service</code> do not collapse into <code>service</code>. <code>--group-by prefix</code> uses only the first hyphenated segment — correct for a deliberate namespace like <code>payments-gateway</code>, but it splits regional variants of one module apart. <code>--group-by flat</code> puts everything in one collection.</p>
+
+        <p class="note"><strong>Personal accounts.</strong> An org and a user are different API endpoints, so a personal account needs <code>--user</code>; <code>--org</code> with a username fails. Your own login includes private repos, someone else's returns only what your token can see.</p>
+
+        <p class="note"><strong>Grouping by name is a guess.</strong> <code>--interactive</code> confirms each repo before anything is written — Enter accepts the suggested category, <code>d</code> drops the repo, and typing a name files it under that category instead. This is the check for an account holding several unrelated projects, where a repo can be matched to the wrong one.</p>
 
         <div class="term">
           <div class="term-header">
@@ -1300,7 +1321,7 @@ Run: gitcollect sync payments-team   to clone new repos and pull existing</span>
               <tr><td>gitcollect status</td><td><span class="pill pill-both">Both</span></td><td>git status across every cloned repo</td></tr>
               <tr><td>gitcollect diff</td><td><span class="pill pill-org">Org</span></td><td>Compare the manifest against platform reality</td></tr>
               <tr><td>gitcollect find</td><td><span class="pill pill-both">Both</span></td><td>Search local collections for a repo or member</td></tr>
-              <tr><td>gitcollect scan</td><td><span class="pill pill-org">Org</span></td><td>Discover org repos and group them by name prefix</td></tr>
+              <tr><td>gitcollect scan</td><td><span class="pill pill-both">Both</span></td><td>Discover org or personal repos and group them into collections</td></tr>
               <tr><td>gitcollect pr</td><td><span class="pill pill-both">Both</span></td><td>Open pull/merge requests across a collection</td></tr>
               <tr><td>gitcollect health</td><td><span class="pill pill-both">Both</span></td><td>Cloned / dirty / behind / open-PR dashboard</td></tr>
               <tr><td>gitcollect archive</td><td><span class="pill pill-both">Both</span></td><td>Hide a collection from list/sync/status (owner only)</td></tr>
