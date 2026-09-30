@@ -402,6 +402,14 @@ func (c *Collection) Save() error {
 		tmp.Close()
 		return fmt.Errorf("could not write collection %q: %w", c.Name, err)
 	}
+	// Flush to disk before the rename. os.Rename makes the directory entry
+	// atomic, not the file's contents: without this, a crash between the
+	// rename and the kernel's writeback leaves a correctly named file
+	// holding zero or partial bytes, which here would lose the whole collection manifest.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("could not write collection %q: %w", c.Name, err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("could not write collection %q: %w", c.Name, err)
 	}
