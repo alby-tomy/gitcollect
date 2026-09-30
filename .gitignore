@@ -5,4 +5,4 @@ coverage.out
 .env
 
 # prompt / spec files — not for distribution
-prompt/
+prompt/.claude/
