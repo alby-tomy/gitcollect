@@ -13,21 +13,38 @@ import (
 )
 
 var (
-	scanOrg     string
-	scanFrom    string
-	scanGroupBy string
-	scanDryRun  bool
-	scanApply   bool
-	scanVerify  bool
-	scanNoArch  bool
+	scanOrg         string
+	scanFrom        string
+	scanGroupBy     string
+	scanUser        string
+	scanInteractive bool
+	scanDryRun      bool
+	scanApply       bool
+	scanVerify      bool
+	scanNoArch      bool
 )
 
 var scanCmd = &cobra.Command{
-	Use:   "scan --org <org> [--from github|gitlab]",
-	Short: "Auto-discover org repos and group them into collections by namespace prefix",
-	Long: `Fetches every repository in a GitHub org or GitLab group and groups them by
-the common prefix in their names (e.g. payments-checkout, payments-gateway →
-"payments" collection).
+	Use:   "scan (--org <org> | --user <login>) [--from github|gitlab]",
+	Short: "Auto-discover repos and group them into collections by shared name",
+	Long: `Fetches every repository in a GitHub org or GitLab group — or, with --user,
+in a personal account — and groups them by the most widely shared meaningful
+word in their names.
+
+Grouping strategies (--group-by):
+
+  token   (default) the shared word wherever it appears, so china-pricing,
+          eu-pricing and us-pricing all land in "pricing". A word must be
+          shared by at least two repos to name a group, and generic terms
+          (service, api, core, ...) are ignored so cart-service and
+          search-service are not collapsed into "service".
+  prefix  the first hyphenated segment only. Use it when repos are named
+          with a deliberate namespace prefix (payments-gateway → payments);
+          note it splits china-pricing and eu-pricing apart.
+  flat    one collection for everything.
+
+Use --interactive to confirm each repo's category before anything is
+written, and to reassign or drop the ones that were placed wrongly.
 
 --verify reports what the scan itself establishes: who the token
 authenticated as, and how many repositories that token can see in the org.
@@ -43,20 +60,24 @@ without touching the filesystem.`,
 }
 
 func init() {
-	scanCmd.Flags().StringVar(&scanOrg, "org", "", "org or group to scan (required)")
+	scanCmd.Flags().StringVar(&scanOrg, "org", "", "org or group to scan (use --user for a personal account)")
 	scanCmd.Flags().StringVar(&scanFrom, "from", "", "platform: github or gitlab (default: github.com)")
-	scanCmd.Flags().StringVar(&scanGroupBy, "group-by", "prefix", "grouping strategy: prefix or flat")
+	scanCmd.Flags().StringVar(&scanGroupBy, "group-by", "token", "grouping strategy: token, prefix or flat")
+	scanCmd.Flags().StringVar(&scanUser, "user", "", "personal account to scan instead of an org (use your own login for private repos)")
+	scanCmd.Flags().BoolVar(&scanInteractive, "interactive", false, "confirm each repo's category before writing")
 	scanCmd.Flags().BoolVar(&scanDryRun, "dry-run", false, "preview collections without writing files")
 	scanCmd.Flags().BoolVar(&scanApply, "apply", false, "write collection YAML files")
 	scanCmd.Flags().BoolVar(&scanVerify, "verify", false, "report what the current token could actually see")
 	scanCmd.Flags().BoolVar(&scanNoArch, "no-archived", false, "exclude archived repos")
-	if err := scanCmd.MarkFlagRequired("org"); err != nil {
-		panic(err)
-	}
+	// An org and a personal account are separate endpoints, so exactly one
+	// of them has to be named - "--org" alone used to be required, which is
+	// what made a personal account impossible to scan.
+	scanCmd.MarkFlagsMutuallyExclusive("org", "user")
+	scanCmd.MarkFlagsOneRequired("org", "user")
 	rootCmd.AddCommand(scanCmd)
 }
 
-// scanGroup is a named group of repos that share a common prefix.
+// scanGroup is a named group of repos that share a common name token.
 type scanGroup struct {
 	name  string
 	repos []api.RepoInfo
@@ -91,9 +112,25 @@ func runScan(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("scan: resolve user id: %w", err)
 	}
 
-	output.Info("Scanning %s/%s...\n", host, scanOrg)
+	// An org and a personal account are different endpoints; asking for one
+	// through the other's just fails, so the target decides which to call.
+	target := scanOrg
+	output.Info("Scanning %s/%s...\n", host, target)
 
-	repos, err := client.ListOrgRepos(scanOrg)
+	var repos []api.RepoInfo
+	if scanUser != "" {
+		target = scanUser
+		// Passing an empty user asks for the authenticated account's own
+		// listing, the only one that includes private repos - so scanning
+		// yourself sees everything you own, not just what is public.
+		lookup := scanUser
+		if strings.EqualFold(scanUser, caller) {
+			lookup = ""
+		}
+		repos, err = client.ListUserRepos(lookup)
+	} else {
+		repos, err = client.ListOrgRepos(scanOrg)
+	}
 	if err != nil {
 		return fmt.Errorf("scan: list repos: %w", err)
 	}
@@ -109,24 +146,34 @@ func runScan(_ *cobra.Command, _ []string) error {
 	}
 
 	if len(repos) == 0 {
-		output.Dim("No repositories found in %s/%s.", host, scanOrg)
+		output.Dim("No repositories found in %s/%s.", host, target)
 		return nil
 	}
 
 	output.Success("Found %d repositor%s in %s/%s", len(repos),
-		plural(len(repos), "y", "ies"), host, scanOrg)
+		plural(len(repos), "y", "ies"), host, target)
 
 	// Group repos.
 	var groups []scanGroup
 	switch scanGroupBy {
 	case "flat":
-		groups = []scanGroup{{name: scanOrg, repos: repos}}
-	default: // "prefix"
+		groups = []scanGroup{{name: target, repos: repos}}
+	case "prefix":
 		groups = groupByPrefix(repos)
+	default: // "token"
+		groups = groupByToken(repos)
+	}
+
+	if scanInteractive {
+		groups = reviewGroups(groups)
+		if len(groups) == 0 {
+			output.Dim("Every repo was dropped; nothing to write.")
+			return nil
+		}
 	}
 
 	if scanVerify {
-		printVerificationChain(caller, scanOrg, repos)
+		printVerificationChain(caller, target, repos)
 	}
 
 	printScanSummary(groups)
@@ -140,9 +187,9 @@ func runScan(_ *cobra.Command, _ []string) error {
 	// Apply or dry-run: write/preview one collection per group.
 	var written, skipped int
 	for _, g := range groups {
-		colName := sanitizeCollectionName(scanOrg + "-" + g.name)
-		if g.name == scanOrg {
-			colName = sanitizeCollectionName(scanOrg)
+		colName := sanitizeCollectionName(target + "-" + g.name)
+		if g.name == target {
+			colName = sanitizeCollectionName(target)
 		}
 
 		if scanDryRun {
@@ -270,6 +317,109 @@ func groupByPrefix(repos []api.RepoInfo) []scanGroup {
 	return groups
 }
 
+// genericToken holds name parts that describe what a repo *is* rather than
+// what it belongs to. Without this, "cart-service", "search-service" and
+// "availability-service" all collapse into a single "service" bucket, which
+// is a worse answer than not grouping at all.
+var genericToken = map[string]bool{
+	"api": true, "app": true, "application": true, "backend": true,
+	"cli": true, "client": true, "common": true, "config": true,
+	"core": true, "demo": true, "deploy": true, "docs": true,
+	"example": true, "frontend": true, "infra": true, "internal": true,
+	"lib": true, "library": true, "main": true, "manager": true,
+	"microservice": true, "module": true, "pkg": true, "platform": true,
+	"proto": true, "repo": true, "sdk": true, "server": true,
+	"service": true, "shared": true, "svc": true, "system": true,
+	"test": true, "tests": true, "tool": true, "tools": true,
+	"ui": true, "utils": true, "util": true, "web": true, "worker": true,
+}
+
+// tokenize splits a repo name into its lowercase word parts.
+func tokenize(name string) []string {
+	parts := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == ' '
+	})
+	return parts
+}
+
+// groupByToken buckets repos by the most widely shared meaningful word in
+// their names, wherever that word sits.
+//
+// This exists because grouping on the first segment alone gets the common
+// case backwards. Given china-pricing, eu-pricing and us-pricing - one
+// team's pricing module, split by region - a first-segment rule yields three
+// collections named "china", "eu" and "us", scattering the very module the
+// user was trying to assemble. The shared word "pricing" is the category,
+// and it is a suffix here and a prefix in payments-gateway, so position
+// cannot be what decides.
+//
+// A token has to appear in at least two repos to name a group, so a word
+// unique to one repo never invents a category. Repos sharing nothing fall
+// back to their own first meaningful word, which keeps them addressable
+// instead of dumping them in a "misc" pile.
+func groupByToken(repos []api.RepoInfo) []scanGroup {
+	freq := make(map[string]int)
+	for _, r := range repos {
+		// Count each token once per repo, so "pricing-pricing" cannot
+		// out-vote a token genuinely shared across two repos.
+		seen := make(map[string]bool)
+		for _, t := range tokenize(r.Name) {
+			if len(t) < 2 || genericToken[t] || seen[t] {
+				continue
+			}
+			seen[t] = true
+			freq[t]++
+		}
+	}
+
+	buckets := make(map[string][]api.RepoInfo)
+	for _, r := range repos {
+		buckets[bestToken(r.Name, freq)] = append(buckets[bestToken(r.Name, freq)], r)
+	}
+
+	names := make([]string, 0, len(buckets))
+	for n := range buckets {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	groups := make([]scanGroup, 0, len(names))
+	for _, n := range names {
+		groups = append(groups, scanGroup{name: n, repos: buckets[n]})
+	}
+	return groups
+}
+
+// bestToken picks the group name for one repo: the token it shares with the
+// most other repos. Ties break on the longer token, then alphabetically, so
+// the same input always produces the same collections.
+func bestToken(name string, freq map[string]int) string {
+	best, bestN := "", 0
+	fallback := ""
+	for _, t := range tokenize(name) {
+		if len(t) < 2 || genericToken[t] {
+			continue
+		}
+		if fallback == "" {
+			fallback = t
+		}
+		n := freq[t]
+		if n < 2 {
+			continue // unique to this repo: not a category
+		}
+		if n > bestN || (n == bestN && (len(t) > len(best) || (len(t) == len(best) && t < best))) {
+			best, bestN = t, n
+		}
+	}
+	if best != "" {
+		return best
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return strings.ToLower(name)
+}
+
 // repoPrefix returns the first hyphen/underscore-delimited segment of name,
 // or the full name if there is no separator.
 func repoPrefix(name string) string {
@@ -353,4 +503,61 @@ func plural(n int, singular, pluralSuffix string) string {
 		return singular
 	}
 	return pluralSuffix
+}
+
+// reviewGroups walks the proposed categories and lets the operator confirm
+// each repo before anything is written.
+//
+// Grouping by name is a guess. It is a good guess when repos are named
+// consistently and a poor one when they are not, and the command had no way
+// to say "this one does not belong here" short of editing the YAML
+// afterwards. This is that step: keep, drop, or file the repo under a
+// different category.
+//
+// Input is read through output.Prompt, so a non-interactive
+// stdin (a pipe, CI) answers with the default and keeps the repo where the
+// grouping put it - the same result as not passing --interactive at all.
+func reviewGroups(groups []scanGroup) []scanGroup {
+	fmt.Println()
+	output.Info("Reviewing %d propose%s categor%s. Enter keeps the suggestion.",
+		len(groups), plural(len(groups), "d", "d"), plural(len(groups), "y", "ies"))
+	output.Dim("  [Enter] keep   d) drop   <name>) file under that category instead")
+	fmt.Println()
+
+	reassigned := make(map[string][]api.RepoInfo)
+	for _, g := range groups {
+		fmt.Printf("%s\n", strings.ToUpper(g.name))
+		for _, r := range g.repos {
+			answer := output.Prompt(fmt.Sprintf("  %s [%s]: ", r.Name, g.name))
+			switch {
+			case answer == "":
+				reassigned[g.name] = append(reassigned[g.name], r)
+			case answer == "d" || answer == "drop":
+				output.Dim("    dropped %s", r.Name)
+			default:
+				dest := sanitizeCollectionName(strings.ToLower(answer))
+				if dest == "" {
+					// Unusable name: keeping the repo beats silently
+					// discarding it over a typo.
+					output.Warn("    %q is not a usable category name; keeping %s in %s", answer, r.Name, g.name)
+					reassigned[g.name] = append(reassigned[g.name], r)
+					continue
+				}
+				reassigned[dest] = append(reassigned[dest], r)
+				output.Dim("    %s → %s", r.Name, dest)
+			}
+		}
+	}
+
+	names := make([]string, 0, len(reassigned))
+	for n := range reassigned {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	out := make([]scanGroup, 0, len(names))
+	for _, n := range names {
+		out = append(out, scanGroup{name: n, repos: reassigned[n]})
+	}
+	return out
 }

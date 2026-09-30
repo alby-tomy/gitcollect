@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -398,5 +399,184 @@ func TestScanDryRun_WritesNothing(t *testing.T) {
 	}
 	if _, err := collection.Load("acme-payments"); err == nil {
 		t.Error("--dry-run must not create a collection file")
+	}
+}
+
+// --- token grouping ---
+
+func scanRepos(names ...string) []api.RepoInfo {
+	out := make([]api.RepoInfo, 0, len(names))
+	for _, n := range names {
+		out = append(out, api.RepoInfo{Name: n})
+	}
+	return out
+}
+
+func groupNames(gs []scanGroup) []string {
+	out := make([]string, 0, len(gs))
+	for _, g := range gs {
+		out = append(out, g.name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// The case the old prefix rule got backwards: one team's pricing module,
+// split by region. Grouping on the first segment produced "china", "eu" and
+// "us" - scattering the very module the operator was trying to assemble.
+func TestGroupByToken_SharedSuffixIsTheCategory(t *testing.T) {
+	groups := groupByToken(scanRepos("china-pricing", "eu-pricing", "us-pricing"))
+
+	if len(groups) != 1 || groups[0].name != "pricing" {
+		t.Fatalf("expected one \"pricing\" group, got %v", groupNames(groups))
+	}
+	if len(groups[0].repos) != 3 {
+		t.Errorf("expected all 3 repos in pricing, got %d", len(groups[0].repos))
+	}
+	// The old behaviour, pinned so the regression is visible if it returns.
+	old := groupNames(groupByPrefix(scanRepos("china-pricing", "eu-pricing", "us-pricing")))
+	if len(old) != 3 {
+		t.Errorf("prefix grouping should still split these three ways, got %v", old)
+	}
+}
+
+// A shared word must be found wherever it sits, not only as a suffix.
+func TestGroupByToken_SharedPrefixAlsoWorks(t *testing.T) {
+	groups := groupByToken(scanRepos("payments-gateway", "payments-checkout", "payments-ledger"))
+	if len(groups) != 1 || groups[0].name != "payments" {
+		t.Fatalf("expected one \"payments\" group, got %v", groupNames(groups))
+	}
+}
+
+// Generic words describe what a repo is, not what it belongs to. Collapsing
+// on them would be worse than not grouping at all.
+func TestGroupByToken_IgnoresGenericWords(t *testing.T) {
+	groups := groupByToken(scanRepos("cart-service", "search-service", "availability-service"))
+	names := groupNames(groups)
+	for _, n := range names {
+		if n == "service" {
+			t.Fatalf("generic word became a category: %v", names)
+		}
+	}
+	if len(groups) != 3 {
+		t.Errorf("expected 3 distinct groups, got %v", names)
+	}
+}
+
+// A word unique to one repo must not invent a category for it.
+func TestGroupByToken_UniqueWordIsNotACategory(t *testing.T) {
+	groups := groupByToken(scanRepos("alpha-pricing", "beta-pricing", "lonely-experiment"))
+	names := groupNames(groups)
+	if len(names) != 2 {
+		t.Fatalf("expected pricing + the singleton, got %v", names)
+	}
+	var pricing *scanGroup
+	for i := range groups {
+		if groups[i].name == "pricing" {
+			pricing = &groups[i]
+		}
+	}
+	if pricing == nil || len(pricing.repos) != 2 {
+		t.Errorf("pricing should hold exactly the two pricing repos, got %v", names)
+	}
+}
+
+// The user's full worked example, end to end.
+func TestGroupByToken_EcommerceExample(t *testing.T) {
+	groups := groupByToken(scanRepos(
+		"china-pricing", "eu-pricing", "us-pricing",
+		"search-indexer", "search-ranking",
+		"availability-checker", "availability-sync",
+		"crm-customers", "crm-tickets",
+	))
+	got := groupNames(groups)
+	want := []string{"availability", "crm", "pricing", "search"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
+// Grouping must not depend on map iteration order.
+func TestGroupByToken_Deterministic(t *testing.T) {
+	in := scanRepos("a-pricing", "b-pricing", "c-search", "d-search")
+	first := groupNames(groupByToken(in))
+	for i := 0; i < 20; i++ {
+		if got := groupNames(groupByToken(in)); !equalStrings(got, first) {
+			t.Fatalf("run %d gave %v, first run gave %v", i, got, first)
+		}
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// --- interactive review ---
+
+// Enter keeps the suggested category, which is what a piped or CI run sends.
+func TestReviewGroups_EmptyAnswerKeepsSuggestion(t *testing.T) {
+	withStdin(t, "\n\n")
+	var got []scanGroup
+	captureStdout(func() {
+		got = reviewGroups([]scanGroup{{name: "pricing", repos: scanRepos("eu-pricing", "us-pricing")}})
+	})
+	if len(got) != 1 || got[0].name != "pricing" || len(got[0].repos) != 2 {
+		t.Fatalf("expected both repos kept in pricing, got %v", groupNames(got))
+	}
+}
+
+// "d" drops a repo that the name-based guess placed wrongly.
+func TestReviewGroups_DropsRepo(t *testing.T) {
+	withStdin(t, "\nd\n")
+	var got []scanGroup
+	captureStdout(func() {
+		got = reviewGroups([]scanGroup{{name: "pricing", repos: scanRepos("eu-pricing", "unrelated-thing")}})
+	})
+	if len(got) != 1 || len(got[0].repos) != 1 || got[0].repos[0].Name != "eu-pricing" {
+		t.Fatalf("expected only eu-pricing to survive, got %+v", got)
+	}
+}
+
+// Typing a name files the repo under that category instead - the
+// "does this really belong here?" correction.
+func TestReviewGroups_ReassignsRepo(t *testing.T) {
+	withStdin(t, "\ncrm\n")
+	var got []scanGroup
+	captureStdout(func() {
+		got = reviewGroups([]scanGroup{{name: "pricing", repos: scanRepos("eu-pricing", "customer-tickets")}})
+	})
+	names := groupNames(got)
+	if len(names) != 2 || names[0] != "crm" || names[1] != "pricing" {
+		t.Fatalf("expected crm + pricing, got %v", names)
+	}
+	for _, g := range got {
+		if g.name == "crm" && (len(g.repos) != 1 || g.repos[0].Name != "customer-tickets") {
+			t.Errorf("crm should hold customer-tickets, got %+v", g.repos)
+		}
+	}
+}
+
+// A typo that sanitises to nothing must not silently discard the repo.
+func TestReviewGroups_UnusableNameKeepsRepo(t *testing.T) {
+	withStdin(t, "***\n")
+	var got []scanGroup
+	captureStdout(func() {
+		got = reviewGroups([]scanGroup{{name: "pricing", repos: scanRepos("eu-pricing")}})
+	})
+	if len(got) != 1 || len(got[0].repos) != 1 {
+		t.Fatalf("repo must survive an unusable category name, got %+v", got)
 	}
 }

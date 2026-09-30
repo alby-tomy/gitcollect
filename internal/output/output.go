@@ -139,6 +139,19 @@ func Confirm(prompt string) bool {
 	return answer == "y" || answer == "yes"
 }
 
+// Prompt prints prompt to stderr and returns the line the user typed, with
+// surrounding whitespace removed. An empty return means they pressed Enter,
+// or that stdin is not interactive - callers treat that as "take the
+// default" so a piped or CI run behaves predictably instead of blocking.
+//
+// It shares readLine with Confirm deliberately: that reader is retained
+// across calls, and building a separate one here would discard whatever it
+// had buffered, breaking any run that answers more than one prompt.
+func Prompt(prompt string) string {
+	fmt.Fprint(os.Stderr, prompt)
+	return strings.TrimSpace(readLine())
+}
+
 // ConfirmWord prints prompt to stderr and requires the user to type word
 // exactly, for destructive confirmations such as delete.
 func ConfirmWord(prompt, word string) bool {
