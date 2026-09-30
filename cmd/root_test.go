@@ -90,7 +90,7 @@ func (m *rootMock) GetAuthenticatedUser() (api.UserInfo, error) {
 func (m *rootMock) GetUser(username string) (api.UserInfo, error) {
 	return api.UserInfo{ID: username + "-id", Login: username}, nil
 }
-func (m *rootMock) GetRepo(owner, repo string) (api.RepoInfo, error) { return api.RepoInfo{}, nil }
+func (m *rootMock) GetRepo(owner, repo string) (api.RepoInfo, error)               { return api.RepoInfo{}, nil }
 func (m *rootMock) AddCollaborator(owner, repo, username, permission string) error { return nil }
 func (m *rootMock) RemoveCollaborator(owner, repo, username string) error          { return nil }
 func (m *rootMock) CheckCollaborator(owner, repo, username string) (bool, error)   { return false, nil }
@@ -101,7 +101,7 @@ func (m *rootMock) ListCommits(owner, repo, branch string, limit int) ([]api.Com
 func (m *rootMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
-func (m *rootMock) Host() string                    { return "github.com" }
+func (m *rootMock) Host() string                      { return "github.com" }
 func (m *rootMock) GetTokenScopes() ([]string, error) { return []string{}, nil }
 func (m *rootMock) ListOrgTeams(org string) ([]api.TeamInfo, error) {
 	return nil, nil
@@ -115,7 +115,7 @@ func (m *rootMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
 func (m *rootMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
-func (m *rootMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *rootMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
 func (m *rootMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // resetCallerCache clears the package-level identity cache before a test and

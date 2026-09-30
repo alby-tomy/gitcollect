@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	statusDest             string
-	statusVerbose          bool
-	statusAll              bool
-	statusIncludeArchived  bool
+	statusDest            string
+	statusVerbose         bool
+	statusAll             bool
+	statusIncludeArchived bool
 
 	// injectable for testing — real git calls by default
 	statusGitStatusFn        = git.Status

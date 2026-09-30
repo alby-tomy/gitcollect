@@ -38,8 +38,8 @@ var findCmd = &cobra.Command{
 }
 
 type memberFindResult struct {
-	Username  string      `json:"username"`
-	FoundIn   []findMatch `json:"found_in"`
+	Username string      `json:"username"`
+	FoundIn  []findMatch `json:"found_in"`
 }
 
 func runFind(cmd *cobra.Command, args []string) error {
