@@ -38,8 +38,8 @@ Examples:
 
 If you want to recover the collection after accidental deletion, restore
 the YAML from backup and run gitcollect sync to re-apply platform access.`,
-	Args:  cobra.ExactArgs(1),
-	RunE:  runDelete,
+	Args: cobra.ExactArgs(1),
+	RunE: runDelete,
 }
 
 func init() {

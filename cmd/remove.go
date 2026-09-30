@@ -34,8 +34,8 @@ Examples:
 See also:
   gitcollect add       — add a repo to a collection
   gitcollect delete    — delete the entire collection`,
-	Args:  cobra.ExactArgs(2),
-	RunE:  runRemove,
+	Args: cobra.ExactArgs(2),
+	RunE: runRemove,
 }
 
 func init() {
