@@ -19,11 +19,11 @@ import (
 const defaultSyncConcurrency = 4
 
 var (
-	syncDryRun             bool
-	syncConcurrency        int
-	syncDest               string
-	syncAll                bool
-	syncIncludeArchived    bool
+	syncDryRun          bool
+	syncConcurrency     int
+	syncDest            string
+	syncAll             bool
+	syncIncludeArchived bool
 )
 
 var syncCmd = &cobra.Command{

@@ -18,24 +18,24 @@ func TestFormatSyncLine(t *testing.T) {
 		want   []string // substrings that must all appear
 	}{
 		{
-			name:   "cloned successfully",
-			r:      syncResult{name: "repo1", kind: syncKindClone, duration: 1200 * time.Millisecond},
-			want:   []string{"repo1", "not cloned", "cloning", "✓ done (1.2s)"},
+			name: "cloned successfully",
+			r:    syncResult{name: "repo1", kind: syncKindClone, duration: 1200 * time.Millisecond},
+			want: []string{"repo1", "not cloned", "cloning", "✓ done (1.2s)"},
 		},
 		{
-			name:   "pulled, up to date",
-			r:      syncResult{name: "repo2", kind: syncKindPull, newCommits: 0},
-			want:   []string{"repo2", "already cloned", "pulling", "✓ up to date"},
+			name: "pulled, up to date",
+			r:    syncResult{name: "repo2", kind: syncKindPull, newCommits: 0},
+			want: []string{"repo2", "already cloned", "pulling", "✓ up to date"},
 		},
 		{
-			name:   "pulled, new commits",
-			r:      syncResult{name: "repo3", kind: syncKindPull, newCommits: 3},
-			want:   []string{"repo3", "✓ 3 new commit(s)"},
+			name: "pulled, new commits",
+			r:    syncResult{name: "repo3", kind: syncKindPull, newCommits: 3},
+			want: []string{"repo3", "✓ 3 new commit(s)"},
 		},
 		{
-			name:   "failed",
-			r:      syncResult{name: "repo4", kind: syncKindClone, err: errors.New("boom")},
-			want:   []string{"repo4", "✗ failed: boom"},
+			name: "failed",
+			r:    syncResult{name: "repo4", kind: syncKindClone, err: errors.New("boom")},
+			want: []string{"repo4", "✗ failed: boom"},
 		},
 		{
 			name:   "dry run clone",

@@ -72,7 +72,7 @@ func (m *multiAddMock) ListCommits(owner, repo, branch string, limit int) ([]api
 func (m *multiAddMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
-func (m *multiAddMock) Host() string                    { return "github.com" }
+func (m *multiAddMock) Host() string                      { return "github.com" }
 func (m *multiAddMock) GetTokenScopes() ([]string, error) { return []string{}, nil }
 func (m *multiAddMock) ListOrgTeams(org string) ([]api.TeamInfo, error) {
 	return nil, nil
@@ -123,7 +123,7 @@ func (m *pendingInviteMock) ListCommits(owner, repo, branch string, limit int) (
 func (m *pendingInviteMock) CreateRepo(owner, name string, private bool, description string) (api.RepoInfo, error) {
 	return api.RepoInfo{Name: name, CloneURL: "https://github.com/" + owner + "/" + name + ".git", Private: private}, nil
 }
-func (m *pendingInviteMock) Host() string                    { return "github.com" }
+func (m *pendingInviteMock) Host() string                      { return "github.com" }
 func (m *pendingInviteMock) GetTokenScopes() ([]string, error) { return []string{}, nil }
 func (m *pendingInviteMock) ListOrgTeams(org string) ([]api.TeamInfo, error) {
 	return nil, nil
@@ -134,7 +134,7 @@ func (m *pendingInviteMock) ListTeamMembers(org, teamSlug, role string) ([]api.U
 func (m *pendingInviteMock) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
-func (m *pendingInviteMock) ListOrgRepos(org string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *pendingInviteMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
 func (m *pendingInviteMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 func (m *pendingInviteMock) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error) {
 	return nil, nil

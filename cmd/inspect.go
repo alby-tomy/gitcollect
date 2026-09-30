@@ -202,8 +202,8 @@ func inspectByRepo(col *collection.Collection, repoName string) error {
 }
 
 type inspectMatrixOutput struct {
-	Collection string             `json:"collection"`
-	Visibility string             `json:"visibility"`
+	Collection string              `json:"collection"`
+	Visibility string              `json:"visibility"`
 	Matrix     access.AccessMatrix `json:"matrix"`
 }
 
