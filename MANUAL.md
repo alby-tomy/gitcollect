@@ -53,6 +53,18 @@
 | join | New-hire onboarding: fetch your team's config and clone repos in one step | yes | — |
 | sync-config | Refresh local collections from the platform org state | yes | — |
 | version | Print version and platform information | no | no |
+| doctor | Health-check auth, token scopes and collection staleness | yes | no |
+| verify | Check every repo in a collection still exists on the platform | yes | no |
+| find | Find a repo across collections, or a member's collections | no | no |
+| pr | Open pull/merge requests across a collection | yes | no |
+| export | Print a collection as YAML or JSON | no | no |
+| describe | Set or clear a collection's description | no | yes |
+| concepts | Explain gitcollect's abstractions | no | no |
+| archive | Soft-archive a collection | no | yes |
+| scan | Discover org or personal repos and group them into collections | yes | — |
+| health | Consolidated health overview for a collection | yes | no |
+| unarchive | Make an archived collection visible again | no | yes |
+| get-update | Check for a newer gitcollect and install it | no | — |
 | completion | Generate the autocompletion script for the specified shell | no | no |
 
 ---
@@ -899,20 +911,39 @@ gitcollect diff cybersecurity --json
 **Usage:**
 ```
 gitcollect move <source-collection> <repo> <dest-collection> [flags]
+gitcollect move <source-collection> <dest-collection> --group <name> [flags]
 ```
 
 **Flags:**
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--group` | `""` | move every repo this group can reach, instead of one named repo |
 | `--dry-run` | false | preview access changes without executing |
+| `--yes` | false | skip the typed confirmation |
 
 **Example:**
 ```bash
 gitcollect move cybersecurity vuln-scanner red-team
 gitcollect move cybersecurity vuln-scanner red-team --dry-run
+
+# Hand a whole module to another team
+gitcollect move platform-team payments-team --group pricing
 ```
 
 **Notes:** Caller must be owner of both collections. Always shows the access diff before executing. Writes to the destination collection first; if that fails, nothing is changed.
+
+`--group` moves every repo the named group can reach — a module handed from
+one team to another in one operation rather than repo by repo. Note the
+positional arguments: `--group` replaces the repo name, so the group form
+takes source and destination only. Every repo is validated before anything
+moves; if even one already exists in the destination, nothing is moved, so a
+module is never left split across two collections.
+
+A move revokes real collaborator access for real people, so it asks you to
+type the name back before doing anything — the module name for a `--group`
+move, the repo name otherwise — the same confirmation GitHub asks for when
+deleting a repository. `--yes` skips it for scripts; `--dry-run` never
+prompts, because it changes nothing.
 
 **See also:** add, remove
 
@@ -1073,6 +1104,249 @@ gitcollect sync-config --all
 
 ---
 
+### gitcollect doctor
+
+**What it does:** Checks gitcollect's configuration and token validity. Reports authentication status for each configured host, collection health (staleness), and token scope availability.
+
+**Usage:**
+```
+gitcollect doctor [flags]
+```
+
+**Flags:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | false | machine-readable output |
+
+**Example:**
+```bash
+gitcollect doctor
+gitcollect doctor --json
+```
+
+**See also:** whoami, verify
+
+---
+
+### gitcollect verify
+
+**What it does:** Checks every repo in a collection against the platform API, detecting repos renamed, deleted, archived or made private since they were added.
+
+**Usage:**
+```
+gitcollect verify <collection> [flags]
+```
+
+**Flags:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--fix` | false | prompt to remove not_found repos |
+| `--json` | false | machine-readable output |
+
+**Example:**
+```bash
+gitcollect verify cybersecurity
+gitcollect verify cybersecurity --fix
+```
+
+**See also:** doctor, diff
+
+---
+
+### gitcollect find
+
+**What it does:** Searches all collections for a repo by name, or with `--member`, finds every collection a given login belongs to.
+
+**Usage:**
+```
+gitcollect find <repo> [flags]
+```
+
+**Flags:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--member` | `""` | find all collections a given member login belongs to |
+| `--json` | false | output result as JSON |
+
+**Example:**
+```bash
+gitcollect find vuln-scanner
+gitcollect find --member alice
+```
+
+**See also:** list, show
+
+---
+
+### gitcollect pr
+
+**What it does:** Fetches open pull requests (GitHub) or merge requests (GitLab) for every accessible repo in the collection and shows them as one table, newest first.
+
+**Usage:**
+```
+gitcollect pr <collection> [flags]
+```
+
+**Flags:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--author` | `""` | show only PRs opened by this login |
+| `--json` | false | machine-readable output |
+
+**Example:**
+```bash
+gitcollect pr cybersecurity
+gitcollect pr cybersecurity --author alice
+```
+
+**Notes:** Repos the platform refuses are named rather than silently counted as zero.
+
+**See also:** health, status
+
+---
+
+### gitcollect export
+
+**What it does:** Prints a collection to stdout as YAML or JSON, for backup or sharing. Output is pure data — no colour, no headers — and the exported YAML round-trips cleanly back into `~/.gitcollect/collections/`.
+
+**Usage:**
+```
+gitcollect export [collection] [flags]
+```
+
+**Flags:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--all` | false | export all collections |
+| `--json` | false | output as JSON instead of YAML |
+
+**Example:**
+```bash
+gitcollect export cybersecurity > backup.yaml
+gitcollect export --all --json
+```
+
+**See also:** publish, copy
+
+---
+
+### gitcollect describe
+
+**What it does:** Sets a free-text description on a collection. Pass an empty string, or omit the argument, to clear it.
+
+**Usage:**
+```
+gitcollect describe <collection> [description]
+```
+
+**Example:**
+```bash
+gitcollect describe cybersecurity "Security tooling and scanners"
+gitcollect describe cybersecurity
+```
+
+**Notes:** Owner only.
+
+**See also:** show, rename
+
+---
+
+### gitcollect concepts
+
+**What it does:** Prints a reference explaining gitcollect's main abstractions and how they map to the underlying GitHub/GitLab behaviour.
+
+**Usage:**
+```
+gitcollect concepts
+```
+
+**See also:** doctor
+
+---
+
+### gitcollect archive
+
+**What it does:** Soft-archives a collection by setting `archived: true` in its YAML manifest.
+
+**Usage:**
+```
+gitcollect archive <collection>
+```
+
+**Example:**
+```bash
+gitcollect archive old-project
+```
+
+**Notes:** Archived collections are excluded from `list`, `sync --all` and `status --all` unless `--include-archived` is passed. The YAML file and all its repos remain on disk — archive is not delete.
+
+**See also:** unarchive, list
+
+---
+
+## Discovery and dashboards
+
+### gitcollect scan
+
+**What it does:** Reads every repository in a GitHub org or GitLab group — or, with `--user`, in a personal account — and buckets them into collections by the words in their names.
+
+**Usage:**
+```
+gitcollect scan (--org <org> | --user <login>) [flags]
+```
+
+**Flags:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--org` | `""` | org or group to scan |
+| `--user` | `""` | personal account to scan instead of an org |
+| `--from` | `github` | platform: `github` or `gitlab` |
+| `--group-by` | `token` | grouping strategy: `token`, `prefix` or `flat` |
+| `--interactive` | false | confirm each repo's category before writing |
+| `--dry-run` | false | preview collections without writing files |
+| `--apply` | false | write collection YAML files |
+| `--no-archived` | false | exclude archived repos |
+| `--verify` | false | report what the current token could actually see |
+
+**Example:**
+```bash
+gitcollect scan --org acme-corp
+gitcollect scan --org acme-corp --apply
+gitcollect scan --user jsmith --interactive
+```
+
+**Notes:** Exactly one of `--org` or `--user` is required; they are mutually exclusive, because an org and a personal account are different API endpoints and asking for one through the other's simply fails. Scanning your own login includes your private repos; naming someone else returns only what your token can see.
+
+`--group-by token` (the default) buckets on the most widely shared meaningful word *wherever it appears in the name*, so `china-pricing`, `eu-pricing` and `us-pricing` all land in one `pricing` collection. A word must be shared by at least two repos before it can name a group, and generic terms (`service`, `api`, `core`, …) are ignored so `cart-service` and `search-service` are not collapsed into a meaningless `service` bucket. `prefix` uses only the first hyphenated segment — right for a deliberate namespace like `payments-gateway`, but it splits regional variants of one module apart. `flat` puts everything in one collection.
+
+Grouping by name is a guess. `--interactive` confirms each repo before anything is written: Enter accepts the suggested category, `d` drops the repo, and typing a name files it under that category instead. This is the check for an account holding several unrelated projects, where a repo can be matched to the wrong one.
+
+scan never overwrites: a collection that already exists is skipped, so re-running `--apply` cannot lose members, groups or per-repo access rules.
+
+**See also:** add, import
+
+---
+
+### gitcollect health
+
+**What it does:** Shows a consolidated health overview for a collection: how many repos are cloned locally vs total accessible, how many have local changes, how many are behind their remote, and the total open pull/merge requests across all accessible repos.
+
+**Usage:**
+```
+gitcollect health <collection> [flags]
+```
+
+**Example:**
+```bash
+gitcollect health cybersecurity
+```
+
+**Notes:** Repos that have not been cloned yet are counted but skipped for local checks. Run `gitcollect sync <collection>` to clone any missing repos first.
+
+**See also:** status, diff, pr
+
+---
+
 ## System
 
 ### gitcollect version
@@ -1091,8 +1365,71 @@ gitcollect version
 
 **Output example:**
 ```
-gitcollect dev windows/amd64
+gitcollect v3.3.0 linux/amd64
 ```
+
+**Notes:** `gitcollect --version` and `gitcollect -v` print the same line, so
+the version is reachable the way every other CLI offers it, not only through
+the subcommand.
+
+A binary built from a source checkout does *not* report `dev`: Go stamps a
+pseudo-version such as `v3.0.2-0.20260914175157-eb4982ebc6d1+dirty`, where
+the trailing `+dirty` marks uncommitted changes. Only a build with no module
+information at all reports `dev`.
+
+---
+
+### gitcollect unarchive
+
+**What it does:** Clears `archived: true` from a collection's YAML manifest, making it visible again in `list`, `sync --all` and `status --all`.
+
+**Usage:**
+```
+gitcollect unarchive <collection>
+```
+
+**Example:**
+```bash
+gitcollect unarchive old-project
+```
+
+**Notes:** Only the collection owner can unarchive it. Archiving never deletes the YAML — archive is not delete.
+
+**See also:** list
+
+---
+
+### gitcollect get-update
+
+**What it does:** Compares the running binary against the latest published release and installs it if there is a newer one.
+
+**Usage:**
+```
+gitcollect get-update [flags]
+```
+
+**Aliases:** `update`, `upgrade`, `self-update`
+
+**Flags:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--check` | false | report whether an update exists, change nothing |
+| `--yes` | false | do not prompt before installing |
+
+**Example:**
+```bash
+gitcollect get-update
+gitcollect get-update --check
+gitcollect get-update --yes
+```
+
+**Notes:** Requires v3.2.0 or newer — earlier binaries do not carry this command. Check with `gitcollect --version`; if you are behind, upgrade once by hand and get-update carries itself forward from then on.
+
+How the upgrade happens follows how gitcollect was installed. A **release binary** downloads the archive for your platform, verifies it against the published SHA-256 in `checksums.txt`, and replaces the binary in place — a download whose checksum does not match is refused, never installed. A **go install** build re-runs `go install github.com/alby-tomy/gitcollect/v3@latest` rather than overwriting the file, so the Go toolchain stays the source of truth for the binary it manages. A build **from source** is refused, and says so.
+
+If the binary lives somewhere unwritable (`/usr/local/bin` on most systems), get-update reports the permission error rather than half-replacing it — re-run with elevated privileges.
+
+**See also:** version
 
 ---
 
@@ -1126,11 +1463,6 @@ gitcollect completion powershell >> $PROFILE; . $PROFILE
 
 ## Commands not yet implemented
 
-| Command | Planned in |
-|---------|-----------|
-| `gitcollect doctor` | FEATURE_GAPS.md (B2) |
-| `gitcollect verify` | FEATURE_GAPS.md (B4) |
-| `gitcollect export` | FEATURE_GAPS.md (C1) |
-| `gitcollect concepts` | FEATURE_GAPS.md (B1) |
-| `gitcollect find` | FEATURE_GAPS.md |
-| `gitcollect describe` | FEATURE_GAPS.md |
+None. This section previously listed `doctor`, `verify`, `export`,
+`concepts`, `find` and `describe` as planned; all six have shipped. Run
+`gitcollect --help` for the authoritative list.
