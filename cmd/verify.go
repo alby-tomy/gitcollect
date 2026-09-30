@@ -128,11 +128,6 @@ func runVerify(cmd *cobra.Command, args []string) error {
 }
 
 func checkAllRepos(col *collection.Collection, client api.Client) []verifyResult {
-	type work struct {
-		idx  int
-		repo collection.RepoAccess
-	}
-
 	results := make([]verifyResult, len(col.Repos))
 	sem := make(chan struct{}, 4)
 	var wg sync.WaitGroup

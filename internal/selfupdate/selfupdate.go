@@ -342,6 +342,14 @@ func Replace(path string, binary []byte) error {
 		tmp.Close()
 		return fmt.Errorf("could not write the new binary: %w", err)
 	}
+	// Flush to disk before the rename. os.Rename makes the directory entry
+	// atomic, not the file's contents: without this, a crash between the
+	// rename and the kernel's writeback leaves a correctly named file
+	// holding zero or partial bytes, which here would leave an unrunnable gitcollect on the PATH.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("could not write the new binary: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("could not write the new binary: %w", err)
 	}

@@ -44,11 +44,11 @@ var (
 	ErrAlreadyExists = errors.New("collection already exists")
 	ErrInvalidName   = errors.New("invalid name")
 
-	nameRe        = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$`)
-	repoNameRe    = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
-	usernameRe    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
-	groupNameRe   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,30}$`)
-	namespaceRe   = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
+	nameRe      = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$`)
+	repoNameRe  = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
+	usernameRe  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
+	groupNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,30}$`)
+	namespaceRe = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
 )
 
 // ValidateCollectionName reports whether name is a safe, well-formed
@@ -141,12 +141,12 @@ type Collection struct {
 	// is resolved (member add/group add/repo grant already need the
 	// login to get the ID in the first place) and when an old-format file
 	// is migrated. Empty/nil on a "1" file that hasn't been migrated yet.
-	Logins    map[string]string `yaml:"logins"`
+	Logins map[string]string `yaml:"logins"`
 	// Namespace is the GitHub/GitLab username or org name under which the
 	// repos in this collection live. Used for API path building only —
 	// defaults to the owner's cached login if empty. Set via
 	// "gitcollect init --namespace <org>" when repos live under an org.
-	Namespace string    `yaml:"namespace,omitempty"`
+	Namespace string `yaml:"namespace,omitempty"`
 	// Archived marks the collection as inactive. Archived collections are
 	// hidden from list/sync --all/status --all unless --include-archived is
 	// passed. The YAML is preserved on disk — archive is not delete.
@@ -179,18 +179,18 @@ func New(name, host string, owner api.UserInfo, visibility Visibility) (*Collect
 	}
 	now := time.Now().UTC()
 	return &Collection{
-		Version:     CurrentVersion,
-		Name:        name,
-		Host:        host,
-		Owner:       owner.ID,
-		Visibility:  visibility,
-		Members:     []string{},
-		Groups:      map[string][]string{},
-		Repos:       []RepoAccess{},
-		Logins:      map[string]string{owner.ID: owner.Login},
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		path:        path,
+		Version:    CurrentVersion,
+		Name:       name,
+		Host:       host,
+		Owner:      owner.ID,
+		Visibility: visibility,
+		Members:    []string{},
+		Groups:     map[string][]string{},
+		Repos:      []RepoAccess{},
+		Logins:     map[string]string{owner.ID: owner.Login},
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		path:       path,
 	}, nil
 }
 
@@ -399,6 +399,14 @@ func (c *Collection) Save() error {
 	defer os.Remove(tmpPath)
 
 	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("could not write collection %q: %w", c.Name, err)
+	}
+	// Flush to disk before the rename. os.Rename makes the directory entry
+	// atomic, not the file's contents: without this, a crash between the
+	// rename and the kernel's writeback leaves a correctly named file
+	// holding zero or partial bytes, which here would lose the whole collection manifest.
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return fmt.Errorf("could not write collection %q: %w", c.Name, err)
 	}

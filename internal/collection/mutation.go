@@ -32,15 +32,6 @@ func removeString(list []string, target string) []string {
 	return out
 }
 
-func containsString(list []string, target string) bool {
-	for _, s := range list {
-		if s == target {
-			return true
-		}
-	}
-	return false
-}
-
 // cloneLogins returns a shallow copy of m. Maps are reference types, so a
 // mutation function that needs to roll back a failed sync must mutate a
 // copy and restore the original map afterward — reassigning the same

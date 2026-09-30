@@ -175,6 +175,11 @@ var (
 	// platform by another means between the two. Callers treat this as
 	// success: the repo exists, which is what we wanted.
 	ErrNameConflict = errors.New("repository already exists")
+
+	// errStopPagination is returned by a paginate callback that has all the
+	// results it needs. The paginate helpers treat it as a clean stop, not
+	// a failure, so it never escapes to a caller.
+	errStopPagination = errors.New("stop pagination")
 )
 
 // NewClient returns the Client implementation for host: GitHub for

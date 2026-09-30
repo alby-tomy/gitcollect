@@ -162,6 +162,14 @@ func (c *Config) save() error {
 		tmp.Close()
 		return fmt.Errorf("could not write config: %w", err)
 	}
+	// Flush to disk before the rename. os.Rename makes the directory entry
+	// atomic, not the file's contents: without this, a crash between the
+	// rename and the kernel's writeback leaves a correctly named file
+	// holding zero or partial bytes, which for this file means the stored auth tokens.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("could not write config: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("could not write config: %w", err)
 	}

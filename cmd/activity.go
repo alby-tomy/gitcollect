@@ -47,7 +47,7 @@ func init() {
 	activityCmd.Flags().StringVar(&activityRepo, "repo", "", "show activity for only this repo")
 	activityCmd.Flags().StringVar(&activityAuthor, "author", "", "filter to commits by this author login")
 	activityCmd.Flags().StringVar(&activitySince, "since", "", "filter to commits within this duration: 1h, 24h, 7d, 30d, or 90d")
-	activityCmd.Flags().IntVar(&activityLimit, "limit", defaultActivityLimit, "max commits to fetch per repo this run")
+	activityCmd.Flags().IntVar(&activityLimit, "limit", defaultActivityLimit, "max commits to fetch per repo this run (paginated; values above 100 span multiple API requests)")
 	activityCmd.Flags().BoolVar(&activityJSON, "json", false, "machine-readable output")
 	rootCmd.AddCommand(activityCmd)
 }
