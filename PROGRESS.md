@@ -13,17 +13,20 @@ It does not replace Git. It wraps Git and the GitHub/GitLab APIs to add the grou
 
 ---
 
-## Current state (as of Session 27)
+## Current state (v3.3.0, `2ebb3bf`)
 
 | Check | Result |
 |---|---|
-| `go build -o bin/gitcollect .` | ✓ clean |
 | `go build ./...` | ✓ clean |
-| `go test ./...` | ✓ all packages pass |
 | `go vet ./...` | ✓ clean |
-| `go test -cover ./cmd/...` | ✓ 60.9% |
+| `go test ./... -race` | ✓ all 10 packages pass |
+| `gofmt -l .` | ✓ empty |
+| `staticcheck ./...` | ✓ clean but for 3 deliberate ST1005s (multi-sentence CLI guidance where the trailing full stop is correct) |
+| `go test -cover ./cmd/...` | 67.4% |
 | Identity migration | ✓ complete — immutable platform IDs |
-| cmd test files | 37 / 39 command files have a test file |
+| cmd test files | 44 / 44 command files have a test file |
+| Latest release | v3.3.0 — 7 assets, serving as `latest` |
+| Open defects | 6 verified, 1 unverified — see the defect register |
 
 ---
 
@@ -423,19 +426,27 @@ These were considered and explicitly rejected:
 
 ## Test coverage
 
-| Package | Coverage | Notes |
-|---|---|---|
-| `internal/collection` | 83.8% | All mutations, access logic, rollback paths |
-| `internal/access` | 93.9% | Full access matrix, owner bypass, inspect views |
-| `internal/api` | 85.5% | GitHub + GitLab against `httptest.Server` |
-| `internal/audit` | 82.8% | Append, read, Filter, FilterByDate, FilterByAction |
-| `internal/activity` | 84.4% | Append, read, filter, dedup |
-| `internal/git` | 85.4% | Clone, Pull, PullWithSummary, CommitsBehind (fake-git harness) |
-| `internal/config` | 82.5% | Token, user, ID cache; directory paths |
-| `internal/output` | 98.1% | Table, JSON, confirm, stale/invite warnings |
-| `cmd` | 60.9% | 37 of 39 command files have test files; 2 untested: inspect, remove, repo |
+Measured with `go test ./... -cover` at `2ebb3bf` (v3.3.0). These replace an
+earlier set of figures that had drifted: several were recorded above the
+80% bar that the code no longer meets, so the table was reporting a
+standard rather than a measurement.
 
-The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14–26. All `internal/` packages remain above the 80% requirement.
+| Package | Coverage | Against 80% bar | Notes |
+|---|---|---|---|
+| `internal/access` | 100.0% | pass | Full access matrix, owner bypass, inconclusive-check paths |
+| `internal/output` | 95.2% | pass | Table, JSON, confirm, prompt, stale/invite warnings |
+| `internal/audit` | 87.2% | pass | Append, read, Filter, FilterByDate, FilterByAction |
+| `internal/activity` | 84.4% | pass | Append, read, filter, dedup |
+| `internal/selfupdate` | 75.9% | **below** | Added v3.2.0; download/verify/extract/replace covered, error branches thinner |
+| `internal/config` | 73.9% | **below** | Token, user, ID cache; directory paths |
+| `internal/collection` | 67.7% | **below** | Mutations, access logic, rollback paths |
+| `internal/git` | 66.7% | **below** | Clone, Pull, PullWithSummary, CommitsBehind (fake-git harness) |
+| `internal/api` | 59.3% | **below** | GitHub + GitLab against `httptest.Server`; the largest gap |
+| `cmd` | 67.4% | n/a | 44 command files, all with a test file |
+
+`internal/api` is the one worth attention: it is the largest package, it is
+where every platform call lives, and its uncovered half is mostly error and
+pagination branches — exactly where the last three API defects were found.
 
 ---
 
@@ -444,9 +455,9 @@ The `cmd` package's previously low coverage (15.5%) was addressed in Sessions 14
 All 13 SCOPED_COMPLETION_CHECK.md prompt files have been verified and gaps closed as of Session 27.
 
 ### Uncovered command files (no test file)
-- cmd/inspect.go — no inspect_test.go
-- cmd/remove.go — no remove_test.go
-- cmd/repo.go — no repo_test.go
+None. All 44 files in `cmd/` have a corresponding `_test.go`. The three
+previously listed here (`inspect`, `remove`, `repo`) now have test files;
+the entry also miscounted, saying "2 untested" while naming three.
 
 ### Optional
 - APPLY_SAMPLE_THEME.md / DOCS_THEME_REDESIGN.md — both effectively applied (lime #C8FF57 / Space Grotesk / JetBrains Mono theme is live in docs/index.html). No further visual changes pending unless explicitly requested.
@@ -473,6 +484,57 @@ These are implementation choices the agent made independently, confirmed as legi
 
 ---
 
-## Bugs noted
+## Defect register
 
-No currently open bugs — all known bugs were fixed in commit 19c86e2.
+Verified against the tree at `2ebb3bf` (v3.3.0). The previous entry read
+"No currently open bugs"; that had gone stale — nine defects have been
+found and fixed since, and several verified gaps remain open below.
+
+Each closed entry names the commit, so the claim can be checked rather
+than taken on trust. Every SHA below was verified to be an ancestor of
+`main` and of the release named beside it.
+
+A caution on those SHAs: this history has been rewritten more than once to
+reassign authorship, and each rewrite silently invalidated every commit ID
+recorded here. If it is rewritten again, re-resolve these by commit subject
+rather than trusting the IDs — a stale SHA in a defect register is worse
+than none, because it reads as evidence while resolving to nothing.
+
+### Closed — fixed and released
+
+| # | Defect | Impact | Fixed in | First release |
+|---|---|---|---|---|
+| D1 | Module path lacked the `/v3` suffix | `go install ...@latest` silently served **v1.0.0**; v2.0.0–v3.0.0 were never installable | `f4b0f10` | v3.1.0 |
+| D2 | Release tagged on a commit reachable from no branch | Released code absent from `main` and from a fresh clone | `3d2823c` | v3.1.0 |
+| D3 | `git fetch --depth=0` in the release gate | `fatal: depth 0 is not a positive number`; under `bash -e` this would have blocked **every** release | `3d2823c` | v3.1.0 |
+| D4 | `ListCommits` silently capped at 100 | `activity --limit 250` returned 100 and reported success; the recorded activity log quietly omitted the rest. GitHub and GitLab *clamp* `per_page` rather than rejecting it, so nothing errored | `feda7eb` | v3.2.0 |
+| D5 | No `fsync` before rename in the three atomic writers | `rename` makes the directory entry atomic, not the contents. A crash before writeback left a correctly-named file holding zero bytes — losing stored auth tokens, a whole collection manifest, or the binary itself | `439d5cf` | v3.2.0 |
+| D6 | `get-update` misread a source build as a release | Go stamps a pseudo-version (`v3.0.2-0.20260914175157-...+dirty`), not `"dev"`; it parsed as 3.0.2 and compared *older*, so the guard meant to protect a developer's uncommitted build offered to overwrite it | `79040f3` | v3.2.0 |
+| D7 | `scan` grouped on the first name segment only | `china-pricing`, `eu-pricing`, `us-pricing` — one team's module — became three collections named "china", "eu", "us", scattering the module the operator was assembling | `02c1c00` | v3.3.0 |
+| D8 | Exhausted rate limit reported as "insufficient permissions" | GitHub answers a spent *primary* limit with **403 + `X-RateLimit-Remaining: 0`**, not 429. Users were sent to audit token scopes when the answer was to wait. Not a corner case: sync costs one call per member-repo pair | `2a878a2` | v3.3.0 |
+| D9 | An unanswerable platform check was treated as a denial | Any 403 — spent quota, missing scope, refused endpoint — blocked the caller. `FilterAccessible` abandoned the whole listing on the first refusal, so one unverifiable repo made `status`, `clone`, `sync`, `activity`, `pr` and `health` report nothing. Failed asymmetrically: an owner's admin token answers fine, a read-only member's may not | `9ce9b5c` | v3.3.0 |
+
+### Open — verified, not fixed
+
+| # | Gap | Evidence | Notes |
+|---|---|---|---|
+| O1 | No hierarchy | `Collection` has no parent/child field; `Groups` maps a name to *people*, not repos | `e-commerce → pricing → china-pricing` cannot be represented. Needs a schema change plus a YAML migration, touching sync and access resolution |
+| O2 | Sync is O(members × repos) | `Collection.SyncCollaborators` builds one job per member-repo pair | 30 members × 20 repos = 600 calls per sync against a 5000/hr limit. D8 exists because of this |
+| O3 | Grants are individual collaborators, not teams | every grant is `AddCollaborator` | Inside an org this sits outside the team structure, costs one call per pair, and sends an invite per person per repo. `PUT /orgs/{org}/teams/{team}/repos/...` would be one call regardless of member count |
+| O4 | One namespace per collection | `RepoNamespace()` returns `Namespace` or the owner's login | A collection cannot span a personal account *and* an org, which limits "sort all my repos by project" |
+| O5 | Re-pushing an existing tag fails the release workflow | runs `36784953053` / `36784986666`: `verify tag` passed, goreleaser failed with `422 ... Code:already_exists` | Harmless — both releases were already published intact — but it reports a red run for a no-op. The workflow should treat an existing release for the tag as a clean skip |
+| O6 | Five packages below the stated 80% coverage bar | see the coverage table above | `internal/api` at 59.3% is the notable one: its uncovered half is mostly error and pagination branches, which is where D4, D8 and D9 all lived |
+
+### Open — unverified
+
+| # | Suspected | Why it is still open |
+|---|---|---|
+| U1 | GitHub's collaborator-check endpoint may require more than the read access gitcollect grants members | Confirming it needs a second account and a private repo; `docs.github.com` was unreachable from the environment used. D9 makes the failure survivable either way — members now get a warning and working commands instead of a lockout — but whether it fires in practice is untested. **To test:** add a second account as a read-only member and run `gitcollect clone` as them; a "Could not confirm platform access" warning means it is real |
+
+### Release history note
+
+`v3.2.0` was tagged at `caa546c` while later work was already on `main`, so
+D7, D8, D9 and the `scan`/`move` features missed it and shipped in `v3.3.0`
+instead. `v3.2.0` itself is intact and published. The tag was not re-pointed:
+moving a tag detaches its GitHub release and drafts it, which had already
+happened once to `v3.0.0` earlier in the same session.
