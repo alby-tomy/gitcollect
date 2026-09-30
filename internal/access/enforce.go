@@ -10,6 +10,7 @@ import (
 
 	"github.com/alby-tomy/gitcollect/v3/internal/api"
 	"github.com/alby-tomy/gitcollect/v3/internal/collection"
+	"github.com/alby-tomy/gitcollect/v3/internal/output"
 )
 
 var (
@@ -63,12 +64,44 @@ func CheckRepoAccess(col *collection.Collection, repoName, callerID string, clie
 	ownerLogin := col.RepoNamespace()
 	has, err := client.CheckCollaborator(ownerLogin, repoName, col.Logins[callerID])
 	if err != nil {
-		return fmt.Errorf("could not verify platform access to %s: %w", repoName, err)
+		// Inconclusive, not denied. See the note on unverifiedWarning: the
+		// local rules above have already authorised this caller, and the
+		// platform independently enforces the actual clone or pull, so a
+		// check that could not be completed must not stand in for a "no".
+		unverifiedWarning(1, err)
+		return nil
 	}
 	if !has {
 		return fmt.Errorf("%w: not yet a collaborator on %s/%s — access has not synced", ErrNoAccess, ownerLogin, repoName)
 	}
 	return nil
+}
+
+// unverifiedWarning reports that a platform access check could not be
+// completed, and that gitcollect proceeded anyway.
+//
+// This is deliberately not a failure. The collaborator check is a courtesy:
+// it turns a bare "git: authentication failed" into a sentence that names
+// the collection and says access has not synced yet. It is not the security
+// boundary — the caller has already passed the collection and repo rules in
+// the manifest, and the platform enforces the real operation regardless of
+// what gitcollect believes.
+//
+// Treating a failed check as a denial therefore bought no safety and cost
+// the tool its function. Any 403 would do it: an exhausted rate limit, a
+// token missing a scope, or an endpoint that wants more than the read
+// access gitcollect deliberately grants its members. In that last case
+// every read-only member — the people this tool exists to serve — would be
+// unable to clone, pull, sync, or see status, while the owner, whose token
+// has admin, saw nothing wrong at all.
+func unverifiedWarning(n int, err error) {
+	switch {
+	case n == 1:
+		output.Warn("Could not confirm platform access: %v", err)
+	default:
+		output.Warn("Could not confirm platform access for %d repo(s): %v", n, err)
+	}
+	output.Dim("  Continuing — the platform enforces access on the operation itself.")
 }
 
 // FilterAccessible returns only the repos accessible to callerID, combining
@@ -86,14 +119,28 @@ func FilterAccessible(col *collection.Collection, callerID string, client api.Cl
 	callerLogin := col.Logins[callerID]
 
 	accessible := make([]collection.RepoAccess, 0, len(candidates))
+	var unverified int
+	var firstErr error
 	for _, repo := range candidates {
 		has, err := client.CheckCollaborator(ownerLogin, repo.Name, callerLogin)
 		if err != nil {
-			return nil, fmt.Errorf("could not verify platform access to %s: %w", repo.Name, err)
+			// Keep the repo and carry on rather than abandoning the whole
+			// listing on the first refusal: one unverifiable repo used to
+			// empty the entire result, so a single rate-limited call made
+			// status, clone and sync report nothing at all.
+			unverified++
+			if firstErr == nil {
+				firstErr = err
+			}
+			accessible = append(accessible, repo)
+			continue
 		}
 		if has {
 			accessible = append(accessible, repo)
 		}
+	}
+	if unverified > 0 {
+		unverifiedWarning(unverified, firstErr)
 	}
 	return accessible, nil
 }

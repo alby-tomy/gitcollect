@@ -409,3 +409,115 @@ func TestSyncCollaborators_ProgressCallbackCalled(t *testing.T) {
 	}
 	_ = calls
 }
+
+// --- inconclusive platform checks (G4) ---
+//
+// The collaborator check is a courtesy that turns a bare git auth failure
+// into a sentence naming the collection. It is not the security boundary:
+// the local rules have already authorised the caller, and the platform
+// enforces the real clone or pull regardless. So a check that could not be
+// *completed* must not be treated as a "no" - doing so bought no safety and
+// would lock out exactly the read-only members gitcollect exists to serve,
+// on any 403 at all: a spent rate limit, a missing token scope, or an
+// endpoint wanting more than the read access members are granted.
+
+func TestCheckRepoAccess_InconclusiveCheckDoesNotDeny(t *testing.T) {
+	col := newCol(t, collection.VisibilityPrivate)
+	col.Members = []string{"alice"}
+	col.Repos = []collection.RepoAccess{{Name: "r", Groups: []string{}, Users: []string{}}}
+
+	client := newMockClient()
+	client.failCheck = true // the platform refuses to answer
+
+	if err := CheckRepoAccess(col, "r", "alice", client); err != nil {
+		t.Fatalf("an unanswerable check must not deny access, got %v", err)
+	}
+}
+
+// A definitive "not a collaborator" is still a denial - that answer is
+// information, and reporting it early beats letting git fail obscurely.
+func TestCheckRepoAccess_DefiniteNoStillDenies(t *testing.T) {
+	col := newCol(t, collection.VisibilityPrivate)
+	col.Members = []string{"alice"}
+	col.Repos = []collection.RepoAccess{{Name: "r", Groups: []string{}, Users: []string{}}}
+
+	client := newMockClient() // answers, and the answer is no
+
+	if err := CheckRepoAccess(col, "r", "alice", client); !errors.Is(err, ErrNoAccess) {
+		t.Fatalf("expected ErrNoAccess for a definite no, got %v", err)
+	}
+}
+
+// Local rules still decide. Failing open on the platform check must not
+// hand access to someone the manifest never granted.
+func TestCheckRepoAccess_InconclusiveCheckStillHonoursLocalRules(t *testing.T) {
+	col := newCol(t, collection.VisibilityPrivate)
+	col.Members = []string{"alice", "bob"}
+	col.Groups = map[string][]string{"red-team": {"alice"}}
+	col.Repos = []collection.RepoAccess{{Name: "r", Groups: []string{"red-team"}}}
+
+	client := newMockClient()
+	client.failCheck = true
+
+	// bob is a member but not in the group: still denied, locally.
+	if err := CheckRepoAccess(col, "r", "bob", client); !errors.Is(err, ErrGroupDenied) {
+		t.Errorf("group rules must still apply, got %v", err)
+	}
+	// a non-member is still refused before the platform is consulted.
+	if err := CheckRepoAccess(col, "r", "stranger", client); !errors.Is(err, ErrForbidden) {
+		t.Errorf("non-members must still be refused, got %v", err)
+	}
+}
+
+// One unverifiable repo used to empty the whole listing, so a single
+// rate-limited call made status, clone and sync report nothing at all.
+func TestFilterAccessible_InconclusiveCheckKeepsRepos(t *testing.T) {
+	col := newCol(t, collection.VisibilityPrivate)
+	col.Members = []string{"alice"}
+	col.Repos = []collection.RepoAccess{
+		{Name: "one", Groups: []string{}, Users: []string{}},
+		{Name: "two", Groups: []string{}, Users: []string{}},
+	}
+
+	client := newMockClient()
+	client.failCheck = true
+
+	got, err := FilterAccessible(col, "alice", client)
+	if err != nil {
+		t.Fatalf("an unanswerable check must not fail the listing, got %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected both repos kept when unverifiable, got %d", len(got))
+	}
+}
+
+// Failing open applies only to the platform check, never to the manifest.
+func TestFilterAccessible_InconclusiveCheckStillHonoursLocalRules(t *testing.T) {
+	col := newCol(t, collection.VisibilityPrivate)
+	col.Members = []string{"alice", "bob"}
+	col.Groups = map[string][]string{"red-team": {"alice"}}
+	col.Repos = []collection.RepoAccess{
+		{Name: "open", Groups: []string{}, Users: []string{}},
+		{Name: "restricted", Groups: []string{"red-team"}},
+	}
+
+	client := newMockClient()
+	client.failCheck = true
+
+	got, err := FilterAccessible(col, "bob", client)
+	if err != nil {
+		t.Fatalf("FilterAccessible: %v", err)
+	}
+	for _, r := range got {
+		if r.Name == "restricted" {
+			t.Fatal("bob must never see a repo his group rules exclude, verified or not")
+		}
+	}
+	if len(got) != 1 || got[0].Name != "open" {
+		t.Fatalf("expected only the open repo, got %v", got)
+	}
+
+	if _, err := FilterAccessible(col, "stranger", client); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("non-members must still be refused, got %v", err)
+	}
+}
