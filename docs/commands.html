@@ -486,6 +486,7 @@
       <div class="nav-section-label">Maintenance</div>
       <ul class="nav-links">
         <li><a href="#doctor">Doctor</a></li>
+        <li><a href="#get-update">Get-update</a></li>
         <li><a href="#verify">Verify</a></li>
         <li><a href="#audit">Audit log</a></li>
         <li><a href="#export">Export &amp; import</a></li>
@@ -986,6 +987,59 @@ Run: gitcollect sync payments-team   to clone new repos and pull existing</span>
       </div>
     </section>
 
+    <!-- ── GET-UPDATE ── -->
+    <section id="get-update" class="section">
+      <div class="container">
+        <div class="section-label">Maintenance</div>
+        <h2 class="section-title">Get-update — upgrade to the latest release <span class="pill pill-both">All users</span></h2>
+
+        <div class="term">
+          <div class="term-header">
+            <div class="term-dots"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div></div>
+            Compare against the latest release and install it
+          </div>
+          <div class="term-body"><span class="p">$</span> <span class="c">gitcollect get-update</span>
+<span class="d">Checking for a newer gitcollect...</span>
+<span class="s">✓ Update available: v3.0.0 → 3.1.0</span>
+<span class="o">  https://github.com/alby-tomy/gitcollect/releases/tag/v3.1.0</span>
+<span class="o">Install 3.1.0 now? [y/N]: </span><span class="c">y</span>
+<span class="d">Downloading 3.1.0 for linux/amd64...</span>
+<span class="s">✓ Checksum verified</span>
+<span class="s">✓ Updated to 3.1.0</span>
+<span class="o">  Replaced /usr/local/bin/gitcollect</span>
+
+<span class="d"># Report only — changes nothing. Useful in a shell prompt or a script.</span>
+<span class="p">$</span> <span class="c">gitcollect get-update</span> <span class="f">--check</span>
+
+<span class="d"># Skip the confirmation.</span>
+<span class="p">$</span> <span class="c">gitcollect get-update</span> <span class="f">--yes</span>
+
+<span class="d"># Already current</span>
+<span class="p">$</span> <span class="c">gitcollect get-update</span>
+<span class="s">✓ gitcollect v3.1.0 is the latest release</span></div>
+        </div>
+
+        <p>The upgrade follows however gitcollect was installed:</p>
+        <ul>
+          <li><strong>Release binary</strong> — downloads the archive for your platform, verifies it
+            against the published SHA-256 in <code>checksums.txt</code>, and replaces the binary in
+            place. A download whose checksum does not match is <em>refused</em>, never installed.</li>
+          <li><strong>go install</strong> — re-runs
+            <code>go install github.com/alby-tomy/gitcollect/v3@latest</code> rather than overwriting
+            the file, so the Go toolchain stays the source of truth for the binary it manages.</li>
+          <li><strong>Built from source</strong> — refuses, and says so. A <code>go build</code> in a
+            checkout reports a development version such as
+            <code>v3.0.2-0.20260914175157-eb4982ebc6d1+dirty</code>; overwriting your own build with a
+            published one would lose work.</li>
+        </ul>
+
+        <p>Aliases: <code>update</code>, <code>upgrade</code>, <code>self-update</code>.
+          If the binary lives somewhere unwritable (<code>/usr/local/bin</code> on most systems),
+          get-update reports the permission error rather than half-replacing it — re-run with
+          elevated privileges.</p>
+      </div>
+    </section>
+
     <!-- ── VERIFY ── -->
     <section id="verify" class="section">
       <div class="container">
@@ -1234,6 +1288,8 @@ Run: gitcollect sync payments-team   to clone new repos and pull existing</span>
               <tr><td>gitcollect audit</td><td><span class="pill pill-org">Org</span></td><td>View the local audit log</td></tr>
               <tr><td>gitcollect verify</td><td><span class="pill pill-both">Both</span></td><td>Check repos are still reachable</td></tr>
               <tr><td>gitcollect doctor</td><td><span class="pill pill-both">Both</span></td><td>Health-check auth and collections</td></tr>
+              <tr><td>gitcollect get-update</td><td><span class="pill pill-both">Both</span></td><td>Upgrade to the latest release</td></tr>
+              <tr><td>gitcollect --version</td><td><span class="pill pill-both">Both</span></td><td>Print the running version (also -v)</td></tr>
               <tr><td>gitcollect delete</td><td><span class="pill pill-both">Both</span></td><td>Delete a collection (revokes all access)</td></tr>
               <tr><td>gitcollect concepts</td><td><span class="pill pill-both">Both</span></td><td>Explain core concepts and mental model</td></tr>
               <tr><td>gitcollect status</td><td><span class="pill pill-both">Both</span></td><td>git status across every cloned repo</td></tr>
