@@ -1073,8 +1073,9 @@
           <p>This compiles gitcollect on your machine and places the binary in <code>~/go/bin/</code> (Linux/Mac) or
             <code>%USERPROFILE%\go\bin\</code> (Windows). If that directory is already on your PATH — which it is by
             default after a standard Go installation — gitcollect is immediately available. To upgrade, run the same
-            command again with <code>@latest</code>, or let gitcollect do it:
-            <code>gitcollect get-update</code> re-runs the right command for however you installed it.
+            command again with <code>@latest</code>. From the next release onward you can also let gitcollect do it:
+            <code>gitcollect get-update</code> re-runs the right command for however you installed it. That command is
+            not in v3.1.0 yet.
           </p>
           <p class="note"><strong>The <code>/v3</code> suffix is required.</strong> Go resolves a module's major
             version from its import path, so <code>go install github.com/alby-tomy/gitcollect@latest</code> — without
@@ -1183,10 +1184,15 @@ sudo mv bin/gitcollect /usr/local/bin/   <span class="comment"># Linux/Mac</span
           <div class="code-block">
             <pre>gitcollect version
 <span class="comment"># Expected output format:</span>
-gitcollect v1.0.0 linux/amd64</pre>
+gitcollect v3.1.0 linux/amd64</pre>
           </div>
-          <p>The version and platform strings are embedded at build time. <code>dev</code> appears instead of a version
-            number when built from source without tags.</p>
+          <p>The version and platform strings are embedded at build time. <code>gitcollect --version</code> and
+            <code>gitcollect -v</code> print the same line.</p>
+          <p class="note">If this reports <strong>v1.0.0</strong>, you installed without the <code>/v3</code> suffix —
+            see the note under Method 1. Re-run the install command exactly as written there.</p>
+          <p>A binary built from a source checkout does <em>not</em> report <code>dev</code>: Go stamps a pseudo-version
+            such as <code>v3.0.2-0.20260914175157-eb4982ebc6d1+dirty</code>, where the trailing <code>+dirty</code>
+            marks uncommitted changes. Only a build with no module information at all reports <code>dev</code>.</p>
         </div>
 
         <div class="install-method">
@@ -2545,10 +2551,9 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
             <p class="desc">Print the build version and platform (<code>GOOS/GOARCH</code>). <code>gitcollect -v</code>
               and <code>gitcollect --version</code> print the identical line; <code>--json</code> adds the Go runtime
               version. A binary from <code>go install</code> reports the module version it was built from.</p>
-            <p>To check whether you are behind without changing anything, run
-              <code>gitcollect get-update --check</code>; to upgrade in place,
-              <code>gitcollect get-update</code>. A release binary is replaced only after its published
-              SHA-256 checksum verifies.</p>
+            <p>From the next release onward, <code>gitcollect get-update --check</code> reports whether you are
+              behind without changing anything, and <code>gitcollect get-update</code> upgrades in place — a release
+              binary is replaced only after its published SHA-256 checksum verifies. Not available in v3.1.0.</p>
           </div>
 
           <div class="cmd-block">
