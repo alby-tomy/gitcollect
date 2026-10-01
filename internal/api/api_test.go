@@ -1202,3 +1202,101 @@ func TestClassifyResponse_GarbageHeaderIsIgnored(t *testing.T) {
 		t.Errorf("got %v, want ErrForbidden", got)
 	}
 }
+
+// --- account kind ---
+
+// Teams, and therefore every team-based grant, exist only on organisations.
+// A caller has to know which kind of account it is holding before choosing
+// how to grant access at all, so this must be answered from what the platform
+// says rather than inferred.
+func TestGitHubGetAccountKind(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   AccountKind
+		errIs  error
+	}{
+		{"organisation", 200, `{"type":"Organization"}`, AccountOrg, nil},
+		{"personal account", 200, `{"type":"User"}`, AccountUser, nil},
+		{"bot counts as a personal account", 200, `{"type":"Bot"}`, AccountUser, nil},
+		{"unrecognised type is not guessed at", 200, `{"type":"Martian"}`, AccountUnknown, nil},
+		{"missing type is not guessed at", 200, `{}`, AccountUnknown, nil},
+		{"absent account", 404, `{}`, AccountUnknown, ErrNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/users/acme" {
+					t.Errorf("asked for %q, want /users/acme", r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			})
+			got, err := c.GetAccountKind("acme")
+			if tc.errIs != nil {
+				if !errors.Is(err, tc.errIs) {
+					t.Fatalf("expected %v, got %v", tc.errIs, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetAccountKind: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// GitLab has no "type" field, so the group endpoint answers the question —
+// but only 404 means "not a group". A 403 means the group exists and is
+// hidden from this token, which is a different answer from "this is a
+// person", and treating it as one would send a caller down the wrong path.
+func TestGitLabGetAccountKind(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   AccountKind
+		errIs  error
+	}{
+		{"group", 200, AccountOrg, nil},
+		{"not a group", 404, AccountUser, nil},
+		{"hidden group is not a person", 403, AccountUnknown, ErrForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestGitLabClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/groups/acme" {
+					t.Errorf("asked for %q, want /groups/acme", r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, `{}`)
+			})
+			got, err := c.GetAccountKind("acme")
+			if tc.errIs != nil {
+				if !errors.Is(err, tc.errIs) {
+					t.Fatalf("expected %v, got %v", tc.errIs, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetAccountKind: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAccountKindString(t *testing.T) {
+	for k, want := range map[AccountKind]string{
+		AccountOrg: "organisation", AccountUser: "user", AccountUnknown: "unknown",
+	} {
+		if got := k.String(); got != want {
+			t.Errorf("%d.String() = %q, want %q", k, got, want)
+		}
+	}
+}

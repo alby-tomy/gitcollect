@@ -496,6 +496,28 @@ func (c *gitlabClient) ListOrgRepos(org string) ([]RepoInfo, error) {
 
 // ListOrgTeams returns the direct subgroups of the given GitLab group,
 // mapped onto TeamInfo. The group slug is used as the Slug field.
+// GetAccountKind reports whether login is a GitLab group or a user. GitLab
+// has no single "type" field to ask for, so the group endpoint is tried and
+// a 404 taken to mean "not a group". A 403 is deliberately not treated that
+// way: it means the group exists but is not visible to this token, which is
+// a different answer from "this is a person".
+func (c *gitlabClient) GetAccountKind(login string) (AccountKind, error) {
+	resp, err := c.do(http.MethodGet, "/groups/"+url.PathEscape(login), nil)
+	if err != nil {
+		return AccountUnknown, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return AccountOrg, nil
+	case http.StatusNotFound:
+		return AccountUser, nil
+	default:
+		return AccountUnknown, classifyResponse(resp)
+	}
+}
+
 func (c *gitlabClient) ListUserRepos(user string) ([]RepoInfo, error) {
 	// owned=true on /projects is the authenticated account's own listing,
 	// private projects included; /users/{u}/projects is someone else's and

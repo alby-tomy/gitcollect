@@ -510,6 +510,39 @@ func (c *githubClient) listRepoPages(startURL string) ([]RepoInfo, error) {
 	return repos, err
 }
 
+// GetAccountKind asks the platform what kind of account login is. GitHub
+// reports it directly as the "type" field, which is authoritative — guessing
+// from whether an org listing happens to succeed would conflate "not an org"
+// with "no permission to look".
+func (c *githubClient) GetAccountKind(login string) (AccountKind, error) {
+	resp, err := c.do(http.MethodGet, "/users/"+url.PathEscape(login), nil)
+	if err != nil {
+		return AccountUnknown, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return AccountUnknown, classifyResponse(resp)
+	}
+
+	var out struct {
+		Type string `json:"type"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return AccountUnknown, fmt.Errorf("could not parse response: %w", err)
+	}
+
+	switch out.Type {
+	case "Organization":
+		return AccountOrg, nil
+	case "User", "Bot":
+		return AccountUser, nil
+	default:
+		// An unrecognised type is reported as unknown rather than guessed at.
+		return AccountUnknown, nil
+	}
+}
+
 func (c *githubClient) ListUserRepos(user string) ([]RepoInfo, error) {
 	// /user/repos is the authenticated account's own listing and is the
 	// only one of the two that includes private repositories; /users/{u}

@@ -92,8 +92,11 @@ func (m *mockClient) ListTeamRepos(org, teamSlug string) ([]api.RepoInfo, error)
 func (m *mockClient) SearchRepos(org, pattern, topic string, limit int) ([]api.RepoInfo, error) {
 	return nil, nil
 }
-func (m *mockClient) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
-func (m *mockClient) ListUserRepos(user string) ([]api.RepoInfo, error)    { return nil, nil }
+func (m *mockClient) ListOrgRepos(org string) ([]api.RepoInfo, error)   { return nil, nil }
+func (m *mockClient) ListUserRepos(user string) ([]api.RepoInfo, error) { return nil, nil }
+func (m *mockClient) GetAccountKind(login string) (api.AccountKind, error) {
+	return api.AccountUser, nil
+}
 func (m *mockClient) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 func newTestCollection(t *testing.T, visibility Visibility) *Collection {

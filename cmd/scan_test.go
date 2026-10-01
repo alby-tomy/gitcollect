@@ -580,3 +580,64 @@ func TestReviewGroups_UnusableNameKeepsRepo(t *testing.T) {
 		t.Fatalf("repo must survive an unusable category name, got %+v", got)
 	}
 }
+
+// --- org vs personal account ---
+
+// orgNotFoundMock fails the org listing the way the platform does for a name
+// that is a real person, and answers the follow-up question honestly.
+type orgNotFoundMock struct {
+	multiAddMock
+	kind api.AccountKind
+}
+
+func (m *orgNotFoundMock) ListOrgRepos(string) ([]api.RepoInfo, error) {
+	return nil, api.ErrNotFound
+}
+func (m *orgNotFoundMock) GetAccountKind(string) (api.AccountKind, error) {
+	return m.kind, nil
+}
+
+// The scope gate runs before the listing; without this both tests stop there
+// and never reach the behaviour under test.
+func (m *orgNotFoundMock) GetTokenScopes() ([]string, error) { return []string{"repo"}, nil }
+
+// "no such org" is the wrong answer when the name is a perfectly real
+// personal account. The error should name the mistake and the fix.
+func TestScan_OrgThatIsReallyAUserExplainsItself(t *testing.T) {
+	prevOrg, prevUser := scanOrg, scanUser
+	scanOrg, scanUser = "jsmith", ""
+	t.Cleanup(func() { scanOrg, scanUser = prevOrg, prevUser })
+
+	setupScanTest(t)
+	cachedClient = &orgNotFoundMock{kind: api.AccountUser}
+	scanFrom, scanDryRun, scanApply, scanVerify, scanNoArch = "", false, false, false, false
+
+	err := runScan(nil, nil)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, want := range []string{"personal account", "--user jsmith"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
+// A genuinely missing org must still report as missing, not be relabelled.
+func TestScan_MissingOrgStillReportsNotFound(t *testing.T) {
+	prevOrg, prevUser := scanOrg, scanUser
+	scanOrg, scanUser = "no-such-org", ""
+	t.Cleanup(func() { scanOrg, scanUser = prevOrg, prevUser })
+
+	setupScanTest(t)
+	cachedClient = &orgNotFoundMock{kind: api.AccountUnknown}
+	scanFrom, scanDryRun, scanApply, scanVerify, scanNoArch = "", false, false, false, false
+
+	err := runScan(nil, nil)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if strings.Contains(err.Error(), "personal account") {
+		t.Errorf("a missing org must not be reported as a personal account: %v", err)
+	}
+}

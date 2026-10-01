@@ -117,6 +117,7 @@ func (m *rootMock) SearchRepos(org, pattern, topic string, limit int) ([]api.Rep
 }
 func (m *rootMock) ListOrgRepos(org string) ([]api.RepoInfo, error)      { return nil, nil }
 func (m *rootMock) ListUserRepos(user string) ([]api.RepoInfo, error)    { return nil, nil }
+func (m *rootMock) GetAccountKind(login string) (api.AccountKind, error) { return api.AccountUser, nil }
 func (m *rootMock) ListOpenPRs(owner, repo string) ([]api.PRInfo, error) { return nil, nil }
 
 // resetCallerCache clears the package-level identity cache before a test and

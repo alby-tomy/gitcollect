@@ -37,6 +37,16 @@ type Client interface {
 	// GitLab has no equivalent state — project membership added via its
 	// API takes effect immediately — so gitlabClient always returns false.
 	GetPendingInvite(owner, repo, username string) (bool, error)
+	// GetAccountKind reports whether login names an organisation or a
+	// personal account.
+	//
+	// The distinction is load-bearing and not cosmetic: teams, and therefore
+	// every team-based access grant, exist only on organisations. A personal
+	// account has no equivalent, so a caller must know which it is holding
+	// before choosing how to grant access at all — and the org and user
+	// listings are different endpoints, each of which simply fails for the
+	// other kind.
+	GetAccountKind(login string) (AccountKind, error)
 	// ListUserRepos returns repositories owned by a personal account,
 	// which is what "gitcollect scan --user" walks. An org and a user are
 	// different endpoints on both platforms — asking for a user through
@@ -159,6 +169,32 @@ type PRInfo struct {
 	Repo      string // repo name within the collection namespace
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// AccountKind distinguishes an organisation from a personal account.
+type AccountKind int
+
+const (
+	// AccountUnknown means the platform did not say, or said something this
+	// version does not recognise. Callers treat it as "do not assume
+	// organisation capabilities", never as a personal account, since acting
+	// on a wrong guess is worse than declining to act.
+	AccountUnknown AccountKind = iota
+	// AccountUser is a personal account: no teams, no org endpoints.
+	AccountUser
+	// AccountOrg is a GitHub organisation or a GitLab group.
+	AccountOrg
+)
+
+func (k AccountKind) String() string {
+	switch k {
+	case AccountUser:
+		return "user"
+	case AccountOrg:
+		return "organisation"
+	default:
+		return "unknown"
+	}
 }
 
 // TeamInfo describes a single team (GitHub) or subgroup (GitLab) returned

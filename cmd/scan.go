@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -132,6 +133,19 @@ func runScan(_ *cobra.Command, _ []string) error {
 		repos, err = client.ListOrgRepos(scanOrg)
 	}
 	if err != nil {
+		// A 404 from the org listing is the single most likely mistake here,
+		// and on its own it reads as "no such org" — which is wrong and
+		// unhelpful when the name is a perfectly real personal account.
+		// Asking what kind of account it is turns that into an instruction.
+		// Only done on failure, so the common path costs no extra call.
+		if scanUser == "" && errors.Is(err, api.ErrNotFound) {
+			if kind, kindErr := client.GetAccountKind(scanOrg); kindErr == nil && kind == api.AccountUser {
+				return fmt.Errorf(
+					"scan: %q is a personal account, not an organisation\n"+
+						"  Personal accounts have no org listing — scan it with:\n"+
+						"    gitcollect scan --user %s", scanOrg, scanOrg)
+			}
+		}
 		return fmt.Errorf("scan: list repos: %w", err)
 	}
 
