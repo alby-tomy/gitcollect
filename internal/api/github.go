@@ -543,6 +543,119 @@ func (c *githubClient) GetAccountKind(login string) (AccountKind, error) {
 	}
 }
 
+// CreateTeam implements TeamGranter.
+func (c *githubClient) CreateTeam(org, name, privacy string) (TeamInfo, error) {
+	if privacy == "" {
+		privacy = "closed"
+	}
+	body := map[string]string{"name": name, "privacy": privacy}
+
+	resp, err := c.do(http.MethodPost, "/orgs/"+url.PathEscape(org)+"/teams", body)
+	if err != nil {
+		return TeamInfo{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return TeamInfo{}, classifyResponse(resp)
+	}
+
+	var out struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Slug        string `json:"slug"`
+		Description string `json:"description"`
+		Privacy     string `json:"privacy"`
+		Parent      *struct {
+			Slug string `json:"slug"`
+		} `json:"parent"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return TeamInfo{}, fmt.Errorf("could not parse response: %w", err)
+	}
+
+	t := TeamInfo{
+		ID: out.ID, Name: out.Name, Slug: out.Slug,
+		Description: out.Description, Privacy: out.Privacy,
+	}
+	if out.Parent != nil {
+		t.ParentSlug = out.Parent.Slug
+	}
+	return t, nil
+}
+
+// SetTeamRepoPermission implements TeamGranter. The platform answers 204
+// with an empty body, so nothing is decoded - attempting to would fail on
+// every successful call.
+func (c *githubClient) SetTeamRepoPermission(org, teamSlug, owner, repo, permission string) error {
+	path := fmt.Sprintf("/orgs/%s/teams/%s/repos/%s/%s",
+		url.PathEscape(org), url.PathEscape(teamSlug), url.PathEscape(owner), url.PathEscape(repo))
+
+	resp, err := c.do(http.MethodPut, path, map[string]string{"permission": permission})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return classifyResponse(resp)
+	}
+	return nil
+}
+
+// RemoveTeamRepo implements TeamGranter.
+func (c *githubClient) RemoveTeamRepo(org, teamSlug, owner, repo string) error {
+	path := fmt.Sprintf("/orgs/%s/teams/%s/repos/%s/%s",
+		url.PathEscape(org), url.PathEscape(teamSlug), url.PathEscape(owner), url.PathEscape(repo))
+
+	resp, err := c.do(http.MethodDelete, path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return classifyResponse(resp)
+	}
+	return nil
+}
+
+// ListRepoTeams implements TeamGranter.
+func (c *githubClient) ListRepoTeams(owner, repo string) ([]TeamAccess, error) {
+	startURL := fmt.Sprintf("%s/repos/%s/%s/teams?per_page=%d",
+		githubBaseURL, url.PathEscape(owner), url.PathEscape(repo), perPageMax)
+
+	var out []TeamAccess
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			Slug       string `json:"slug"`
+			Permission string `json:"permission"`
+			// "direct" when the grant is on this repository; anything else
+			// means it arrives through a parent team.
+			AccessSource string `json:"access_source"`
+			Parent       *struct {
+				Slug string `json:"slug"`
+			} `json:"parent"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, t := range page {
+			a := TeamAccess{
+				Slug:       t.Slug,
+				Permission: t.Permission,
+				Direct:     t.AccessSource == "direct",
+			}
+			if t.Parent != nil {
+				a.ParentSlug = t.Parent.Slug
+			}
+			out = append(out, a)
+		}
+		return nil
+	})
+	return out, err
+}
+
 func (c *githubClient) ListUserRepos(user string) ([]RepoInfo, error) {
 	// /user/repos is the authenticated account's own listing and is the
 	// only one of the two that includes private repositories; /users/{u}

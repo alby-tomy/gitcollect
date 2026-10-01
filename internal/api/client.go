@@ -197,6 +197,50 @@ func (k AccountKind) String() string {
 	}
 }
 
+// TeamGranter is implemented by platforms that can grant repository access
+// to a team rather than to one person at a time.
+//
+// It is deliberately separate from Client rather than folded into it. Teams
+// exist only on GitHub organisations: a personal account has none, and
+// GitLab's project-sharing model is different enough that pretending
+// otherwise would mean every client carrying stubs that only ever return
+// "unsupported". Callers type-assert for it, so "can this platform do team
+// grants?" is a question with a real answer at runtime.
+//
+// The shape here was taken from live responses rather than assumed - see
+// the recorded payloads in the tests.
+type TeamGranter interface {
+	// CreateTeam creates a team and returns it, including the slug the
+	// platform derived. The slug is not predictable from the name, so it
+	// must be read back rather than guessed.
+	CreateTeam(org, name, privacy string) (TeamInfo, error)
+	// SetTeamRepoPermission grants team access to owner/repo at the given
+	// permission ("pull", "push", "admin", ...), creating or updating the
+	// grant. This is the call that replaces one AddCollaborator per member:
+	// membership of the team then carries the access, so adding a person
+	// costs nothing per repo.
+	SetTeamRepoPermission(org, teamSlug, owner, repo, permission string) error
+	// RemoveTeamRepo revokes a team's access to owner/repo.
+	RemoveTeamRepo(org, teamSlug, owner, repo string) error
+	// ListRepoTeams reports which teams can reach owner/repo, and whether
+	// each grant is direct or inherited from a parent team.
+	ListRepoTeams(owner, repo string) ([]TeamAccess, error)
+}
+
+// TeamAccess is one team's access to a repository.
+type TeamAccess struct {
+	Slug       string
+	Permission string // "pull" | "triage" | "push" | "maintain" | "admin"
+	// Direct distinguishes a grant made on this repository from one the
+	// team inherits through its parent. The distinction is not cosmetic:
+	// reconciliation must never revoke inherited access, because the grant
+	// does not live on this repository and removing it would silently
+	// change what the parent team can reach.
+	Direct bool
+	// ParentSlug is non-empty when the team is nested under another.
+	ParentSlug string
+}
+
 // TeamInfo describes a single team (GitHub) or subgroup (GitLab) returned
 // by ListOrgTeams.
 type TeamInfo struct {

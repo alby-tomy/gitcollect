@@ -1300,3 +1300,166 @@ func TestAccountKindString(t *testing.T) {
 		}
 	}
 }
+
+// --- team grants (TeamGranter) ---
+//
+// The payloads below are real responses captured from a live GitHub
+// organisation, not invented ones. That matters: three of this project's
+// defects reached a release because a mock agreed with an assumption the
+// platform did not share.
+
+// repoTeamsPayload is GET /repos/{org}/{repo}/teams, trimmed to the fields
+// that are decoded. access_source and parent are the load-bearing ones.
+const repoTeamsPayload = `[{
+  "name":"gitcollect-e2e","id":19824924,"slug":"gitcollect-e2e",
+  "privacy":"closed","permission":"pull",
+  "permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},
+  "access_source":"direct","parent":null
+}]`
+
+// createTeamPayload is POST /orgs/{org}/teams. The slug is derived by the
+// platform, so it is read back rather than guessed from the name.
+const createTeamPayload = `{
+  "id":19824924,"name":"gitcollect-e2e","slug":"gitcollect-e2e",
+  "description":null,"privacy":"closed","permission":"pull","parent":null
+}`
+
+func TestGitHubCreateTeam(t *testing.T) {
+	var gotBody, gotPath, gotMethod string
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody, gotPath, gotMethod = string(b), r.URL.Path, r.Method
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, createTeamPayload)
+	})
+
+	team, err := c.CreateTeam("acme", "gitcollect-e2e", "closed")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/orgs/acme/teams" {
+		t.Errorf("sent %s %s, want POST /orgs/acme/teams", gotMethod, gotPath)
+	}
+	if !strings.Contains(gotBody, `"privacy":"closed"`) {
+		t.Errorf("body should carry privacy, got %s", gotBody)
+	}
+	if team.Slug != "gitcollect-e2e" || team.ID != 19824924 {
+		t.Errorf("got %+v", team)
+	}
+}
+
+// An empty privacy must not be sent through as-is; GitHub rejects it.
+func TestGitHubCreateTeam_DefaultsPrivacy(t *testing.T) {
+	var gotBody string
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, createTeamPayload)
+	})
+	if _, err := c.CreateTeam("acme", "x", ""); err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	if !strings.Contains(gotBody, `"privacy":"closed"`) {
+		t.Errorf("empty privacy should default to closed, sent %s", gotBody)
+	}
+}
+
+// The grant answers 204 with an empty body. Decoding one would fail on
+// every successful call, so success must be read from the status alone.
+func TestGitHubSetTeamRepoPermission_204EmptyBody(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotMethod, gotPath, gotBody = r.Method, r.URL.Path, string(b)
+		w.WriteHeader(http.StatusNoContent) // exactly what the live API returns
+	})
+
+	if err := c.SetTeamRepoPermission("acme", "payments", "acme", "sandbox", "pull"); err != nil {
+		t.Fatalf("SetTeamRepoPermission: %v", err)
+	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("method = %s, want PUT", gotMethod)
+	}
+	if want := "/orgs/acme/teams/payments/repos/acme/sandbox"; gotPath != want {
+		t.Errorf("path = %s, want %s", gotPath, want)
+	}
+	if !strings.Contains(gotBody, `"permission":"pull"`) {
+		t.Errorf("body = %s, want the permission", gotBody)
+	}
+}
+
+func TestGitHubSetTeamRepoPermission_ErrorsSurface(t *testing.T) {
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	if err := c.SetTeamRepoPermission("acme", "t", "acme", "r", "pull"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestGitHubRemoveTeamRepo(t *testing.T) {
+	var gotMethod string
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.WriteHeader(http.StatusNoContent)
+	})
+	if err := c.RemoveTeamRepo("acme", "t", "acme", "r"); err != nil {
+		t.Fatalf("RemoveTeamRepo: %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Errorf("method = %s, want DELETE", gotMethod)
+	}
+}
+
+// Decoded against the real payload, so a field renamed or missed shows up
+// here rather than as an empty slug in production.
+func TestGitHubListRepoTeams_DecodesRealPayload(t *testing.T) {
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, repoTeamsPayload)
+	})
+
+	teams, err := c.ListRepoTeams("acme", "sandbox")
+	if err != nil {
+		t.Fatalf("ListRepoTeams: %v", err)
+	}
+	if len(teams) != 1 {
+		t.Fatalf("got %d teams, want 1", len(teams))
+	}
+	got := teams[0]
+	if got.Slug != "gitcollect-e2e" {
+		t.Errorf("slug = %q", got.Slug)
+	}
+	if got.Permission != "pull" {
+		t.Errorf("permission = %q, want pull", got.Permission)
+	}
+	if !got.Direct {
+		t.Error(`access_source "direct" should set Direct`)
+	}
+	if got.ParentSlug != "" {
+		t.Errorf("parent was null, so ParentSlug should be empty, got %q", got.ParentSlug)
+	}
+}
+
+// Inherited access must be distinguishable from a direct grant. Revoking an
+// inherited one would not remove it from this repository at all - the grant
+// lives on the parent - so reconciliation has to be able to tell them apart.
+func TestGitHubListRepoTeams_InheritedIsNotDirect(t *testing.T) {
+	const inherited = `[{"slug":"child","permission":"push",
+	  "access_source":"parent_team","parent":{"slug":"platform"}}]`
+
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, inherited)
+	})
+
+	teams, err := c.ListRepoTeams("acme", "sandbox")
+	if err != nil {
+		t.Fatalf("ListRepoTeams: %v", err)
+	}
+	if teams[0].Direct {
+		t.Error("access inherited from a parent must not be reported as direct")
+	}
+	if teams[0].ParentSlug != "platform" {
+		t.Errorf("ParentSlug = %q, want platform", teams[0].ParentSlug)
+	}
+}
