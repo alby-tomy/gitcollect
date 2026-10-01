@@ -603,7 +603,8 @@ func (c *githubClient) SetTeamRepoPermission(org, teamSlug, owner, repo, permiss
 	return nil
 }
 
-// RemoveTeamRepo implements TeamGranter.
+// RemoveTeamRepo implements TeamGranter. A grant that is already absent is
+// success, not an error - see removedOK.
 func (c *githubClient) RemoveTeamRepo(org, teamSlug, owner, repo string) error {
 	path := fmt.Sprintf("/orgs/%s/teams/%s/repos/%s/%s",
 		url.PathEscape(org), url.PathEscape(teamSlug), url.PathEscape(owner), url.PathEscape(repo))
@@ -613,11 +614,29 @@ func (c *githubClient) RemoveTeamRepo(org, teamSlug, owner, repo string) error {
 		return err
 	}
 	defer resp.Body.Close()
+	return removedOK(resp)
+}
 
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+// removedOK turns a delete response into an error only when the thing is
+// still there afterwards.
+//
+// Reconciliation is idempotent by nature: it computes the access that should
+// exist and removes the rest, and it may be re-run after a partial failure or
+// alongside a change made in the web UI. "Already gone" is the desired end
+// state, so treating the platform's 404 as a failure would make a sync fail
+// on work it had already completed - or on work somebody else completed.
+//
+// Observed directly for team deletion, where deleting a team twice returns
+// 404 the second time. The same is assumed for repo grants and memberships
+// rather than confirmed, which is safe in the direction that matters: the
+// worst case is reporting success for something that was never there.
+func removedOK(resp *http.Response) error {
+	switch resp.StatusCode {
+	case http.StatusNoContent, http.StatusOK, http.StatusNotFound:
+		return nil
+	default:
 		return classifyResponse(resp)
 	}
-	return nil
 }
 
 // ListRepoTeams implements TeamGranter.
@@ -696,11 +715,7 @@ func (c *githubClient) RemoveTeamMembership(org, teamSlug, username string) erro
 		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		return classifyResponse(resp)
-	}
-	return nil
+	return removedOK(resp)
 }
 
 // ListTeamMemberships implements TeamGranter.

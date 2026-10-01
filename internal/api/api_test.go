@@ -1587,3 +1587,48 @@ func TestGitHubListTeamMemberships_InheritedIsFlagged(t *testing.T) {
 		t.Error("inherited membership must be flagged")
 	}
 }
+
+// --- removal idempotency ---
+
+// Reconciliation removes whatever access should not exist, and may be
+// re-run after a partial failure or alongside a change made in the web UI.
+// "Already gone" is the end state it wanted, so a 404 must not fail the
+// sync on work that is already done.
+func TestGitHubRemovals_AlreadyAbsentIsNotAnError(t *testing.T) {
+	for _, status := range []int{http.StatusNoContent, http.StatusOK, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			})
+			if err := c.RemoveTeamRepo("acme", "t", "acme", "r"); err != nil {
+				t.Errorf("RemoveTeamRepo on %d: %v", status, err)
+			}
+			if err := c.RemoveTeamMembership("acme", "t", "u"); err != nil {
+				t.Errorf("RemoveTeamMembership on %d: %v", status, err)
+			}
+		})
+	}
+}
+
+// Being forbidden is a real failure and must not be swallowed along with it.
+func TestGitHubRemovals_RealFailuresStillSurface(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   error
+	}{
+		{http.StatusForbidden, ErrForbidden},
+		{http.StatusUnauthorized, ErrUnauthorized},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+			})
+			if err := c.RemoveTeamRepo("acme", "t", "acme", "r"); !errors.Is(err, tc.want) {
+				t.Errorf("RemoveTeamRepo: got %v, want %v", err, tc.want)
+			}
+			if err := c.RemoveTeamMembership("acme", "t", "u"); !errors.Is(err, tc.want) {
+				t.Errorf("RemoveTeamMembership: got %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
