@@ -2,6 +2,7 @@ package collection
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -708,5 +709,336 @@ func TestFixCmd_NoLoginNoSuggestion(t *testing.T) {
 	}
 	if got := col.FixCmd("someone", "someone", "r"); got == "" {
 		t.Error("FixCmd with a login should still suggest a command")
+	}
+}
+
+// --- access strategy ---
+
+// Every manifest written before team support has no access_strategy field.
+// Those collections must keep granting exactly as they did.
+func TestStrategy_DefaultsToCollaborator(t *testing.T) {
+	c := &Collection{}
+	if got := c.Strategy(); got != StrategyCollaborator {
+		t.Errorf("an absent strategy must mean %q, got %q", StrategyCollaborator, got)
+	}
+	c.AccessStrategy = StrategyCollaborator
+	if got := c.Strategy(); got != StrategyCollaborator {
+		t.Errorf("got %q", got)
+	}
+	c.AccessStrategy = StrategyTeam
+	if got := c.Strategy(); got != StrategyTeam {
+		t.Errorf("got %q", got)
+	}
+	// An unrecognised value is not treated as team access. Granting through
+	// a mechanism nobody asked for is worse than ignoring a typo.
+	c.AccessStrategy = "teams-ish"
+	if got := c.Strategy(); got != StrategyCollaborator {
+		t.Errorf("an unknown strategy must not enable teams, got %q", got)
+	}
+}
+
+// teamKindMock answers GetAccountKind with whatever the test needs, and can
+// be made to implement api.TeamGranter or not.
+type teamKindMock struct {
+	mockClient
+	kind api.AccountKind
+}
+
+func (m *teamKindMock) GetAccountKind(string) (api.AccountKind, error) { return m.kind, nil }
+
+type grantingMock struct {
+	teamKindMock
+}
+
+func (m *grantingMock) CreateTeam(string, string, string) (api.TeamInfo, error) {
+	return api.TeamInfo{}, nil
+}
+func (m *grantingMock) SetTeamRepoPermission(_, _, _, _, _ string) error { return nil }
+func (m *grantingMock) RemoveTeamRepo(_, _, _, _ string) error           { return nil }
+func (m *grantingMock) ListRepoTeams(_, _ string) ([]api.TeamAccess, error) {
+	return nil, nil
+}
+func (m *grantingMock) SetTeamMembership(_, _, _, _ string) (api.TeamMembership, error) {
+	return api.TeamMembership{}, nil
+}
+func (m *grantingMock) RemoveTeamMembership(_, _, _ string) error { return nil }
+func (m *grantingMock) ListTeamMemberships(_, _ string) ([]api.TeamMembership, error) {
+	return nil, nil
+}
+
+func TestCheckTeamSupport(t *testing.T) {
+	// A collaborator collection never consults the platform at all.
+	t.Run("collaborator strategy needs no support", func(t *testing.T) {
+		c := &Collection{Host: "github.com"}
+		if err := c.CheckTeamSupport(&teamKindMock{kind: api.AccountUser}); err != nil {
+			t.Errorf("collaborator access must not require teams: %v", err)
+		}
+	})
+
+	t.Run("organisation with a team-capable client is allowed", func(t *testing.T) {
+		c := &Collection{Host: "github.com", AccessStrategy: StrategyTeam, Namespace: "acme"}
+		if err := c.CheckTeamSupport(&grantingMock{teamKindMock{kind: api.AccountOrg}}); err != nil {
+			t.Errorf("an org on a team-capable client should be allowed: %v", err)
+		}
+	})
+
+	// Teams do not exist on a personal account, so this must refuse rather
+	// than quietly grant one collaborator call per member per repo.
+	t.Run("personal namespace is refused, not downgraded", func(t *testing.T) {
+		c := &Collection{Host: "github.com", AccessStrategy: StrategyTeam, Namespace: "jsmith"}
+		err := c.CheckTeamSupport(&grantingMock{teamKindMock{kind: api.AccountUser}})
+		if !errors.Is(err, ErrTeamsUnsupported) {
+			t.Fatalf("expected ErrTeamsUnsupported, got %v", err)
+		}
+		if !strings.Contains(err.Error(), StrategyCollaborator) {
+			t.Errorf("the error should say how to fix it, got: %v", err)
+		}
+	})
+
+	// A platform whose client cannot grant teams is refused before the
+	// account kind is even considered.
+	t.Run("client without team support is refused", func(t *testing.T) {
+		c := &Collection{Host: "gitlab.com", AccessStrategy: StrategyTeam, Namespace: "acme"}
+		err := c.CheckTeamSupport(&teamKindMock{kind: api.AccountOrg})
+		if !errors.Is(err, ErrTeamsUnsupported) {
+			t.Fatalf("expected ErrTeamsUnsupported, got %v", err)
+		}
+	})
+}
+
+func TestTeamBinding(t *testing.T) {
+	c := &Collection{}
+	if _, ok := c.TeamSlugFor("pricing"); ok {
+		t.Error("an unbound group must report no binding")
+	}
+
+	c.BindTeam("pricing", "acme-pricing")
+	slug, ok := c.TeamSlugFor("pricing")
+	if !ok || slug != "acme-pricing" {
+		t.Errorf("got %q/%v, want acme-pricing/true", slug, ok)
+	}
+
+	// An empty binding is no binding: it would otherwise be used as a team
+	// slug and address the wrong URL.
+	c.BindTeam("search", "")
+	if _, ok := c.TeamSlugFor("search"); ok {
+		t.Error("an empty slug must not count as bound")
+	}
+}
+
+// --- team sync ---
+
+// recordingGranter records every team call so a test can assert on what was
+// actually asked of the platform, not just the outcome.
+type recordingGranter struct {
+	teamKindMock
+
+	created   []string
+	granted   []string // "slug:repo"
+	revoked   []string
+	addedMem  []string // "slug:login"
+	removeMem []string
+
+	repoTeams map[string][]api.TeamAccess
+	members   map[string][]api.TeamMembership
+	slugFor   func(name string) string
+}
+
+func newRecordingGranter() *recordingGranter {
+	return &recordingGranter{
+		teamKindMock: teamKindMock{kind: api.AccountOrg},
+		repoTeams:    map[string][]api.TeamAccess{},
+		members:      map[string][]api.TeamMembership{},
+	}
+}
+
+func (m *recordingGranter) CreateTeam(_, name, _ string) (api.TeamInfo, error) {
+	m.created = append(m.created, name)
+	slug := name
+	if m.slugFor != nil {
+		slug = m.slugFor(name)
+	}
+	return api.TeamInfo{Name: name, Slug: slug}, nil
+}
+func (m *recordingGranter) SetTeamRepoPermission(_, slug, _, repo, _ string) error {
+	m.granted = append(m.granted, slug+":"+repo)
+	return nil
+}
+func (m *recordingGranter) RemoveTeamRepo(_, slug, _, repo string) error {
+	m.revoked = append(m.revoked, slug+":"+repo)
+	return nil
+}
+func (m *recordingGranter) ListRepoTeams(_, repo string) ([]api.TeamAccess, error) {
+	return m.repoTeams[repo], nil
+}
+func (m *recordingGranter) SetTeamMembership(_, slug, login, _ string) (api.TeamMembership, error) {
+	m.addedMem = append(m.addedMem, slug+":"+login)
+	return api.TeamMembership{Login: login, Role: "member", State: "active"}, nil
+}
+func (m *recordingGranter) RemoveTeamMembership(_, slug, login string) error {
+	m.removeMem = append(m.removeMem, slug+":"+login)
+	return nil
+}
+func (m *recordingGranter) ListTeamMemberships(_, slug string) ([]api.TeamMembership, error) {
+	return m.members[slug], nil
+}
+
+func teamCollection() *Collection {
+	return &Collection{
+		Name: "platform", Host: "github.com", Namespace: "acme",
+		AccessStrategy: StrategyTeam,
+		Members:        []string{"alice-id", "bob-id"},
+		Logins:         map[string]string{"alice-id": "alice", "bob-id": "bob"},
+		Groups:         map[string][]string{"pricing": {"alice-id"}},
+		Repos: []RepoAccess{
+			{Name: "eu-pricing", Groups: []string{"pricing"}},
+			{Name: "us-pricing", Groups: []string{"pricing"}},
+			{Name: "unrelated", Groups: []string{}},
+		},
+	}
+}
+
+// The whole point: a group's repos are granted once to the team, and the
+// member is added once — not once per repo.
+func TestSyncViaTeams_GrantsTeamOncePerRepoNotPerMember(t *testing.T) {
+	c := teamCollection()
+	c.Groups["pricing"] = []string{"alice-id", "bob-id"}
+	g := newRecordingGranter()
+
+	if _, _, err := c.SyncViaTeams(g, nil); err != nil {
+		t.Fatalf("SyncViaTeams: %v", err)
+	}
+
+	if len(g.granted) != 2 {
+		t.Errorf("expected one grant per repo in the group, got %v", g.granted)
+	}
+	// Two members across two repos would be four collaborator calls; here
+	// membership costs one call each regardless of repo count.
+	if len(g.addedMem) != 2 {
+		t.Errorf("expected one membership call per member, got %v", g.addedMem)
+	}
+}
+
+// The slug is the platform's to decide, so it must be read back and stored,
+// not derived from the group name.
+func TestSyncViaTeams_StoresThePlatformSlug(t *testing.T) {
+	c := teamCollection()
+	g := newRecordingGranter()
+	g.slugFor = func(name string) string { return "acme-" + name + "-7" }
+
+	if _, _, err := c.SyncViaTeams(g, nil); err != nil {
+		t.Fatalf("SyncViaTeams: %v", err)
+	}
+
+	slug, ok := c.TeamSlugFor("pricing")
+	if !ok || slug != "acme-pricing-7" {
+		t.Fatalf("slug = %q/%v, want the platform's acme-pricing-7", slug, ok)
+	}
+	for _, g := range g.granted {
+		if !strings.HasPrefix(g, "acme-pricing-7:") {
+			t.Errorf("grants must use the platform slug, got %q", g)
+		}
+	}
+}
+
+// A second sync must not create the team again.
+func TestSyncViaTeams_ReusesAnExistingBinding(t *testing.T) {
+	c := teamCollection()
+	c.BindTeam("pricing", "already-there")
+	g := newRecordingGranter()
+
+	if _, _, err := c.SyncViaTeams(g, nil); err != nil {
+		t.Fatalf("SyncViaTeams: %v", err)
+	}
+	if len(g.created) != 0 {
+		t.Errorf("a bound group must not be recreated, created %v", g.created)
+	}
+	if len(g.granted) == 0 || !strings.HasPrefix(g.granted[0], "already-there:") {
+		t.Errorf("should grant through the bound slug, got %v", g.granted)
+	}
+}
+
+// Access the team holds but the manifest no longer grants is revoked.
+func TestSyncViaTeams_RevokesAccessTheManifestDropped(t *testing.T) {
+	c := teamCollection()
+	c.BindTeam("pricing", "pricing")
+	g := newRecordingGranter()
+	// The team still holds "unrelated", which no group grants any more.
+	g.repoTeams["unrelated"] = []api.TeamAccess{{Slug: "pricing", Direct: true}}
+
+	if _, removed, err := c.SyncViaTeams(g, nil); err != nil {
+		t.Fatalf("SyncViaTeams: %v", err)
+	} else if removed != 1 {
+		t.Errorf("removed = %d, want 1", removed)
+	}
+	if len(g.revoked) != 1 || g.revoked[0] != "pricing:unrelated" {
+		t.Errorf("revoked = %v, want pricing:unrelated", g.revoked)
+	}
+}
+
+// Inherited access is reported by the platform but does not live on this
+// repo. Revoking it would not remove it, and would change what the parent
+// team reaches.
+func TestSyncViaTeams_NeverRevokesInheritedAccess(t *testing.T) {
+	c := teamCollection()
+	c.BindTeam("pricing", "pricing")
+	g := newRecordingGranter()
+	g.repoTeams["unrelated"] = []api.TeamAccess{
+		{Slug: "pricing", Direct: false, ParentSlug: "platform"},
+	}
+
+	if _, removed, err := c.SyncViaTeams(g, nil); err != nil {
+		t.Fatalf("SyncViaTeams: %v", err)
+	} else if removed != 0 {
+		t.Errorf("removed = %d, want 0 — inherited access is not ours", removed)
+	}
+	if len(g.revoked) != 0 {
+		t.Errorf("must not revoke inherited access, revoked %v", g.revoked)
+	}
+}
+
+// Same rule for people: a member held through a parent team cannot be
+// removed from the child.
+func TestSyncViaTeams_NeverRemovesInheritedMembers(t *testing.T) {
+	c := teamCollection()
+	c.BindTeam("pricing", "pricing")
+	g := newRecordingGranter()
+	g.members["pricing"] = []api.TeamMembership{
+		{Login: "alice", Inherited: false}, // wanted, stays
+		{Login: "carol", Inherited: true},  // not wanted, but not ours
+		{Login: "dave", Inherited: false},  // not wanted, and ours to remove
+	}
+
+	if _, _, err := c.SyncViaTeams(g, nil); err != nil {
+		t.Fatalf("SyncViaTeams: %v", err)
+	}
+	if len(g.removeMem) != 1 || g.removeMem[0] != "pricing:dave" {
+		t.Errorf("removeMem = %v, want only pricing:dave", g.removeMem)
+	}
+}
+
+// A repo outside the collection is none of gitcollect's business, even if
+// the team reaches it.
+func TestSyncViaTeams_IgnoresReposOutsideTheCollection(t *testing.T) {
+	c := teamCollection()
+	c.BindTeam("pricing", "pricing")
+	g := newRecordingGranter()
+	g.repoTeams["someone-elses-repo"] = []api.TeamAccess{{Slug: "pricing", Direct: true}}
+
+	if _, _, err := c.SyncViaTeams(g, nil); err != nil {
+		t.Fatalf("SyncViaTeams: %v", err)
+	}
+	for _, r := range g.revoked {
+		if strings.Contains(r, "someone-elses-repo") {
+			t.Error("must not touch repos the collection does not list")
+		}
+	}
+}
+
+func TestSyncViaTeams_RefusedWithoutTeamSupport(t *testing.T) {
+	c := teamCollection()
+	_, _, err := c.SyncViaTeams(&teamKindMock{kind: api.AccountOrg}, nil)
+	if !errors.Is(err, ErrTeamsUnsupported) {
+		t.Errorf("expected ErrTeamsUnsupported, got %v", err)
 	}
 }

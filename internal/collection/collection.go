@@ -142,6 +142,26 @@ type Collection struct {
 	// login to get the ID in the first place) and when an old-format file
 	// is migrated. Empty/nil on a "1" file that hasn't been migrated yet.
 	Logins map[string]string `yaml:"logins"`
+	// AccessStrategy selects how repo access is granted. Empty (the
+	// default, and what every existing manifest has) means per-member
+	// collaborator grants. "team" grants a platform team instead.
+	//
+	// It is opt-in rather than automatic on purpose. Switching strategy
+	// changes real access on real repositories, and an existing collection
+	// already holds collaborator grants that a silent migration would have
+	// to revoke. Nobody should discover that happened because they upgraded.
+	AccessStrategy string `yaml:"access_strategy,omitempty"`
+	// TeamSlugs maps a gitcollect group name to the platform team that
+	// carries its access. Only used when AccessStrategy is "team".
+	//
+	// The binding is stored rather than derived. A team's slug is decided
+	// by the platform and is not predictable from the name - "Payments
+	// Team" becomes "payments-team" - so it has to be read back from the
+	// creation response and remembered. Storing it also means gitcollect
+	// never has to guess whether a same-named team it did not create is
+	// the one it should be managing, and that a gitcollect group can be
+	// renamed without losing the team behind it.
+	TeamSlugs map[string]string `yaml:"team_slugs,omitempty"`
 	// Namespace is the GitHub/GitLab username or org name under which the
 	// repos in this collection live. Used for API path building only —
 	// defaults to the owner's cached login if empty. Set via
@@ -473,4 +493,73 @@ func (c *Collection) Delete() error {
 		return fmt.Errorf("could not delete collection %q: %w", c.Name, err)
 	}
 	return nil
+}
+
+// Access strategies for Collection.AccessStrategy.
+const (
+	// StrategyCollaborator grants each member access to each repo
+	// individually. The default, and what every manifest written before
+	// team support used.
+	StrategyCollaborator = "collaborator"
+	// StrategyTeam grants a platform team, and puts members in that team.
+	StrategyTeam = "team"
+)
+
+// Strategy returns the collection's access strategy, resolving the empty
+// value that every pre-existing manifest carries.
+func (c *Collection) Strategy() string {
+	if c.AccessStrategy == StrategyTeam {
+		return StrategyTeam
+	}
+	return StrategyCollaborator
+}
+
+// ErrTeamsUnsupported reports that a collection asks for team-based access
+// on a platform or namespace that cannot provide it.
+var ErrTeamsUnsupported = errors.New("team-based access is not available here")
+
+// CheckTeamSupport reports whether this collection can actually use team
+// grants, and explains the refusal when it cannot.
+//
+// Both conditions are checked rather than assumed, and a failure is an
+// error rather than a quiet fall back to collaborator grants. Falling back
+// silently would issue one API call per member per repo that the operator
+// did not ask for, and would hide the real problem - a personal namespace,
+// or a platform without teams - behind access that merely looks right.
+func (c *Collection) CheckTeamSupport(client api.Client) error {
+	if c.Strategy() != StrategyTeam {
+		return nil
+	}
+
+	if _, ok := client.(api.TeamGranter); !ok {
+		return fmt.Errorf("%w: %s does not support teams", ErrTeamsUnsupported, c.Host)
+	}
+
+	ns := c.RepoNamespace()
+	kind, err := client.GetAccountKind(ns)
+	if err != nil {
+		return fmt.Errorf("could not determine whether %q is an organisation: %w", ns, err)
+	}
+	if kind != api.AccountOrg {
+		return fmt.Errorf(
+			"%w: %q is a %s, and teams exist only on organisations\n"+
+				"  Set access_strategy back to %q, or move these repos to an organisation",
+			ErrTeamsUnsupported, ns, kind, StrategyCollaborator)
+	}
+	return nil
+}
+
+// TeamSlugFor returns the platform team bound to a gitcollect group, and
+// whether a binding exists yet.
+func (c *Collection) TeamSlugFor(group string) (string, bool) {
+	slug, ok := c.TeamSlugs[group]
+	return slug, ok && slug != ""
+}
+
+// BindTeam records the platform team that carries a group's access.
+func (c *Collection) BindTeam(group, slug string) {
+	if c.TeamSlugs == nil {
+		c.TeamSlugs = make(map[string]string, 1)
+	}
+	c.TeamSlugs[group] = slug
 }

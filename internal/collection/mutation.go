@@ -3,6 +3,7 @@ package collection
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -559,4 +560,173 @@ func (c *Collection) DeleteGroup(group string) error {
 	delete(c.Groups, group)
 	delete(c.GroupAdmins, group)
 	return c.Save()
+}
+
+// SyncViaTeams reconciles access using platform teams instead of per-member
+// collaborator grants.
+//
+// This is the point of the whole team strategy. SyncCollaborators issues one
+// call per member per repo, so thirty members across twenty repos is six
+// hundred calls and can exhaust an hourly quota in a single run. Here each
+// group costs one call per repo plus one per member, and adding a person
+// later costs one call total however many repos the group holds.
+//
+// Individual grants in RepoAccess.Users are deliberately left to the
+// collaborator path: they are grants to a person, not to a group, and
+// inventing a single-member team for each would be worse on every axis.
+//
+// Nothing inherited is ever removed. A team that reaches a repo through its
+// parent, or a member who belongs through a parent team, is reported by the
+// platform but is not ours to revoke - the grant does not live here, and the
+// call would either fail or change what the parent reaches.
+func (c *Collection) SyncViaTeams(client api.Client, onProgress func(current, total int)) (added, removed int, err error) {
+	granter, ok := client.(api.TeamGranter)
+	if !ok {
+		return 0, 0, fmt.Errorf("%w: client cannot grant teams", ErrTeamsUnsupported)
+	}
+
+	org := c.RepoNamespace()
+	groups := make([]string, 0, len(c.Groups))
+	for g := range c.Groups {
+		groups = append(groups, g)
+	}
+	sort.Strings(groups)
+
+	var errs []error
+	total := len(groups)
+	for i, group := range groups {
+		slug, bindErr := c.ensureTeam(granter, org, group)
+		if bindErr != nil {
+			errs = append(errs, fmt.Errorf("group %s: %w", group, bindErr))
+			continue
+		}
+
+		a, r, repoErr := c.syncTeamRepos(granter, org, group, slug)
+		added, removed = added+a, removed+r
+		if repoErr != nil {
+			errs = append(errs, fmt.Errorf("group %s: %w", group, repoErr))
+		}
+
+		if memErr := c.syncTeamMembers(granter, org, group, slug); memErr != nil {
+			errs = append(errs, fmt.Errorf("group %s: %w", group, memErr))
+		}
+
+		if onProgress != nil {
+			onProgress(i+1, total)
+		}
+	}
+
+	if len(errs) > 0 {
+		return added, removed, errors.Join(errs...)
+	}
+	return added, removed, nil
+}
+
+// ensureTeam returns the platform team backing a group, creating and
+// recording it the first time. The slug is taken from the platform's
+// response, never derived from the group name, because the platform decides
+// it and does not always agree with the obvious guess.
+func (c *Collection) ensureTeam(g api.TeamGranter, org, group string) (string, error) {
+	if slug, bound := c.TeamSlugFor(group); bound {
+		return slug, nil
+	}
+
+	team, err := g.CreateTeam(org, group, "closed")
+	if err != nil {
+		return "", fmt.Errorf("create team: %w", err)
+	}
+	if team.Slug == "" {
+		return "", fmt.Errorf("create team: platform returned no slug")
+	}
+	c.BindTeam(group, team.Slug)
+	return team.Slug, nil
+}
+
+// syncTeamRepos makes the team's repositories match the repos the group is
+// granted in the manifest.
+func (c *Collection) syncTeamRepos(g api.TeamGranter, org, group, slug string) (added, removed int, err error) {
+	want := make(map[string]bool)
+	for _, r := range c.Repos {
+		for _, rg := range r.Groups {
+			if rg == group {
+				want[r.Name] = true
+				break
+			}
+		}
+	}
+
+	var errs []error
+	for name := range want {
+		if setErr := g.SetTeamRepoPermission(org, slug, org, name, api.PermissionPull); setErr != nil {
+			errs = append(errs, fmt.Errorf("grant %s: %w", name, setErr))
+			continue
+		}
+		added++
+	}
+
+	// Revoke what the team holds and the manifest no longer grants, looking
+	// only at repos this collection knows about: a team may legitimately
+	// reach repositories outside the collection, and those are none of
+	// gitcollect's business.
+	for _, r := range c.Repos {
+		if want[r.Name] {
+			continue
+		}
+		teams, listErr := g.ListRepoTeams(org, r.Name)
+		if listErr != nil {
+			errs = append(errs, fmt.Errorf("list teams on %s: %w", r.Name, listErr))
+			continue
+		}
+		for _, t := range teams {
+			if t.Slug != slug || !t.Direct {
+				continue // not ours, or inherited and not ours to remove
+			}
+			if rmErr := g.RemoveTeamRepo(org, slug, org, r.Name); rmErr != nil {
+				errs = append(errs, fmt.Errorf("revoke %s: %w", r.Name, rmErr))
+				continue
+			}
+			removed++
+		}
+	}
+
+	if len(errs) > 0 {
+		return added, removed, errors.Join(errs...)
+	}
+	return added, removed, nil
+}
+
+// syncTeamMembers makes the team's membership match the group's.
+func (c *Collection) syncTeamMembers(g api.TeamGranter, org, group, slug string) error {
+	want := make(map[string]bool, len(c.Groups[group]))
+	for _, id := range c.Groups[group] {
+		if login := c.Logins[id]; login != "" {
+			want[strings.ToLower(login)] = true
+		}
+	}
+
+	var errs []error
+	for login := range want {
+		if _, err := g.SetTeamMembership(org, slug, login, "member"); err != nil {
+			errs = append(errs, fmt.Errorf("add %s: %w", login, err))
+		}
+	}
+
+	current, err := g.ListTeamMemberships(org, slug)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("list members: %w", err))
+		return errors.Join(errs...)
+	}
+	for _, m := range current {
+		if want[strings.ToLower(m.Login)] || m.Inherited {
+			continue // wanted, or held through a parent team
+		}
+		if err := g.RemoveTeamMembership(org, slug, m.Login); err != nil {
+			errs = append(errs, fmt.Errorf("remove %s: %w", m.Login, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
 }
