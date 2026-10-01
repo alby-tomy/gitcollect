@@ -61,6 +61,13 @@ jobs:
           fi
           echo "module '$module' is consistent with tag $GITHUB_REF_NAME"
 
+      # Documented version samples have drifted three times, once showing
+      # v1.0.0 — the symptom of installing without the /v3 suffix, which the
+      # same page warns about. Gating here forces them to be updated in the
+      # commit being tagged, rather than noticed a release or two later.
+      - name: version samples match the tag
+        run: ./scripts/check-version-samples.sh "$GITHUB_REF_NAME"
+
       - name: build
         run: go build ./...
 
@@ -84,7 +91,38 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # A tag can be pushed more than once, and each push re-triggers this
+      # workflow. goreleaser then tries to upload assets that are already
+      # attached and fails with "422 Validation Failed ... already_exists",
+      # reporting a red run for what is really a no-op — the release itself
+      # is intact. Detect that case and stop cleanly instead.
+      - name: skip if this tag is already released
+        id: released
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code=$(curl -sS -o /tmp/release.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" || true)
+
+          assets=0
+          if [ "$code" = "200" ]; then
+            assets=$(jq '.assets | length' /tmp/release.json)
+          fi
+
+          # Only an already-published release with assets counts. A release
+          # that exists but is empty — a half-finished run — must still be
+          # allowed to proceed and upload.
+          if [ "$code" = "200" ] && [ "$assets" -gt 0 ]; then
+            echo "::notice::$GITHUB_REF_NAME is already released with $assets asset(s); nothing to do."
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: goreleaser/goreleaser-action@v6
+        if: steps.released.outputs.already != 'true'
         with:
           version: "~> v2"
           args: release --clean
