@@ -2,7 +2,12 @@ version: 2
 project_name: gitcollect
 
 builds:
-  - env: [CGO_ENABLED=0]
+    # Pinned because the repo now holds a second main package
+    # (scripts/checkversions, a release-time docs check). goreleaser defaults
+    # this to "." already; saying so means a future tool package can never
+    # quietly change what gets released.
+  - main: .
+    env: [CGO_ENABLED=0]
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     ldflags:

@@ -66,7 +66,7 @@ jobs:
       # same page warns about. Gating here forces them to be updated in the
       # commit being tagged, rather than noticed a release or two later.
       - name: version samples match the tag
-        run: ./scripts/check-version-samples.sh "$GITHUB_REF_NAME"
+        run: go run ./scripts/checkversions -version "$GITHUB_REF_NAME"
 
       - name: build
         run: go build ./...
