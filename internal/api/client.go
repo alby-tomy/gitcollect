@@ -225,6 +225,39 @@ type TeamGranter interface {
 	// ListRepoTeams reports which teams can reach owner/repo, and whether
 	// each grant is direct or inherited from a parent team.
 	ListRepoTeams(owner, repo string) ([]TeamAccess, error)
+	// SetTeamMembership adds username to the team, or updates their role,
+	// and returns the membership the platform actually recorded.
+	//
+	// It returns the result rather than just an error because the requested
+	// role is not always the role granted: an organisation owner is forced
+	// to "maintainer" whatever is asked for. Verified against a live org -
+	// a request for "member" came back as "maintainer". Code that assumed
+	// the request echoed back would have been quietly wrong about who holds
+	// what.
+	SetTeamMembership(org, teamSlug, username, role string) (TeamMembership, error)
+	// RemoveTeamMembership removes username from the team.
+	RemoveTeamMembership(org, teamSlug, username string) error
+	// ListTeamMemberships reports the team's members, including whether
+	// each is a direct member or inherited from a parent team.
+	ListTeamMemberships(org, teamSlug string) ([]TeamMembership, error)
+}
+
+// TeamMembership is one account's membership of a team.
+type TeamMembership struct {
+	Login string
+	// Role is what the platform recorded, which may differ from what was
+	// requested - see SetTeamMembership.
+	Role string // "member" | "maintainer"
+	// State is "active" once the membership is in force, or "pending" when
+	// the account has been invited and has not accepted. A pending
+	// membership grants nothing yet, exactly like the collaborator invite
+	// GetPendingInvite already reports, so a sync that treats it as done
+	// would report access the person does not have.
+	State string
+	// Inherited is true when the membership comes from a parent team rather
+	// than this one. Removing such a member here would not remove them -
+	// the membership does not live on this team.
+	Inherited bool
 }
 
 // TeamAccess is one team's access to a repository.

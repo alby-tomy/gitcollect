@@ -1463,3 +1463,127 @@ func TestGitHubListRepoTeams_InheritedIsNotDirect(t *testing.T) {
 		t.Errorf("ParentSlug = %q, want platform", teams[0].ParentSlug)
 	}
 }
+
+// --- team membership ---
+
+// The exact response from a live organisation. Note the role: "member" was
+// requested and "maintainer" came back, because the account is an org owner.
+const setMembershipPayload = `{"state":"active","role":"maintainer",
+  "url":"https://api.github.com/organizations/336364501/team/19824924/memberships/alby-tomy"}`
+
+// Live GET /orgs/{org}/teams/{slug}/members, trimmed to decoded fields.
+const teamMembersPayload = `[{"login":"alby-tomy","id":78116411,"type":"User",
+  "role":"maintainer","inherited":false}]`
+
+// The role granted is not always the role requested: GitHub forces an
+// organisation owner to "maintainer". Trusting the request would have made
+// gitcollect wrong about who holds what, silently.
+func TestGitHubSetTeamMembership_UsesTheGrantedRoleNotTheRequested(t *testing.T) {
+	var sentBody, sentPath, sentMethod string
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		sentBody, sentPath, sentMethod = string(b), r.URL.Path, r.Method
+		_, _ = io.WriteString(w, setMembershipPayload)
+	})
+
+	got, err := c.SetTeamMembership("acme", "payments", "alby-tomy", "member")
+	if err != nil {
+		t.Fatalf("SetTeamMembership: %v", err)
+	}
+	if sentMethod != http.MethodPut {
+		t.Errorf("method = %s, want PUT", sentMethod)
+	}
+	if want := "/orgs/acme/teams/payments/memberships/alby-tomy"; sentPath != want {
+		t.Errorf("path = %s, want %s", sentPath, want)
+	}
+	if !strings.Contains(sentBody, `"role":"member"`) {
+		t.Errorf("should request the role asked for, sent %s", sentBody)
+	}
+	if got.Role != "maintainer" {
+		t.Errorf("Role = %q, want the granted %q — the request must not be echoed back", got.Role, "maintainer")
+	}
+	if got.State != "active" {
+		t.Errorf("State = %q, want active", got.State)
+	}
+	if got.Login != "alby-tomy" {
+		t.Errorf("Login = %q", got.Login)
+	}
+}
+
+// A pending membership grants nothing yet. Reporting it as done would tell
+// the operator someone has access when they have only been invited.
+func TestGitHubSetTeamMembership_PendingIsReported(t *testing.T) {
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"state":"pending","role":"member"}`)
+	})
+	got, err := c.SetTeamMembership("acme", "payments", "newcomer", "member")
+	if err != nil {
+		t.Fatalf("SetTeamMembership: %v", err)
+	}
+	if got.State != "pending" {
+		t.Errorf("State = %q, want pending", got.State)
+	}
+}
+
+func TestGitHubSetTeamMembership_DefaultsRole(t *testing.T) {
+	var sentBody string
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		sentBody = string(b)
+		_, _ = io.WriteString(w, setMembershipPayload)
+	})
+	if _, err := c.SetTeamMembership("acme", "t", "u", ""); err != nil {
+		t.Fatalf("SetTeamMembership: %v", err)
+	}
+	if !strings.Contains(sentBody, `"role":"member"`) {
+		t.Errorf("empty role should default to member, sent %s", sentBody)
+	}
+}
+
+func TestGitHubRemoveTeamMembership(t *testing.T) {
+	var sentMethod string
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		sentMethod = r.Method
+		w.WriteHeader(http.StatusNoContent)
+	})
+	if err := c.RemoveTeamMembership("acme", "t", "u"); err != nil {
+		t.Fatalf("RemoveTeamMembership: %v", err)
+	}
+	if sentMethod != http.MethodDelete {
+		t.Errorf("method = %s, want DELETE", sentMethod)
+	}
+}
+
+func TestGitHubListTeamMemberships_DecodesRealPayload(t *testing.T) {
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, teamMembersPayload)
+	})
+	got, err := c.ListTeamMemberships("acme", "payments")
+	if err != nil {
+		t.Fatalf("ListTeamMemberships: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d members, want 1", len(got))
+	}
+	if got[0].Login != "alby-tomy" || got[0].Role != "maintainer" {
+		t.Errorf("got %+v", got[0])
+	}
+	if got[0].Inherited {
+		t.Error(`"inherited":false must not read as inherited`)
+	}
+}
+
+// Inherited membership must be distinguishable: removing such a member from
+// this team would not remove them, since the membership lives on the parent.
+func TestGitHubListTeamMemberships_InheritedIsFlagged(t *testing.T) {
+	c := withGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `[{"login":"x","role":"member","inherited":true}]`)
+	})
+	got, err := c.ListTeamMemberships("acme", "payments")
+	if err != nil {
+		t.Fatalf("ListTeamMemberships: %v", err)
+	}
+	if !got[0].Inherited {
+		t.Error("inherited membership must be flagged")
+	}
+}

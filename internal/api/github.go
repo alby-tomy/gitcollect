@@ -656,6 +656,83 @@ func (c *githubClient) ListRepoTeams(owner, repo string) ([]TeamAccess, error) {
 	return out, err
 }
 
+// SetTeamMembership implements TeamGranter.
+func (c *githubClient) SetTeamMembership(org, teamSlug, username, role string) (TeamMembership, error) {
+	if role == "" {
+		role = "member"
+	}
+	path := fmt.Sprintf("/orgs/%s/teams/%s/memberships/%s",
+		url.PathEscape(org), url.PathEscape(teamSlug), url.PathEscape(username))
+
+	resp, err := c.do(http.MethodPut, path, map[string]string{"role": role})
+	if err != nil {
+		return TeamMembership{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return TeamMembership{}, classifyResponse(resp)
+	}
+
+	var out struct {
+		State string `json:"state"`
+		Role  string `json:"role"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return TeamMembership{}, fmt.Errorf("could not parse response: %w", err)
+	}
+	// Role is taken from the response, never from the request: the platform
+	// overrides it for organisation owners.
+	return TeamMembership{Login: username, Role: out.Role, State: out.State}, nil
+}
+
+// RemoveTeamMembership implements TeamGranter.
+func (c *githubClient) RemoveTeamMembership(org, teamSlug, username string) error {
+	path := fmt.Sprintf("/orgs/%s/teams/%s/memberships/%s",
+		url.PathEscape(org), url.PathEscape(teamSlug), url.PathEscape(username))
+
+	resp, err := c.do(http.MethodDelete, path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return classifyResponse(resp)
+	}
+	return nil
+}
+
+// ListTeamMemberships implements TeamGranter.
+//
+// The member listing reports role and inheritance but not state, so members
+// returned here are the ones already in force; a pending invitation does not
+// appear until accepted.
+func (c *githubClient) ListTeamMemberships(org, teamSlug string) ([]TeamMembership, error) {
+	startURL := fmt.Sprintf("%s/orgs/%s/teams/%s/members?per_page=%d",
+		githubBaseURL, url.PathEscape(org), url.PathEscape(teamSlug), perPageMax)
+
+	var out []TeamMembership
+	err := c.paginate(startURL, func(body []byte) error {
+		var page []struct {
+			Login     string `json:"login"`
+			Role      string `json:"role"`
+			Inherited bool   `json:"inherited"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		for _, m := range page {
+			out = append(out, TeamMembership{
+				Login: m.Login, Role: m.Role,
+				State: "active", Inherited: m.Inherited,
+			})
+		}
+		return nil
+	})
+	return out, err
+}
+
 func (c *githubClient) ListUserRepos(user string) ([]RepoInfo, error) {
 	// /user/repos is the authenticated account's own listing and is the
 	// only one of the two that includes private repositories; /users/{u}
