@@ -821,6 +821,97 @@
       display: block;
     }
 
+    /* ── DOWNLOADS ── */
+    .dl-status {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      padding: 14px 0;
+    }
+
+    .dl-rel {
+      border: 1px solid var(--wire);
+      border-radius: 8px;
+      padding: 16px 18px;
+      margin-bottom: 12px;
+      background: var(--ink2);
+    }
+
+    .dl-rel.is-latest {
+      border-color: rgba(200, 255, 87, 0.35);
+    }
+
+    .dl-head {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .dl-ver {
+      font-family: var(--mono);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--head);
+    }
+
+    .dl-latest-tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink);
+      background: var(--lime);
+      border-radius: 3px;
+      padding: 2px 7px;
+    }
+
+    .dl-date {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .dl-os {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      flex-wrap: wrap;
+      padding: 5px 0;
+      font-size: 13px;
+    }
+
+    .dl-os-name {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      min-width: 74px;
+    }
+
+    .dl-os a {
+      font-family: var(--mono);
+      font-size: 12px;
+      border-bottom: 1px solid transparent;
+    }
+
+    .dl-os a:hover {
+      border-bottom-color: var(--lime);
+    }
+
+    .dl-sums {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--wire);
+    }
+
+    @media (max-width: 640px) {
+      .dl-os-name {
+        min-width: 0;
+        flex-basis: 100%;
+      }
+    }
+
     .tab-panel .note {
       margin-top: 12px;
     }
@@ -1037,6 +1128,7 @@
       <ul class="nav-links">
         <li><a href="#philosophy">Philosophy</a></li>
         <li><a href="#install">Install</a></li>
+        <li><a href="#downloads">Downloads</a></li>
         <li><a href="#walkthrough">Walkthrough</a></li>
         <li><a href="#commands">Commands</a></li>
         <li><a href="commands.html" style="color:var(--lime);border-left:2px solid var(--lime);padding-left:8px;margin-left:-2px;">↗ Examples</a></li>
@@ -1349,6 +1441,34 @@ source ~/.zshrc</pre>
             </div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ── DOWNLOADS ── -->
+    <section id="downloads" class="section">
+      <div class="container">
+        <div class="section-label">Downloads</div>
+        <h2 class="section-title">Every release</h2>
+        <p class="section-sub">Pre-built binaries for Linux, macOS and Windows. Each release also ships a
+          <code>checksums.txt</code> — verify before you run anything you downloaded.</p>
+
+        <p class="note" id="dl-platform" hidden></p>
+
+        <div id="dl-status" class="dl-status">Loading releases…</div>
+        <div id="dl-list"></div>
+
+        <noscript>
+          <p class="warn">This list is built from the GitHub Releases API, which needs JavaScript. Browse them
+            directly at <a href="https://github.com/alby-tomy/gitcollect/releases" target="_blank"
+              rel="noopener">github.com/alby-tomy/gitcollect/releases</a>.</p>
+        </noscript>
+
+        <p class="note"><strong>Verifying a download.</strong> Each release's <code>checksums.txt</code> lists the
+          SHA-256 of every archive. On Linux or macOS,
+          <code>sha256sum -c checksums.txt --ignore-missing</code>; in PowerShell,
+          <code>Get-FileHash .\gitcollect_&lt;version&gt;_windows_amd64.zip -Algorithm SHA256</code> and compare the
+          line for that file. <code>gitcollect get-update</code> does this check for you and refuses a download whose
+          checksum does not match.</p>
       </div>
     </section>
 
@@ -2778,6 +2898,143 @@ Run: gitcollect sync acme-corp-payments-team   to clone new repos and pull exist
       });
     }, { threshold: 0.3 });
     sections.forEach(s => s.id && observer.observe(s));
+
+    /* ── DOWNLOADS ──
+       Built from the GitHub Releases API at page load rather than written
+       into this file.
+
+       A hand-written list is the same mistake this project has already made
+       three times with version samples: correct on the day it ships, wrong
+       at the next release, and nobody notices until someone downloads
+       something old. Asking the API means the page cannot disagree with
+       what is actually published. The repository is public, so the call
+       needs no credential. */
+    (function () {
+      const REPO = 'alby-tomy/gitcollect';
+      const list = document.getElementById('dl-list');
+      const status = document.getElementById('dl-status');
+      if (!list || !status) return;
+
+      // Asset names drop the leading "v": tag v3.3.0 ships
+      // gitcollect_3.3.0_linux_amd64.tar.gz. Conflating the two is what made
+      // the documented download URLs 404 once already, so the asset list
+      // from the API is matched rather than a filename reconstructed.
+      const PLATFORMS = [
+        { label: 'Linux', match: /_linux_/ },
+        { label: 'macOS', match: /_darwin_/ },
+        { label: 'Windows', match: /_windows_/ }
+      ];
+
+      function archOf(name) {
+        const m = name.match(/_(amd64|arm64|386|arm)\b/);
+        return m ? m[1] : name;
+      }
+
+      function el(tag, cls, text) {
+        const n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text != null) n.textContent = text;
+        return n;
+      }
+
+      // Suggest the build matching the visitor's machine. navigator.platform
+      // is deprecated and userAgentData is not everywhere, so this sniffs
+      // loosely and stays silent when unsure - a wrong suggestion is worse
+      // than none.
+      function guessPlatform() {
+        const ua = (navigator.userAgent || '') + ' ' + (navigator.platform || '');
+        if (/Win/i.test(ua)) return 'Windows';
+        if (/Mac/i.test(ua)) return 'macOS';
+        if (/Linux|X11|Android/i.test(ua)) return 'Linux';
+        return null;
+      }
+
+      function render(releases) {
+        const mine = guessPlatform();
+        if (mine) {
+          const hint = document.getElementById('dl-platform');
+          if (hint) {
+            hint.textContent = 'You appear to be on ' + mine + '. Pick the ' + mine +
+              ' archive below, or use the install commands above.';
+            hint.hidden = false;
+          }
+        }
+
+        releases.forEach(function (r, i) {
+          const card = el('div', 'dl-rel' + (i === 0 ? ' is-latest' : ''));
+
+          const head = el('div', 'dl-head');
+          head.appendChild(el('span', 'dl-ver', r.tag_name));
+          if (i === 0) head.appendChild(el('span', 'dl-latest-tag', 'latest'));
+          if (r.published_at) {
+            head.appendChild(el('span', 'dl-date', new Date(r.published_at).toISOString().slice(0, 10)));
+          }
+          const page = el('a', null, 'release notes ↗');
+          page.href = r.html_url;
+          page.target = '_blank';
+          page.rel = 'noopener';
+          head.appendChild(page);
+          card.appendChild(head);
+
+          PLATFORMS.forEach(function (p) {
+            const assets = (r.assets || []).filter(function (a) { return p.match.test(a.name); });
+            if (!assets.length) return;
+            const row = el('div', 'dl-os');
+            row.appendChild(el('span', 'dl-os-name', p.label));
+            assets.sort(function (a, b) { return a.name.localeCompare(b.name); })
+              .forEach(function (a) {
+                const link = el('a', null, archOf(a.name));
+                link.href = a.browser_download_url;
+                link.title = a.name;
+                row.appendChild(link);
+              });
+            card.appendChild(row);
+          });
+
+          const sums = (r.assets || []).find(function (a) { return a.name === 'checksums.txt'; });
+          if (sums) {
+            const row = el('div', 'dl-os dl-sums');
+            row.appendChild(el('span', 'dl-os-name', 'Checksums'));
+            const link = el('a', null, 'checksums.txt');
+            link.href = sums.browser_download_url;
+            row.appendChild(link);
+            card.appendChild(row);
+          }
+
+          list.appendChild(card);
+        });
+      }
+
+      function fail(why) {
+        status.textContent = why + ' Browse them directly at ';
+        const a = el('a', null, 'the Releases page');
+        a.href = 'https://github.com/' + REPO + '/releases';
+        a.target = '_blank';
+        a.rel = 'noopener';
+        status.appendChild(a);
+        status.appendChild(document.createTextNode('.'));
+      }
+
+      fetch('https://api.github.com/repos/' + REPO + '/releases?per_page=30', {
+        headers: { Accept: 'application/vnd.github+json' }
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          // Drafts are not downloadable by the public, so listing one would
+          // offer links that 404 for everyone but the maintainer.
+          const published = (data || []).filter(function (r) { return !r.draft; });
+          if (!published.length) { fail('No published releases found.'); return; }
+          status.hidden = true;
+          render(published);
+        })
+        .catch(function (e) {
+          // Most likely the unauthenticated rate limit, 60/hour per IP.
+          fail('Could not load the release list (' + e.message + ').');
+        });
+    })();
 
     /* ── ROUTE HIGHLIGHT ──
        Flash whatever the reader just routed to. Paired with the
